@@ -15,8 +15,8 @@ interface AudioPlayerProps {
 // FREESOUND CONFIGURATION
 // ----------------------------------------------------------------------
 
-// API Key (Client Secret)
-const API_KEY = "UyddwR1Kqoj3J1tSagw6oLTBKETViLioFdGjF0Nl"; 
+// API Key (Client Secret) - Loaded from environment variables
+const API_KEY = import.meta.env.VITE_FREESOUND_API_KEY || "UyddwR1Kqoj3J1tSagw6oLTBKETViLioFdGjF0Nl"; 
 
 const BASE_URL = "https://freesound.org/apiv2/search/text/";
 
@@ -426,17 +426,24 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
 
   const onAmbienceError = (e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
       const target = e.currentTarget;
-      const src = target.src || "unknown";
-      
-      // Sanitized Error Logging
-      let errorCode = "UNKNOWN";
-      
-      if (target.error) {
-          errorCode = target.error.code.toString();
+      const error = target.error;
+
+      if (error) {
+          const errorMap: Record<number, string> = {
+              1: 'MEDIA_ERR_ABORTED',
+              2: 'MEDIA_ERR_NETWORK',
+              3: 'MEDIA_ERR_DECODE',
+              4: 'MEDIA_ERR_SRC_NOT_SUPPORTED'
+          };
+
+          console.warn(`[Freesound] ${errorMap[error.code] || 'UNKNOWN'} (Code ${error.code})`);
+          console.warn(`[Freesound] URL: ${target.src}`);
+          console.warn(`[Freesound] CrossOrigin: ${target.crossOrigin}`);
+          console.warn(`[Freesound] NetworkState: ${target.networkState}`);
       }
 
-      console.warn(`[Freesound] Audio load failed for URL: ${src}. (Code: ${errorCode}). Switching to synthetic.`);
-      
+      console.warn('[Freesound] Switching to synthetic ambience fallback.');
+
       // Automatically switch to fallback
       setUsingSyntheticAmbience(true);
   };
@@ -597,8 +604,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
             key={ambienceUrl} /* Forces re-mount if URL changes */
             loop
             preload="auto"
-            /* REMOVED CROSSORIGIN to fix Code 4 Errors */
-            referrerPolicy="no-referrer" /* IMPORTANT FOR CDNS */
+            crossOrigin="anonymous"
+            referrerPolicy="origin"
             onError={onAmbienceError}
         />
       )}
