@@ -1,13 +1,15 @@
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { AppState, Level, Length, TextType, Accent, AppMode } from './types';
 import { generateLessonPlan, generateAudio } from './services/geminiService';
 import AudioPlayer from './components/AudioPlayer';
 import ExerciseCard from './components/ExerciseCard';
 import LoadingScreen from './components/LoadingScreen';
+import AuthScreen from './components/AuthScreen';
 import SelectInput from './components/SelectInput';
 import MatrixSelector from './components/MatrixSelector';
 import { SCENARIO_DATABASE, ScenarioContext, ScenarioAction } from './data/scenarios';
-import { ArrowRight, AlertTriangle, BookOpen, Mic2, Layout, Search } from 'lucide-react';
+import { ArrowRight, AlertTriangle, BookOpen, Mic2, Layout, Search, Key } from 'lucide-react';
 
 const LEVELS = Object.values(Level);
 const LENGTHS = Object.values(Length);
@@ -20,37 +22,81 @@ const MODES = [
 ];
 
 const getSpeedForLevel = (level: Level): number => {
-    if (level.includes('Inicial')) return 0.8;
-    if (level.includes('Avanzado')) return 1.1; // Slightly faster default for advanced
-    return 1.0; // Intermediate
+    // User requested natural speed for all levels, no "slow motion"
+    return 1.0; 
 };
 
 const App: React.FC = () => {
-  // State Initialization
-  const [state, setState] = useState<AppState>({
-    status: 'idle',
-    config: {
-      mode: AppMode.Standard,
-      level: Level.Initial,
-      topic: "",
-      length: Length.Short,
-      textType: TextType.Dialogue,
-      accent: Accent.Madrid
-    },
-    lessonPlan: null,
-    audioBlob: null,
-    error: null,
+  // Lazy initialization to check localStorage immediately prevents the "Auth" flash
+  const [state, setState] = useState<AppState>(() => {
+    // Try/Catch for safer localStorage access
+    try {
+        const storedKey = localStorage.getItem('gemini_api_key');
+        return {
+            status: (storedKey && storedKey.startsWith('AIza')) ? 'idle' : 'auth',
+            config: {
+                mode: AppMode.Standard,
+                level: Level.Intro,
+                topic: "",
+                length: Length.Short,
+                textType: TextType.Dialogue,
+                accent: Accent.Madrid
+            },
+            lessonPlan: null,
+            audioBlob: null,
+            error: null,
+        };
+    } catch (e) {
+        return {
+            status: 'auth',
+            config: {
+                mode: AppMode.Standard,
+                level: Level.Intro,
+                topic: "",
+                length: Length.Short,
+                textType: TextType.Dialogue,
+                accent: Accent.Madrid
+            },
+            lessonPlan: null,
+            audioBlob: null,
+            error: null,
+        };
+    }
   });
 
+  // FAILSAFE: Watch for localStorage changes or mismatches on mount
+  // This ensures that if the lazy init failed for some reason, we recover the session.
+  useEffect(() => {
+    const checkKey = () => {
+        const storedKey = localStorage.getItem('gemini_api_key');
+        if (storedKey && storedKey.startsWith('AIza') && state.status === 'auth') {
+            console.log("Restoring session from local storage...");
+            setState(prev => ({ ...prev, status: 'idle' }));
+        }
+    };
+    checkKey();
+    window.addEventListener('storage', checkKey);
+    return () => window.removeEventListener('storage', checkKey);
+  }, [state.status]);
+
+  const handleAuthSuccess = () => {
+      setState(prev => ({ ...prev, status: 'idle' }));
+  };
+
+  const handleResetKey = () => {
+      if (window.confirm("¿Seguro que quieres borrar la API Key y salir? Esto requerirá ingresarla de nuevo.")) {
+        localStorage.removeItem('gemini_api_key');
+        setState(prev => ({ ...prev, status: 'auth', error: null }));
+      }
+  };
+
   // 1. Get List of Contexts (Locus) for current Level
-  const currentContextList = useMemo(() => SCENARIO_DATABASE[state.config.level], [state.config.level]);
+  const currentContextList = useMemo(() => SCENARIO_DATABASE[state.config.level] || SCENARIO_DATABASE[Level.Intro], [state.config.level]);
 
   // 2. Select Locus (Scenario)
-  // Default to first item when level changes
   const [selectedLocus, setSelectedLocus] = useState<ScenarioContext>(currentContextList[0]);
 
   // 3. Get List of Actions (Modus) for selected Locus
-  // This is the key "Context Aware" list
   const currentActionList = useMemo(() => selectedLocus.actions, [selectedLocus]);
 
   // 4. Select Modus (Action)
@@ -67,15 +113,14 @@ const App: React.FC = () => {
   const [audioError, setAudioError] = useState<string | null>(null);
 
   // --- EFFECT: LEVEL CHANGE ---
-  // When Level changes, update Locus List -> Reset Locus -> Reset Modus
   useEffect(() => {
-      const firstLocus = SCENARIO_DATABASE[state.config.level][0];
+      const db = SCENARIO_DATABASE[state.config.level] || SCENARIO_DATABASE[Level.Intro];
+      const firstLocus = db[0];
       setSelectedLocus(firstLocus);
       setSelectedModus(firstLocus.actions[0]);
   }, [state.config.level]);
 
   // --- EFFECT: LOCUS CHANGE ---
-  // When Locus changes, update Modus List -> Reset Modus
   useEffect(() => {
       setSelectedModus(selectedLocus.actions[0]);
   }, [selectedLocus]);
@@ -83,7 +128,7 @@ const App: React.FC = () => {
 
   // --- RANDOMIZER LOGIC ---
   const handleRandomizeMatrix = useCallback(() => {
-      const contexts = SCENARIO_DATABASE[state.config.level];
+      const contexts = SCENARIO_DATABASE[state.config.level] || SCENARIO_DATABASE[Level.Intro];
       const randomCtx = contexts[Math.floor(Math.random() * contexts.length)];
       
       const actions = randomCtx.actions;
@@ -99,7 +144,6 @@ const App: React.FC = () => {
     setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null }));
     setAudioError(null);
     
-    // DETERMINE TOPIC BASED ON MODE
     let finalTopic = "";
     
     if (state.config.mode === AppMode.Vocabulary) {
@@ -110,11 +154,9 @@ const App: React.FC = () => {
         finalTopic = vocabTopic;
     } 
     else if (state.config.mode === AppMode.AccentChallenge) {
-        // Topic is less relevant here, handled by service, but we pass a generic seed
         finalTopic = "Encuentro entre desconocidos con acentos distintos";
     }
     else {
-        // STANDARD MODE
         if (isCustomMode) {
             finalTopic = customTopicInput;
         } else {
@@ -128,17 +170,15 @@ const App: React.FC = () => {
     }
 
     try {
-      // Step 1: Generate Text Content
       const plan = await generateLessonPlan(
         state.config.level, 
         finalTopic, 
         state.config.length, 
         state.config.textType, 
         state.config.accent,
-        state.config.mode // Pass MODE to service
+        state.config.mode 
       );
       
-      // Update state with plan, move to audio generation
       setState(prev => ({ 
           ...prev, 
           config: { ...prev.config, topic: finalTopic },
@@ -146,7 +186,6 @@ const App: React.FC = () => {
           status: 'generating_audio' 
       }));
 
-      // Step 2: Generate Audio (Graceful Fallback)
       try {
         const audioUrl = await generateAudio(plan.dialogue, plan.characters, state.config.accent);
         setState(prev => ({ 
@@ -186,27 +225,54 @@ const App: React.FC = () => {
     setActiveTab('transcript');
   };
 
-  // Helper to determine the best keywords for ambient sound search
   const getAmbienceContext = () => {
-      // If we are in the result screen, use the generated title/description
       if (state.lessonPlan?.situationDescription) {
           return `${state.lessonPlan.title} ${state.lessonPlan.situationDescription}`;
       }
-      // Mode specific ambience seeds
       if (state.config.mode === AppMode.Vocabulary) return vocabTopic;
       if (state.config.mode === AppMode.AccentChallenge) return "cafe park public space";
-
-      // If generating Standard, use the Locus value (it matches AudioPlayer regexes)
       if (isCustomMode) return customTopicInput;
       return selectedLocus.value;
   };
+
+  // --- SCREEN: AUTH ---
+  if (state.status === 'auth') {
+      return <AuthScreen onSuccess={handleAuthSuccess} />;
+  }
+
+  // --- SCREEN: LOADING ---
+  if (state.status === 'generating_plan' || state.status === 'generating_audio') {
+    return <LoadingScreen status={state.status} />;
+  }
+
+  // --- SCREEN: ERROR ---
+  if (state.status === 'error') {
+     return (
+        <div className="h-screen w-full bg-black flex items-center justify-center p-8">
+            <div className="border border-red-600 p-12 max-w-lg w-full relative">
+                <div className="absolute top-0 left-0 bg-red-600 text-black font-mono text-[10px] px-2 py-1 uppercase font-bold">Registro de Error</div>
+                <h2 className="font-display text-3xl uppercase text-white mb-6">Fallo en Ejecución</h2>
+                <p className="font-mono text-red-500 text-sm mb-8 border-l-2 border-red-900 pl-4">{state.error}</p>
+                <div className="flex gap-4">
+                    <button onClick={resetApp} className="flex-1 px-6 py-3 border border-zinc-700 text-zinc-300 hover:border-white hover:text-white font-mono text-xs uppercase tracking-widest transition-all">
+                        Reiniciar Sistema
+                    </button>
+                    {/* Botón para cambiar API Key si el error es de autenticación */}
+                    <button onClick={handleResetKey} className="px-6 py-3 border border-red-900 text-red-500 hover:bg-red-900 hover:text-white font-mono text-xs uppercase tracking-widest transition-all" title="Cambiar API Key">
+                        <Key size={14} />
+                    </button>
+                </div>
+            </div>
+        </div>
+     )
+  }
 
   // --- SCREEN: IDLE (Landing) ---
   if (state.status === 'idle') {
     return (
       <div className="h-screen w-full bg-black text-white overflow-hidden flex flex-col md:flex-row">
           
-          {/* LEFT: MANIFESTO - RESTORED PROPORTIONS */}
+          {/* LEFT: MANIFESTO */}
           <div className="w-full md:w-1/2 border-r border-zinc-800 p-8 md:p-12 flex flex-col justify-between relative bg-[url('https://grainy-gradients.vercel.app/noise.svg')] bg-opacity-20 hidden md:flex">
               <div className="relative z-10">
                 <h1 className="font-display text-5xl md:text-7xl lg:text-8xl font-bold tracking-tighter uppercase leading-[0.85] mb-8">
@@ -221,12 +287,17 @@ const App: React.FC = () => {
                 </p>
               </div>
 
-              <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest mt-12 md:mt-0">
-                  v3.6.0 // NEW MODES ENABLED
+              <div className="flex items-center justify-between mt-12 md:mt-0">
+                  <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">
+                      v3.8.0 // PERSISTENCE FIX
+                  </div>
+                  <button onClick={handleResetKey} className="text-zinc-700 hover:text-white transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2">
+                      <Key size={10} /> Configuración de Clave
+                  </button>
               </div>
           </div>
 
-          {/* RIGHT: CONFIG - RESTORED PROPORTIONS */}
+          {/* RIGHT: CONFIG */}
           <div className="w-full md:w-1/2 overflow-y-auto bg-black scrollbar-thin">
               <div className="min-h-full flex flex-col">
                   {/* Mobile Header */}
@@ -236,7 +307,7 @@ const App: React.FC = () => {
 
                   <div className="flex-1 p-8 md:p-12 space-y-10">
                       
-                      {/* --- MODE SELECTOR (NEW) --- */}
+                      {/* --- MODE SELECTOR --- */}
                       <div>
                           <label className="block text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-3">MODALIDAD DE PRÁCTICA</label>
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -263,8 +334,6 @@ const App: React.FC = () => {
                             onChange={(e: any) => setState({...state, config: {...state.config, level: e.target.value}})}
                           />
                       </div>
-
-                      {/* --- CONDITIONAL UI BASED ON MODE --- */}
 
                       {/* MODE: STANDARD */}
                       {state.config.mode === AppMode.Standard && (
@@ -309,7 +378,7 @@ const App: React.FC = () => {
                           </div>
                       )}
 
-                      {/* MODE: ACCENT CHALLENGE (Simplest UI) */}
+                      {/* MODE: ACCENT CHALLENGE */}
                       {state.config.mode === AppMode.AccentChallenge && (
                           <div className="p-6 border border-zinc-800 bg-zinc-900/30 animate-in fade-in duration-500">
                               <Mic2 size={32} className="text-zinc-500 mb-4" />
@@ -364,27 +433,6 @@ const App: React.FC = () => {
     );
   }
 
-  // --- SCREEN: LOADING ---
-  if (state.status === 'generating_plan' || state.status === 'generating_audio') {
-    return <LoadingScreen status={state.status} />;
-  }
-
-  // --- SCREEN: ERROR ---
-  if (state.status === 'error') {
-     return (
-        <div className="h-screen w-full bg-black flex items-center justify-center p-8">
-            <div className="border border-red-600 p-12 max-w-lg w-full relative">
-                <div className="absolute top-0 left-0 bg-red-600 text-black font-mono text-[10px] px-2 py-1 uppercase font-bold">Registro de Error</div>
-                <h2 className="font-display text-3xl uppercase text-white mb-6">Fallo en Ejecución</h2>
-                <p className="font-mono text-red-500 text-sm mb-8 border-l-2 border-red-900 pl-4">{state.error}</p>
-                <button onClick={resetApp} className="px-6 py-3 border border-zinc-700 text-zinc-300 hover:border-white hover:text-white font-mono text-xs uppercase tracking-widest transition-all">
-                    Reiniciar Sistema
-                </button>
-            </div>
-        </div>
-     )
-  }
-
   // --- SCREEN: READY (Main App) ---
   return (
     <div className="h-screen flex flex-col bg-black overflow-hidden">
@@ -392,7 +440,6 @@ const App: React.FC = () => {
         <header className="h-14 border-b border-zinc-800 flex items-center justify-between px-6 bg-black z-20 flex-shrink-0">
             <div className="flex items-center gap-2">
                 <div className="w-2 h-2 bg-white"></div>
-                {/* MODIFIED: INCREASED TEXT SIZE TO text-2xl */}
                 <span className="font-display font-bold uppercase tracking-tight text-2xl cursor-pointer" onClick={resetApp}>Escucha<span className="text-zinc-600">LAB</span></span>
             </div>
             <div className="flex gap-6 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
@@ -408,7 +455,7 @@ const App: React.FC = () => {
 
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
             
-            {/* LEFT PANEL: CONTEXT & PLAYER - RESTORED RESPONSIVE WIDTH */}
+            {/* LEFT PANEL: CONTEXT & PLAYER */}
             <div className="w-full md:w-5/12 lg:w-1/3 bg-zinc-950/50 border-r border-zinc-800 flex flex-col h-[40vh] md:h-full z-10">
                 <div className="p-8 flex-1 overflow-y-auto">
                     {state.lessonPlan && (

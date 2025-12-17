@@ -1,10 +1,13 @@
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from "../types";
 
-const apiKey = process.env.API_KEY;
-if (!apiKey) console.error("Falta API_KEY");
-
-const ai = new GoogleGenAI({ apiKey: apiKey || '' });
+// Helper to get key from storage
+const getApiKey = (): string => {
+    const key = localStorage.getItem('gemini_api_key');
+    if (!key) throw new Error("API Key no encontrada. Por favor, reinicia la app e ingrésala.");
+    return key;
+};
 
 const GENERATION_MODEL = "gemini-2.5-flash";
 const AUDIO_MODEL = "gemini-2.5-flash-preview-tts";
@@ -54,208 +57,80 @@ const isValidExercise = (ex: any): boolean => {
 };
 
 // --- CONFIGURATION: PERFILES LINGÜÍSTICOS AVANZADOS ---
-// Se incluyen instrucciones explícitas de Gramática, Léxico y Pragmática para cada variante.
-
 const DIALECT_PROFILES: Record<Accent, string> = {
   [Accent.Madrid]: `
     DIALECTO: ESPAÑA - MADRID (CENTRO PENINSULAR).
-    
-    [GRAMÁTICA Y MORFOLOGÍA]
-    - DISTINCIÓN TÚ/USTED: Marcada. 'Tú' generalizado hasta los 40-50 años. 'Usted' solo en jerarquía muy clara.
-    - PLURAL: Estrictamente 'Vosotros' (Informal) vs 'Ustedes' (Formal).
-    - LEÍSMO DE PERSONA (OBLIGATORIO): Usa "Le vi" (a él) en vez de "Lo vi". "Les dije".
-    - IMPERATIVO COLOQUIAL: Uso del infinitivo por imperativo en plural ("¡Venir aquí!" en vez de "¡Venid!").
-    
-    [PRAGMÁTICA Y MARCADORES]
-    - INTENSIFICADORES: "Mazo" (muy/mucho), "Súper" (súper bien).
-    - MULETILLAS: "En plan" (usar máx 2 veces), "O sea", "¿Sabes?", "Es que..." (pronunciado 'Ejque').
-    - HONESTIDAD BRUSCA: Tienden a ser directos, suenan menos "suaves" que los latinos.
-
-    [LÉXICO]
-    - INFORMAL: "Molar" (gustar), "Flipar" (alucinar), "Tío/Tronco" (amigo), "Curro" (trabajo), "Garito" (bar).
-    - FORMAL: Estándar peninsular (Coche, Ordenador, DNI, Piso, Zumo).
+    [GRAMÁTICA] DISTINCIÓN TÚ/USTED marcada. PLURAL: Vosotros. LEÍSMO DE PERSONA obligatorio ("Le vi"). IMPERATIVO COLOQUIAL ("Venir" por "Venid").
+    [PRAGMÁTICA] Intensificadores: "Mazo", "Súper". Muletillas: "En plan", "O sea", "Es que". Honestidad brusca.
+    [LÉXICO] "Molar", "Flipar", "Tío/Tronco", "Curro", "Garito", "Coche", "Ordenador", "Piso".
   `,
-  
   [Accent.Andalusia]: `
-    DIALECTO: ESPAÑA - ANDALUCÍA (OCCIDENTAL/SEVILLA/CÁDIZ).
-    
-    [GRAMÁTICA Y FONÉTICA ESCRITA]
-    - PLURAL: Preferencia por 'Ustedes' con verbo en 2ª persona ("Ustedes sois") o 3ª ("Ustedes son").
-    - ELISIÓN (Simular ritmo rápido):
-      * Pérdida de 'd' intervocálica: "Comío" (Comido), "Cansao" (Cansado), "La'o" (Lado).
-      * Apócope: "Pa'" (Para), "Na'" (Nada), "To'" (Todo).
-    
-    [PRAGMÁTICA]
-    - CORTESÍA: Muy afectuosa incluso con desconocidos ("Mi vida", "Corazón", "Hijo/a").
-    - EXAGERACIÓN: Uso frecuente de hipérboles.
-
-    [LÉXICO]
-    - INFORMAL: "Illo" (Quillo/Chico - muy frecuente), "Pisha" (Cádiz), "Miarma" (Sevilla), "Coraje" (dar rabia), "No ni ná" (afirmación enfática).
-    - FORMAL: Léxico peninsular estándar pero manteniendo la construcción sintáctica suave.
+    DIALECTO: ESPAÑA - ANDALUCÍA (OCCIDENTAL).
+    [GRAMÁTICA] Plural 'Ustedes' con verbo en 2ª o 3ª. ELISIÓN de 'd' ("Comío") y apócope ("Pa'", "Na'").
+    [PRAGMÁTICA] Cortesía afectuosa ("Mi vida", "Hijo"). Exageración.
+    [LÉXICO] "Illo", "Pisha", "Miarma", "Coraje", "No ni ná".
   `,
-
   [Accent.MexicoCity]: `
     DIALECTO: MÉXICO - CDMX (CHILANGO).
-    
-    [GRAMÁTICA]
-    - USTEDES: Único plural.
-    - TIEMPOS: Preferencia absoluta por Pretérito Simple ("Llegué") frente al Compuesto ("He llegado").
-    - DIMINUTIVOS (PRAGMÁTICA CLAVE): Úsalos para suavizar órdenes o tiempos. "Ahorita", "Un cafecito", "Despacito".
-    
-    [PRAGMÁTICA]
-    - CORTESÍA: Muy alta. Evita el "No" directo. Usa "¿Qué crees?" o "Fíjate que..." para dar malas noticias.
-    - "MANDE": Respuesta automática a "¿Qué?" o cuando no se escucha algo.
-
-    [LÉXICO]
-    - INFORMAL: "Güey" (omnipresente entre amigos), "No manches/No mames" (sorpresa), "Chido/Padre" (bueno), "Chamba" (trabajo), "¿Qué onda?", "Lana" (dinero).
-    - FORMAL: "Disculpe", "Joven", "Señorita". Vocabulario: Carro, Celular, Computadora, Departamento, Alberca (piscina).
+    [GRAMÁTICA] USTEDES único plural. Pretérito Simple preferente. DIMINUTIVOS frecuentes ("Ahorita", "Cafecito").
+    [PRAGMÁTICA] Cortesía alta ("¿Qué crees?", "Fíjate que..."). "Mande".
+    [LÉXICO] "Güey", "No manches", "Chido/Padre", "Chamba", "¿Qué onda?", "Lana", "Carro", "Celular", "Computadora".
   `,
-
   [Accent.Bogota]: `
     DIALECTO: COLOMBIA - BOGOTÁ (ROLO).
-    
-    [GRAMÁTICA - EL "USTEDEO" BOGOTANO]
-    - REGLA DE ORO: En Bogotá, hombres y mujeres se tratan de "USTED" entre amigos, familiares y parejas.
-      * "Oiga, ¿usted va a ir a la fiesta?" (A un amigo íntimo).
-      * El "Tú" es menos frecuente en hombres (suena cursi o 'gomelo').
-      * "Su merced": Usar solo en contextos de servicio muy amables o rurales/tradicionales.
-    
-    [PRAGMÁTICA]
-    - PETICIONES: Se usa "Regalar" para comprar/pedir. "Vecino, regáleme una leche" (significa véndame).
-    - SUAVIDAD: Tono pausado y muy cortés. "Qué pena con usted" (para disculparse).
-
-    [LÉXICO]
-    - INFORMAL: "Parce" (amigo), "Vaina" (cosa), "Chévere" (bien), "Tinto" (café solo), "Pola" (cerveza), "Harto" (mucho), "Dar papaya" (exponerse).
-    - FORMAL: Léxico muy culto y preciso.
+    [GRAMÁTICA] USTEDEO entre amigos y familia.
+    [PRAGMÁTICA] "Regalar" para pedir ("Regáleme una leche"). Suavidad y cortesía ("Qué pena con usted").
+    [LÉXICO] "Parce", "Vaina", "Chévere", "Tinto", "Pola", "Harto", "Dar papaya".
   `,
-
   [Accent.Caribbean]: `
-    DIALECTO: CARIBE (PUERTO RICO / CUBA / DOMINICANA).
-    
-    [GRAMÁTICA - SINTAXIS]
-    - NO INVERSIÓN EN PREGUNTAS (RASGO DEFINITORIO):
-      * Estándar: "¿Qué quieres tú?" -> Caribe: "¿Qué tú quieres?"
-      * "¿Cómo tú estás?", "¿A dónde tú vas?".
-    - PRONOMBRES SUJETOS: Uso redundante. "Yo creo que yo voy a ir porque yo quiero".
-    
-    [FONÉTICA ESCRITA]
-    - Aspiración de 's' final puede representarse sutilmente como 'h' o cortes, pero prioriza legibilidad. "Vamo' a ver".
-    - Lambdacismo (R -> L) en Puerto Rico: Sutil en el texto ("Pueltorro"), pero no abuses para no hacerlo cómico.
-
-    [LÉXICO]
-    - INFORMAL: "Boricua", "Pana" (amigo), "Corillo" (grupo), "Guagua" (autobús), "Chavos" (dinero), "Bochinche" (chisme), "Janguear" (salir), "Brutal" (genial).
-    - FORMAL: Mantiene la sintaxis de no inversión. Muy cálido.
+    DIALECTO: CARIBE (PUERTO RICO / CUBA).
+    [GRAMÁTICA] NO INVERSIÓN en preguntas ("¿Qué tú quieres?"). Pronombres redundantes ("Yo creo que yo...").
+    [FONÉTICA] Aspiración de 's'.
+    [LÉXICO] "Boricua", "Pana", "Corillo", "Guagua", "Chavos", "Bochinche", "Janguear", "Brutal".
   `,
-
   [Accent.BuenosAires]: `
     DIALECTO: ARGENTINA (RIOPLATENSE).
-    
-    [GRAMÁTICA - VOSEO OBLIGATORIO]
-    - PRONOMBRE: "Vos" (en lugar de tú).
-    - VERBOS PRESENTE: Acentuación final. "Tenés", "Podés", "Querés", "Sos".
-    - IMPERATIVO: "Hacé", "Vení", "Mirá", "Decime".
-    
-    [PRAGMÁTICA]
-    - DIRECTOS: Tono seguro, a veces percibido como arrogante pero es solo confianza.
-    - INTENSIFICADOR: "Re" (sin guion o pegado). "Relindo", "Re cansado". No usan "Muy".
-
-    [LÉXICO]
-    - INFORMAL: "Che" (vocativo universal), "Boludo" (amigo o insulto, contexto), "Laburo" (trabajo), "Bondi" (bus), "Guita" (dinero), "Mina/Pibe", "Posta" (verdad), "Viste" (muletilla final).
-    - FORMAL: Se mantiene el "Vos" pero se elimina el slang (Che/Boludo). Vocabulario: Auto, Celular, Departamento, Computadora.
+    [GRAMÁTICA] VOSEO ("Vos tenés", "Vení").
+    [PRAGMÁTICA] Directos. Intensificador "Re" ("Relindo").
+    [LÉXICO] "Che", "Boludo", "Laburo", "Bondi", "Guita", "Mina/Pibe", "Posta", "Viste", "Auto", "Celular".
   `,
-
   [Accent.Santiago]: `
     DIALECTO: CHILE - SANTIAGO.
-    
-    [GRAMÁTICA - VOSEO CHILENO (MIXTO)]
-    - CONTEXTO INFORMAL: Usa pronombre "Tú" o "Vos" pero verbo con terminación "-ái" / "-ís".
-      * "¿Cómo estái?", "¿Qué querís?", "¿Si venís?".
-      * "Cachái" (¿Entiendes?) es la muletilla fundamental.
-    
-    [PRAGMÁTICA]
-    - VELOCIDAD: Frases cortas, rápidas.
-    - "PO": Aglutinación de "pues" al final de frases. "Sí po", "No po", "Ya po".
-    - "AL TIRO": Inmediatamente.
-
-    [LÉXICO]
-    - INFORMAL: "Weón" (palabra comodín: amigo, sujeto, insulto), "Bacán" (genial), "Fome" (aburrido), "Pololo/a" (novio/a), "Luca" (mil pesos), "Carrete" (fiesta).
-    - FORMAL: Desaparece el voseo chileno. Se vuelve un español muy estándar y sobrio. Usa "Usted".
+    [GRAMÁTICA] VOSEO MIXTO ("Tú estái", "Vos querís"). "Cachái".
+    [PRAGMÁTICA] Velocidad rápida. "PO" al final ("Sí po"). "Al tiro".
+    [LÉXICO] "Weón", "Bacán", "Fome", "Pololo/a", "Luca", "Carrete".
   `,
-
   [Accent.Lima]: `
-    DIALECTO: PERÚ - LIMA (RIBEREÑO).
-    
-    [GRAMÁTICA]
-    - TUTEO: Estándar y claro.
-    - "NOMÁS": Usado como suavizante o limitador pospuesto. "Pasa nomás", "Ahí nomás", "Un ratito nomás".
-    - DIMINUTIVOS: Extensivos. "Ahorita", "Sopita", "Cerquita".
-    
-    [PRAGMÁTICA]
-    - "PE": Reducción de "pues" al final de frase. "Claro pe", "Vamos pe".
-    - "YA": Usado como asentimiento constante. "Ya, bacán".
-
-    [LÉXICO]
-    - INFORMAL: "Pata/Causa" (amigo), "Chamba" (trabajo), "Jato" (casa), "Chévere" (genial), "Piña" (mala suerte), "Al toque" (rápido), "Soroche" (mal de altura).
-    - FORMAL: Uno de los acentos más neutros de América. Vocabulario: Carro, Celular.
+    DIALECTO: PERÚ - LIMA.
+    [GRAMÁTICA] Tuteo estándar. "Nomás" pospuesto ("Pasa nomás"). Diminutivos ("Ahorita").
+    [PRAGMÁTICA] "Pe" (Pues), "Ya" (Asentimiento).
+    [LÉXICO] "Pata/Causa", "Chamba", "Jato", "Chévere", "Piña", "Al toque", "Carro".
   `
 };
 
-// --- LOGICA PEDAGOGICA ---
-
 const getExerciseInstructions = (level: Level, mode: AppMode): string => {
-  // 1. MODE: ACCENT CHALLENGE (Override everything)
   if (mode === AppMode.AccentChallenge) {
-    return `
-    MODO: ADIVINA EL ACENTO.
-    Genera ejercicios ESPECÍFICOS para identificar el origen de los hablantes.
-    
-    Genera 1 ejercicio de COMPRENSIÓN (multiple_choice):
-    A. "¿De dónde son?" - Pregunta explícitamente el origen de Hablante A y Hablante B.
-       Opciones incorrectas deben ser otros países de habla hispana.
-    
-    Genera 1 ejercicio de VOCABULARIO (classification):
-    A. "Mapa de Palabras" - Relaciona la palabra dialectal (ej: "Chamba" o "Curro") con su país de origen.
-    `;
+    return `MODO: ADIVINA EL ACENTO. Genera 1 ejercicio COMPRENSIÓN (multiple_choice) preguntando "¿De dónde son?" con opciones de países. Genera 1 ejercicio VOCABULARIO (classification) relacionando palabras dialectales con su país.`;
   }
-
-  // 2. MODE: VOCABULARY EXPANSION (Override everything)
   if (mode === AppMode.Vocabulary) {
-    return `
-    MODO: AMPLIACIÓN DE VOCABULARIO (INTENSIVO).
-    
-    Genera 1 ejercicio de COMPRENSIÓN (true_false):
-    A. Validar el uso correcto de los términos técnicos en contexto.
-
-    Genera 3 ejercicios de VOCABULARIO (OBLIGATORIOS):
-    A. "Definiciones Precisas" (multiple_choice): Seleccionar la definición correcta de un término complejo usado.
-    B. "Sinonimia Contextual" (classification): Relacionar el término técnico con su equivalente coloquial o sinónimo.
-    C. "Precisión Léxica" (cloze): Rellenar huecos con el término exacto del tema seleccionado.
-    `;
+    return `MODO: VOCABULARIO INTENSIVO. Genera 1 COMPRENSIÓN (true_false). Genera 3 VOCABULARIO: Definiciones (multiple_choice), Sinonimia (classification), Precisión (cloze).`;
   }
-
-  // 3. MODE: STANDARD (Level based)
-  if (level.includes('Inicial')) {
-    return `
-    NIVEL INICIAL (A1-A2).
-    Genera 2 ejercicios de COMPRENSIÓN (Simple recall, True/False).
-    Genera 2 ejercicios de VOCABULARIO (Match word to definition).
-    `;
-  } 
   
-  if (level.includes('Intermedio')) {
-    return `
-    NIVEL INTERMEDIO (B1-B2).
-    Genera 2 ejercicios de COMPRENSIÓN (Inferencia, Tono).
-    Genera 2 ejercicios de VOCABULARIO (Sinónimos, Colocaciones).
-    `;
+  if (level === Level.Intro) {
+      return `NIVEL A0 (REALISTA - "KEYWORD SPOTTING").
+      IMPORTANTE: Aunque el audio es rápido y natural, los ejercicios deben basarse en extraer el dato específico que has incluido obligatoriamente.
+      
+      2 Ejercicios de COMPRENSIÓN (Multiple Choice):
+      - Pregunta EXACTA sobre el dato incluido (ej: "¿Qué número de habitación le han dado?", "¿Cuál es el apellido?", "¿A qué hora es la cita?").
+      - Opciones distractores deben ser muy parecidas (ej: 304, 314, 403) para forzar la discriminación auditiva.
+      
+      2 Ejercicios de VOCABULARIO:
+      - Relacionar palabras oídas con su significado o completar una frase del texto con la palabra exacta.`;
   }
 
-  // Avanzado
-  return `
-  NIVEL AVANZADO (C1-C2).
-  Genera 2 ejercicios de COMPRENSIÓN (Matices culturales, Ironía).
-  Genera 2 ejercicios de VOCABULARIO (Modismos, Registro, Jerga).
-  `;
+  if (level.includes('Principiante')) return `NIVEL A1-A2. 2 ejercicios COMPRENSIÓN (Simple recall). 2 ejercicios VOCABULARIO (Match definition).`;
+  if (level.includes('Intermedio')) return `NIVEL B1-B2. 2 ejercicios COMPRENSIÓN (Inferencia). 2 ejercicios VOCABULARIO (Sinónimos).`;
+  return `NIVEL C1-C2. 2 ejercicios COMPRENSIÓN (Matices/Ironía). 2 ejercicios VOCABULARIO (Jerga/Registro).`;
 };
 
 // --- MAIN GENERATOR ---
@@ -269,77 +144,75 @@ export const generateLessonPlan = async (
   mode: AppMode
 ): Promise<LessonPlan> => {
 
+  // DYNAMIC INSTANTIATION WITH STORED KEY
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
   let profileInstruction = "";
   let finalTopic = topic;
   let numSpeakers = (textType === TextType.RadioNews || textType === TextType.Monologue) ? 1 : 2;
 
-  // --- LOGIC FOR MODES ---
-  
+  // REGLAS ESPECÍFICAS DE NIVEL
+  let constraint = "";
+  if (level === Level.Intro) {
+      // DYNAMIC A0 INJECTION
+      // We check the topic string to inject specific A0 requirements
+      const t = topic.toLowerCase();
+      let mandatoryInclusion = "";
+
+      if (t.includes("deletrear") || t.includes("apellido") || t.includes("nombre")) {
+          mandatoryInclusion = "MANDATORY: One speaker MUST SPELL a name/surname letter by letter (e.g., 'G-A-R-C-I-A'). It must be clear.";
+      } else if (t.includes("teléfono") || t.includes("whatsapp")) {
+          mandatoryInclusion = "MANDATORY: One speaker MUST dictate a phone number digit by digit (e.g., '6-5-4...').";
+      } else if (t.includes("precio") || t.includes("cuenta") || t.includes("cuesta")) {
+          mandatoryInclusion = "MANDATORY: Mention specific prices with cents (e.g., '14 euros con 95').";
+      } else if (t.includes("dirección") || t.includes("calle")) {
+          mandatoryInclusion = "MANDATORY: Mention a specific street name and number.";
+      } else if (t.includes("hora") || t.includes("cita")) {
+          mandatoryInclusion = "MANDATORY: Mention specific times (e.g., 'A las 5 y media').";
+      } else if (t.includes("correo") || t.includes("email")) {
+          mandatoryInclusion = "MANDATORY: Dictate an email address using 'arroba', 'punto', 'guion bajo'.";
+      }
+
+      constraint = `
+      NIVEL A0 (REALISTA - INMERSIÓN TOTAL):
+      - Genera un diálogo 100% NATURAL y FLUIDO entre nativos.
+      - VELOCIDAD NORMAL. NO hables lento. NO simplifiques las frases. NO limites el vocabulario.
+      - ${mandatoryInclusion}
+      - El objetivo es que el estudiante capture ese dato específico en un entorno ruidoso/rápido.
+      `;
+  } else if (level === Level.Beginner) {
+      constraint = `NIVEL A1-A2: Frases de longitud media, vocabulario frecuente.`;
+  } else {
+      constraint = `NIVEL MCER: ${level}. Naturalidad y coherencia con el nivel.`;
+  }
+
+
   if (mode === AppMode.AccentChallenge) {
-      // RANDOMIZE TWO DISTINCT ACCENTS
       const allAccents = Object.values(Accent);
       const shuffled = allAccents.sort(() => 0.5 - Math.random());
       const accent1 = shuffled[0];
       const accent2 = shuffled[1];
       
       profileInstruction = `
-      ESTO ES UN RETO DE ACENTOS (JUEGO DE ADIVINANZA).
-      IGNORA EL ACENTO SELECCIONADO POR EL USUARIO.
-      
-      TU TAREA ES GENERAR UN DIÁLOGO ENTRE:
-      - HABLANTE A: Rasgos de ${DIALECT_PROFILES[accent1]}
-      - HABLANTE B: Rasgos de ${DIALECT_PROFILES[accent2]}
-      
-      El tema debe ser un choque cultural o léxico (ej: pedir algo y que el otro no entienda la palabra).
-
-      !!! PROTOCOLO ANTI-SPOILER (CRÍTICO) !!!
-      Para que el juego funcione, el usuario NO DEBE SABER de dónde son hasta que haga los ejercicios.
-      1. Campo 'title': DEBE SER MISTERIOSO. Ej: "Confusión en el mercado", "Dos viajeros". NUNCA pongas "Argentino vs Mexicano".
-      2. Campo 'situationDescription': DEBE SER NEUTRA. Ej: "Dos personas intentan ponerse de acuerdo...". NO menciones nacionalidades ni regiones.
-      3. Campo 'communicativeFunction': "Contrastar variedades dialectales" (Genérico).
-      4. Campo 'freesoundSearchQuery': GENÉRICO. Ej: "busy cafe ambience" (NO incluyas el nombre del país aquí para que no salga en los metadatos del audio).
+      RETO DE ACENTOS. IGNORA ACENTO SELECCIONADO.
+      HABLANTE A: ${DIALECT_PROFILES[accent1]}. HABLANTE B: ${DIALECT_PROFILES[accent2]}.
+      Tema: Choque cultural/léxico.
+      PROTOCOLO ANTI-SPOILER: Título misterioso. Descripción neutra. NO mencionar países en metadatos.
       `;
-      finalTopic = "Encuentro cultural / Choque de dialectos / Confusión de palabras";
-      numSpeakers = 2; // Force dialogue
+      finalTopic = "Encuentro cultural / Confusión de palabras";
+      numSpeakers = 2;
 
   } else if (mode === AppMode.Vocabulary) {
-      // VOCABULARY MODE
       const baseProfile = DIALECT_PROFILES[accent];
-      profileInstruction = `
-      ${baseProfile}
-
-      OBJETIVO: DENSIDAD LÉXICA ALTA.
-      El usuario quiere aprender vocabulario sobre: "${topic}".
-      
-      !!! REGLA DE UNIFORMIDAD !!!
-      AMBOS HABLANTES DEBEN USAR ESTE ACENTO (${accent}).
-      No permitas que un hablante sea "neutro". Si el dialecto usa "vos", ambos usan "vos".
-      
-      El diálogo debe estar CARGADO de terminología específica, sinónimos y expresiones relacionadas con ese tema.
-      `;
+      profileInstruction = `${baseProfile}. OBJETIVO: DENSIDAD LÉXICA ALTA sobre "${topic}". AMBOS HABLANTES USAN ESTE ACENTO.`;
 
   } else {
-      // STANDARD MODE
-      // CRITICAL FIX: FORCE CONSISTENCY
       const baseProfile = DIALECT_PROFILES[accent];
-      profileInstruction = `
-      ${baseProfile}
-
-      !!! REGLA DE ORO DE CONSISTENCIA (CRÍTICA) !!!
-      AMBOS HABLANTES (A y B) SON NATIVOS DE ESTA REGIÓN (${accent}).
-      Está PROHIBIDO que uno hable "neutro" o "estándar" y el otro dialectal.
-      
-      - Si el perfil dice "Usar VOS", AMBOS deben vosear.
-      - Si el perfil dice "No inversión de preguntas", AMBOS lo hacen.
-      - Si es una entrevista, el entrevistador TAMBIÉN es local y comparte el acento y modismos.
-      
-      El objetivo es una inmersión total en ESTE acento específico.
-      `;
+      profileInstruction = `${baseProfile}. CONSISTENCIA: AMBOS HABLANTES SON NATIVOS DE ESTA REGIÓN. Prohibido mezclar con neutro.`;
   }
 
   const exerciseLogic = getExerciseInstructions(level, mode);
 
-  // IMPORTANT: Explicit schema examples prevent hallucinations
   const jsonStructure = `
   {
     "title": "String",
@@ -350,59 +223,27 @@ export const generateLessonPlan = async (
     "dialogue": [{ "speaker": "String", "text": "String", "emotion": "String" }],
     "exercises": {
       "comprehension": [
-        {
-          "id": "ex_c1",
-          "type": "multiple_choice", 
-          "question": "Pregunta...",
-          "options": [{ "id": "o1", "text": "Opción A" }, { "id": "o2", "text": "Opción B" }],
-          "correctAnswer": "o1", 
-          "explanation": "..."
-        }
+        { "id": "ex_c1", "type": "multiple_choice", "question": "...", "options": [{ "id": "o1", "text": "..." }], "correctAnswer": "o1", "explanation": "..." }
       ],
-      "vocabulary": [
-        {
-          "id": "ex_v1",
-          "type": "classification",
-          "question": "Relaciona...",
-          "rows": [{ "id": "r1", "text": "..." }],
-          "columns": [{ "id": "c1", "text": "..." }],
-          "correctAnswer": { "r1": "c1" },
-          "explanation": "..."
-        }
-      ]
+      "vocabulary": []
     }
   }
   `;
 
+  // IGNORING LENGTH LIMITS FOR A0 IF REQUESTED BY USER
+  // We modify the prompt length instruction slightly for A0 to ensure natural flow.
+  const lengthInstruction = (level === Level.Intro) ? "Longitud: Natural y fluida, ignorando límites estrictos de turnos si corta la naturalidad." : `Longitud: ${length}.`;
+
   const prompt = `
-  Genera una lección de escucha en español (JSON).
+  Genera lección escucha español (JSON).
+  Modo: ${mode}. Nivel: ${level}. Tema: ${finalTopic}. Formato: ${textType}. Hablantes: ${numSpeakers}. ${lengthInstruction}
   
-  CONFIGURACIÓN GLOBAL:
-  - Modo de App: ${mode}
-  - Nivel: ${level}
-  - Tema Base: ${finalTopic}
-  - Formato: ${textType}
-  - Hablantes: ${numSpeakers}
-  - Longitud: ${length}
-  
-  INSTRUCCIONES DE PERFIL Y ACENTO:
-  ${profileInstruction}
+  PERFIL: ${profileInstruction}
+  RESTRICCIONES NIVEL: ${constraint}
+  EJERCICIOS: ${exerciseLogic}
+  AMBIENTE: Genera "freesoundSearchQuery" en inglés.
 
-  REGLA DE TONO (FORMAL vs INFORMAL):
-  1. Analiza el TEMA ("${finalTopic}").
-     - Si es FORMAL (Trabajo, Médico, Policia): Usa la gramática del perfil pero ELIMINA el slang/jerga muy fuerte. Mantén el tratamiento de respeto (Usted/Ustedes) según las reglas del perfil regional.
-     - Si es INFORMAL (Amigos, Fiesta, Bar): Usa TODAS las muletillas, slang y gramática relajada del perfil.
-  
-  2. MANTÉN LA COHERENCIA: No mezcles registros. O los dos son formales, o los dos son informales.
-
-  INSTRUCCIONES DE EJERCICIOS:
-  ${exerciseLogic}
-
-  AMBIENTACIÓN SONORA:
-  Genera "freesoundSearchQuery" en inglés para buscar ambiente de fondo.
-
-  Estructura JSON:
-  ${jsonStructure}
+  JSON Structure: ${jsonStructure}
   `;
 
   try {
@@ -410,8 +251,7 @@ export const generateLessonPlan = async (
       model: GENERATION_MODEL,
       contents: prompt,
       config: {
-        // We relax system instruction slightly to allow the Prompt to override Accent logic for the challenge
-        systemInstruction: "Eres un experto lingüista y guionista. Genera JSON válido estrictamente.",
+        systemInstruction: "Eres experto lingüista. Genera JSON válido.",
         responseMimeType: "application/json", 
         temperature: 0.7, 
       },
@@ -421,17 +261,11 @@ export const generateLessonPlan = async (
     const jsonStr = cleanJsonString(response.text);
     const plan = JSON.parse(jsonStr) as LessonPlan;
     
-    // Safety checks & VALIDATION
     if (!plan.dialogue) plan.dialogue = [];
     if (!plan.exercises) plan.exercises = { comprehension: [], vocabulary: [] };
 
-    // Strict Filtering of Broken Exercises
-    if (plan.exercises.comprehension) {
-        plan.exercises.comprehension = plan.exercises.comprehension.filter(isValidExercise);
-    }
-    if (plan.exercises.vocabulary) {
-        plan.exercises.vocabulary = plan.exercises.vocabulary.filter(isValidExercise);
-    }
+    if (plan.exercises.comprehension) plan.exercises.comprehension = plan.exercises.comprehension.filter(isValidExercise);
+    if (plan.exercises.vocabulary) plan.exercises.vocabulary = plan.exercises.vocabulary.filter(isValidExercise);
 
     return plan;
   } catch (error: any) {
@@ -443,8 +277,11 @@ export const generateLessonPlan = async (
 export const generateAudio = async (
     dialogue: LessonPlan['dialogue'], 
     characters: Character[],
-    accent: Accent // Note: In "AccentChallenge", the text itself carries the phonetic markers written by the LLM
+    accent: Accent 
 ): Promise<string> => {
+  // DYNAMIC INSTANTIATION WITH STORED KEY
+  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+
   if (!dialogue || dialogue.length === 0) return "";
 
   const speakerCounts: Record<string, number> = {};
@@ -457,8 +294,6 @@ export const generateAudio = async (
 
   const isMultiSpeaker = sortedSpeakers.length >= 2;
   let speechConfig;
-  
-  // RAW TEXT: No system instructions hidden here to ensure natural cadence.
   let textPrompt = "";
 
   if (isMultiSpeaker) {

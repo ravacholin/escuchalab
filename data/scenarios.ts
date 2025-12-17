@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { Level } from '../types';
 import { 
@@ -12,7 +13,7 @@ import {
     // Missing Icons Fix
     Check, X, TrendingUp, CheckCircle, FileText, Ban, Apple, DoorOpen, Server, Lightbulb, BatteryLow, PieChart, Eye, Watch, GraduationCap,
     // New Additions
-    Stamp, Popcorn, Building, HeartHandshake, Baby, Dog, Hammer, Film, BookOpen, Siren, Headphones, Guitar, Newspaper, Tent
+    Stamp, Popcorn, Building, HeartHandshake, Baby, Dog, Hammer, Film, BookOpen, Siren, Headphones, Guitar, Newspaper, Tent, Hash
 } from 'lucide-react';
 
 export interface ScenarioAction {
@@ -29,7 +30,59 @@ export interface ScenarioContext {
 }
 
 export const SCENARIO_DATABASE: Record<Level, ScenarioContext[]> = {
-    [Level.Initial]: [
+    [Level.Intro]: [
+        {
+            label: "Datos de Contacto",
+            value: "Intercambio de información personal social ruido ambiente",
+            icon: Phone,
+            actions: [
+                { label: "Número de WhatsApp", value: "Pedir y anotar un número de teléfono. UNO de los hablantes dicta los dígitos lentamente o agrupados.", icon: Hash },
+                { label: "Correo Electrónico", value: "Dictar un email complejo (arroba, punto, guion bajo).", icon: MessageCircle },
+                { label: "Usuario de Instagram", value: "Preguntar cómo aparece en redes sociales y deletrear el usuario.", icon: Search }
+            ]
+        },
+        {
+            label: "Recepción de Hotel",
+            value: "Recepción hotel check-in formal mostrador",
+            icon: Bed,
+            actions: [
+                { label: "Deletrear Apellido", value: "El recepcionista no entiende el apellido y pide deletrearlo letra por letra.", icon: FileText },
+                { label: "Número de Habitación", value: "Asignar una habitación (ej: 304, 512) y dar instrucciones del piso.", icon: Key },
+                { label: "Horario Desayuno", value: "Informar de la hora exacta del desayuno (de 7:30 a 10:00).", icon: Clock }
+            ]
+        },
+        {
+            label: "Compras y Dinero",
+            value: "Tienda caja pagar ruido supermercado",
+            icon: Wallet,
+            actions: [
+                { label: "Precio Exacto", value: "El cajero dice el total con céntimos (ej: 14,95€) y el cliente busca cambio.", icon: Euro },
+                { label: "Número de Zapato/Ropa", value: "Pedir una talla específica (38, 42, XL) y preguntar si hay.", icon: ShoppingBag },
+                { label: "Devolución (Días)", value: "Preguntar cuántos días hay para devolver (15 días, 30 días).", icon: Clock }
+            ]
+        },
+        {
+            label: "Transporte / Ciudad",
+            value: "Calle taxi parada autobús ruido tráfico",
+            icon: Car,
+            actions: [
+                { label: "Dirección Exacta", value: "Decir al taxista la calle y el número exacto del portal.", icon: MapPin },
+                { label: "Número de Autobús", value: "Preguntar qué número de bus va al centro (el 24, el 132).", icon: Bus },
+                { label: "Distancia / Tiempo", value: "Preguntar cuánto falta (10 minutos, 5 kilómetros).", icon: Watch }
+            ]
+        },
+        {
+            label: "Citas y Agenda",
+            value: "Oficina administración teléfono cita médica",
+            icon: Clock,
+            actions: [
+                { label: "Fecha de Nacimiento", value: "Dar la fecha de nacimiento para un formulario (día, mes, año).", icon: FileText },
+                { label: "Reservar Hora", value: "Acordar una cita para un día específico a una hora concreta.", icon: Clock },
+                { label: "Código Postal", value: "Dictar el código postal de la dirección.", icon: Hash }
+            ]
+        }
+    ],
+    [Level.Beginner]: [
         {
             label: "Cafetería / Restaurante",
             value: "Cafetería restaurante bar ruidoso servicio mesa",

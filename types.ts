@@ -1,6 +1,7 @@
 
 export enum Level {
-  Initial = 'Inicial (A1-A2)',
+  Intro = 'Inicial Absoluto (A0)',
+  Beginner = 'Principiante (A1-A2)',
   Intermediate = 'Intermedio (B1-B2)',
   Advanced = 'Avanzado (C1)'
 }
@@ -79,9 +80,6 @@ export interface Exercise {
   gapOptions?: Record<string, ExerciseOption[]>; 
 
   // Respuesta Polimórfica:
-  // - String: ID única (Multiple Choice)
-  // - Array<String>: Lista de IDs ordenada (Ordering)
-  // - Record<string, string>: Mapa ID_Fila -> ID_Columna (Classification, True/False List, Cloze)
   correctAnswer: string | string[] | Record<string, string>; 
   
   explanation: string;
@@ -101,7 +99,7 @@ export interface LessonPlan {
 }
 
 export interface AppState {
-  status: 'idle' | 'generating_plan' | 'generating_audio' | 'ready' | 'error';
+  status: 'auth' | 'idle' | 'generating_plan' | 'generating_audio' | 'ready' | 'error';
   config: {
     mode: AppMode;
     level: Level;
