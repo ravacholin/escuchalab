@@ -31,6 +31,15 @@ function cleanJsonString(str: string): string {
     return cleaned;
 }
 
+// Sanitize text for TTS to avoid "non-audio response" errors caused by stage directions or formatting
+function sanitizeForTTS(text: string): string {
+    if (!text) return "";
+    return text
+        .replace(/[\*\[\]\(\)]/g, '') // Remove * [ ] ( ) characters often used for actions/emotions
+        .replace(/\s+/g, ' ')         // Normalize whitespace
+        .trim();
+}
+
 // --- VALIDATION HELPER ---
 const isValidExercise = (ex: any): boolean => {
     if (!ex || !ex.type || !ex.question) return false;
@@ -155,7 +164,6 @@ export const generateLessonPlan = async (
   let constraint = "";
   if (level === Level.Intro) {
       // DYNAMIC A0 INJECTION
-      // We check the topic string to inject specific A0 requirements
       const t = topic.toLowerCase();
       let mandatoryInclusion = "";
 
@@ -230,8 +238,6 @@ export const generateLessonPlan = async (
   }
   `;
 
-  // IGNORING LENGTH LIMITS FOR A0 IF REQUESTED BY USER
-  // We modify the prompt length instruction slightly for A0 to ensure natural flow.
   const lengthInstruction = (level === Level.Intro) ? "Longitud: Natural y fluida, ignorando límites estrictos de turnos si corta la naturalidad." : `Longitud: ${length}.`;
 
   const prompt = `
@@ -299,15 +305,20 @@ export const generateAudio = async (
   if (isMultiSpeaker) {
     const s1 = sortedSpeakers[0];
     const s2 = sortedSpeakers[1];
+    
+    // Internal mapping to SpeakerA/SpeakerB for robust config matching
     const mapToInternal = (original: string) => {
+        // Robust checking for substring matches
         if (original.includes(s1) || s1.includes(original)) return "SpeakerA";
         if (original.includes(s2) || s2.includes(original)) return "SpeakerB";
-        return "SpeakerA";
+        return "SpeakerA"; // Fallback
     };
+
     const getVoice = (name: string, defaultVoice: string) => {
         const char = characters.find(c => c.name === name || name.includes(c.name));
         return char?.gender === 'Female' ? 'Kore' : (char?.gender === 'Male' ? 'Fenrir' : defaultVoice);
     };
+
     speechConfig = {
       multiSpeakerVoiceConfig: {
         speakerVoiceConfigs: [
@@ -316,15 +327,39 @@ export const generateAudio = async (
         ]
       }
     };
+
     textPrompt = dialogue
         .filter(d => d.speaker && (d.speaker.includes(s1) || d.speaker.includes(s2) || s1.includes(d.speaker) || s2.includes(d.speaker)))
-        .map(d => `${mapToInternal(d.speaker)}: ${d.text}`)
+        .map(d => {
+            const cleanText = sanitizeForTTS(d.text);
+            if (!cleanText) return null;
+            return `${mapToInternal(d.speaker)}: ${cleanText}`;
+        })
+        .filter(Boolean) // Remove nulls
         .join('\n');
+
   } else {
+    // Single Speaker Logic
     const s1 = sortedSpeakers[0];
     const char = characters.find(c => c.name === s1 || s1.includes(c.name));
-    speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: char?.gender === 'Female' ? 'Kore' : 'Puck' } } };
-    textPrompt = dialogue.map(d => d.text).join('\n\n');
+    
+    speechConfig = { 
+        voiceConfig: { 
+            prebuiltVoiceConfig: { 
+                voiceName: char?.gender === 'Female' ? 'Kore' : 'Puck' 
+            } 
+        } 
+    };
+
+    textPrompt = dialogue
+        .map(d => sanitizeForTTS(d.text))
+        .filter(t => t.length > 0)
+        .join('\n\n');
+  }
+
+  // Final validation before sending
+  if (textPrompt.length === 0) {
+      throw new Error("No hay texto válido para generar audio.");
   }
 
   if (textPrompt.length > 4000) textPrompt = textPrompt.substring(0, 4000);
@@ -332,12 +367,28 @@ export const generateAudio = async (
   try {
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
       model: AUDIO_MODEL,
-      contents: { parts: [{ text: textPrompt }] },
-      config: { responseModalities: ['AUDIO'] as any, speechConfig: speechConfig }
+      // CORRECT STRUCTURE: Array of objects with parts
+      contents: [{ parts: [{ text: textPrompt }] }], 
+      config: { 
+          responseModalities: ['AUDIO'], 
+          speechConfig: speechConfig 
+      }
     }));
-    return response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data || "";
+    
+    // Check if we actually got audio data
+    const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    if (!audioData) {
+        throw new Error("El modelo no devolvió datos de audio (posible bloqueo de contenido).");
+    }
+
+    return audioData;
   } catch (error: any) {
     console.error("Audio Gen Error:", error);
-    throw new Error(`Error TTS: ${error.message}`);
+    // Extract meaningful message from API error if possible
+    let msg = error.message || "Error desconocido";
+    if (msg.includes("non-audio response") || msg.includes("INVALID_ARGUMENT")) {
+         msg = "El modelo de audio rechazó el contenido del diálogo.";
+    }
+    throw new Error(`Error TTS: ${msg}`);
   }
 };

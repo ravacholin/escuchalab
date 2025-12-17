@@ -1,3 +1,4 @@
+
 import React, { useRef, useState, useEffect } from 'react';
 import { Play, Pause, RotateCcw, Activity, Waves, Radio, Sparkles, CloudDownload, Loader2 } from 'lucide-react';
 import { TopicEnum } from '../types';
@@ -14,47 +15,45 @@ interface AudioPlayerProps {
 // FREESOUND CONFIGURATION
 // ----------------------------------------------------------------------
 
-const FREESOUND_API_KEY = "UMfBT0W8mPZdOveDpz9WS960NAHPvXzopDzMFzpu";
+// API Key (Client Secret)
+const API_KEY = "UyddwR1Kqoj3J1tSagw6oLTBKETViLioFdGjF0Nl"; 
+
 const BASE_URL = "https://freesound.org/apiv2/search/text/";
 
-// Helper to map Spanish topics to specific English queries for Freesound
-// This serves as the ROBUST FALLBACK if the AI's specific query fails.
+// Helper: Map Spanish topics to English queries
 const mapTopicToEnglishQuery = (topic?: string): string => {
-  if (!topic) return "room tone quiet";
+  if (!topic) return "room tone";
   const t = topic.toLowerCase();
 
-  // Explicit overrides for Transport (Common custom requests)
-  if (t.match(/\b(tren|metro|subte|ferrocarril|vagón)\b/)) return "train interior ambience"; 
-  if (t.match(/\b(estación|andén|aeropuerto|terminal)\b/)) return "train station busy ambience";
-  if (t.match(/\b(coche|auto|conducir|taxi|uber|carro)\b/)) return "car interior driving ambience";
-  if (t.match(/\b(autobús|bus|colectivo|guagua)\b/)) return "bus interior ambience";
-  if (t.match(/\b(avión|vuelo|despegue)\b/)) return "airport terminal ambience";
-
+  // Transport
+  if (t.match(/\b(tren|metro|subte|ferrocarril|vagón|estación|andén)\b/)) return "train station"; 
+  if (t.match(/\b(aeropuerto|terminal|avión|vuelo|despegue)\b/)) return "airport ambience";
+  if (t.match(/\b(coche|auto|conducir|taxi|uber|carro|tráfico|semáforo)\b/)) return "city traffic";
+  if (t.match(/\b(autobús|bus|colectivo|guagua)\b/)) return "bus interior";
+  
   // City / Street
-  if (t.match(/\b(calle|avenida|ciudad|paseo|plaza|centro|tráfico|semáforo|direcciones)\b/)) return "city street background noise";
+  if (t.match(/\b(calle|avenida|ciudad|paseo|plaza|centro|direcciones)\b/)) return "city street";
 
   // Social / Crowd
-  if (t.match(/\b(bar|pub|cervecería|tasca|copas|discoteca|antro)\b/)) return "bar crowded ambience";
-  if (t.match(/\b(restaurante|comida|cena|café|bistro|desayuno|almuerzo)\b/)) return "restaurant busy ambience";
-  
-  if (t.match(/\b(tienda|compras|mercado|super|supermercado|shopping)\b/)) return "supermarket ambience";
-  if (t.match(/\b(fiesta|social|amigos|reunión|cumpleaños)\b/)) return "party chatter ambience";
+  if (t.match(/\b(bar|pub|cervecería|tasca|copas|discoteca|antro|fiesta)\b/)) return "bar crowd";
+  if (t.match(/\b(restaurante|comida|cena|café|bistro|desayuno|almuerzo)\b/)) return "restaurant busy";
+  if (t.match(/\b(tienda|compras|mercado|super|supermercado|shopping)\b/)) return "supermarket"; 
+  if (t.match(/\b(social|amigos|reunión|cumpleaños|gente)\b/)) return "people talking"; 
 
   // Work / Focus
-  if (t.match(/\b(trabajo|oficina|negocios|jefe|despacho)\b/)) return "office room tone";
-  if (t.match(/\b(médico|doctor|hospital|salud|enfermera|consulta|clínica)\b/)) return "hospital waiting room ambience";
-  if (t.match(/\b(banco|biblioteca|escuela|clase|aula|universidad)\b/)) return "library quiet ambience";
+  if (t.match(/\b(trabajo|oficina|negocios|jefe|despacho|banco|reunión)\b/)) return "office ambience";
+  if (t.match(/\b(médico|doctor|hospital|salud|enfermera|consulta|clínica|farmacia)\b/)) return "hospital waiting room";
+  if (t.match(/\b(biblioteca|escuela|clase|aula|universidad|silencio)\b/)) return "library ambience";
 
   // Nature
-  if (t.match(/\b(parque|jardín|campo|bosque|pájaro)\b/)) return "park nature ambience";
-  if (t.match(/\b(playa|mar|océano|costa|arena)\b/)) return "beach waves constant"; 
-  if (t.match(/\b(lluvia|tormenta|trueno|llover)\b/)) return "rain window ambience";
+  if (t.match(/\b(parque|jardín|campo|bosque|pájaro)\b/)) return "park birds";
+  if (t.match(/\b(playa|mar|océano|costa|arena)\b/)) return "ocean waves"; 
+  if (t.match(/\b(lluvia|tormenta|trueno|llover)\b/)) return "rain window";
 
   // Home / Cozy
-  if (t.match(/\b(casa|hogar|familia|sofá|salón|habitación)\b/)) return "living room quiet ambience";
-  if (t.match(/\b(hotel|alojamiento|recepción|lobby)\b/)) return "hotel lobby ambience";
+  if (t.match(/\b(casa|hogar|familia|sofá|salón|habitación|hotel|recepción|lobby)\b/)) return "room tone";
 
-  return "room tone";
+  return "ambience"; 
 };
 
 // ----------------------------------------------------------------------
@@ -93,6 +92,15 @@ function writeString(view: DataView, offset: number, string: string) {
     view.setUint8(offset + i, string.charCodeAt(i));
   }
 }
+
+// Helper to force HTTPS on URLs to avoid mixed content blocking
+const forceHttps = (url: string) => {
+    if (!url) return url;
+    if (url.startsWith("http://")) {
+        return url.replace("http://", "https://");
+    }
+    return url;
+};
 
 const SPEEDS = [0.8, 1.0, 1.1, 1.25, 1.4, 1.5];
 
@@ -152,24 +160,47 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
   }, [playbackRate, speechUrl]);
 
   // ----------------------------------------------------------------------
-  // ROBUST FREESOUND FETCHING LOGIC (Cascading Fallback)
+  // ROBUST FREESOUND FETCHING LOGIC (URL PARAM AUTH)
   // ----------------------------------------------------------------------
   useEffect(() => {
     let isMounted = true;
 
-    // --- Search Helper ---
-    const searchApi = async (query: string) => {
+    // --- Search Helper using URL Parameter Auth (Most Robust) ---
+    const searchApi = async (query: string, strategy: 'quality' | 'popular' | 'generic') => {
         try {
-            const fields = "id,name,previews,duration,username";
-            const url = `${BASE_URL}?query=${encodeURIComponent(query)}&fields=${fields}&token=${FREESOUND_API_KEY}`;
-            console.log(`[Freesound] Searching: "${query}"`);
+            const fields = "id,name,previews,duration,username,num_downloads,avg_rating";
+            let sortParam = "";
             
+            // Strategy determines sorting
+            if (strategy === 'quality') sortParam = "&sort=rating_desc";
+            if (strategy === 'popular') sortParam = "&sort=downloads_desc";
+            // 'generic' uses default relevance sorting (no param)
+
+            // AUTHENTICATION:
+            // We append `&token=${API_KEY}` directly to the URL.
+            // This is the standard way to authenticate public requests in Freesound APIv2.
+            const url = `${BASE_URL}?query=${encodeURIComponent(query)}&fields=${fields}${sortParam}&page_size=30&token=${API_KEY}`;
+            
+            console.log(`[Freesound] Searching (${strategy}): "${query}"`);
+            
+            // Note: No headers object needed for URL Param auth
             const res = await fetch(url);
-            if (!res.ok) throw new Error("API Error");
+
+            if (!res.ok) {
+                const errText = await res.text();
+                // Specific Debugging for 401
+                if (res.status === 401) {
+                    console.error("FREESOUND AUTH ERROR (401): The API Key was rejected.");
+                    console.error("CHECK: Did you copy the 'Client ID' (short) instead of the 'Client Secret' (long)?");
+                    console.error("Current Key Length:", API_KEY.length);
+                }
+                throw new Error(`API Error ${res.status}: ${errText}`);
+            }
+
             const data = await res.json();
             return data.results || [];
         } catch (e) {
-            console.warn(`[Freesound] Search failed for "${query}"`, e);
+            console.warn(`[Freesound] Search failed for "${query}" (${strategy})`, e);
             return [];
         }
     };
@@ -180,67 +211,69 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
         setIsLoadingAmbience(true);
         setAmbienceName("");
 
-        // 1. Determine Queries with "Ambience" Enforcer
-        let primaryQuery = (explicitQuery && explicitQuery.trim().length > 0) ? explicitQuery.trim() : "";
-        
-        // ENFORCER: Ensure explicit query actually requests background noise
-        if (primaryQuery) {
-             const lower = primaryQuery.toLowerCase();
-             if (!lower.includes("ambience") && !lower.includes("background") && !lower.includes("noise") && !lower.includes("tone")) {
-                 primaryQuery += " ambience";
-             }
-        }
+        // 1. Determine Search Terms
+        const primaryTerm = (explicitQuery && explicitQuery.trim().length > 0) ? explicitQuery.trim() : "";
+        const secondaryTerm = mapTopicToEnglishQuery(topic);
+        const fallbackTerm = "ambience";
 
-        const fallbackQuery = mapTopicToEnglishQuery(topic);
-        const ultimateFallback = "room tone";
-
-        // 2. Perform Cascading Search
+        // 2. Perform Cascading Search (3 Layers)
         let results = [];
-        let usedQuery = "";
 
-        // Attempt 1: Explicit AI Query (if available)
-        if (primaryQuery) {
-            results = await searchApi(primaryQuery);
-            if (results.length > 0) usedQuery = primaryQuery;
+        // Layer 1: Specific Term + High Quality (Rating)
+        if (primaryTerm) {
+            results = await searchApi(primaryTerm, 'quality');
+            if (results.length === 0) {
+                 // Try Popularity if Quality fails
+                 results = await searchApi(primaryTerm, 'popular');
+            }
         }
 
-        // Attempt 2: Mapped Fallback (if Attempt 1 failed or wasn't available)
-        // We only skip if fallback is identical to primary (to avoid duplicate request)
-        if (results.length === 0 && fallbackQuery !== primaryQuery) {
-            console.log(`[Freesound] Primary failed. Trying fallback: "${fallbackQuery}"`);
-            results = await searchApi(fallbackQuery);
-            if (results.length > 0) usedQuery = fallbackQuery;
+        // Layer 2: Mapped Term + Popularity (If Layer 1 failed)
+        if (results.length === 0 && secondaryTerm !== primaryTerm) {
+            console.log(`[Freesound] Falling back to category: "${secondaryTerm}"`);
+            results = await searchApi(secondaryTerm, 'popular');
+            if (results.length === 0) {
+                // Try Relevance if Popularity fails
+                results = await searchApi(secondaryTerm, 'generic');
+            }
         }
 
-        // Attempt 3: Ultimate Fallback (Room Tone)
+        // Layer 3: "Ambience" + Popularity (Ultimate safety net)
         if (results.length === 0) {
-             console.log(`[Freesound] All specific searches failed. Trying generic: "${ultimateFallback}"`);
-             results = await searchApi(ultimateFallback);
-             if (results.length > 0) usedQuery = ultimateFallback;
+             console.log(`[Freesound] Falling back to generic: "${fallbackTerm}"`);
+             // For the ultimate fallback, use Relevance (generic) to ensure ANY result
+             results = await searchApi(fallbackTerm, 'generic');
         }
 
         // 3. Process Results
         if (isMounted) {
             if (results.length > 0) {
-                // Client-side filtering: Prefer items between 15s and 300s
-                const validDurationItems = results.filter((item: any) => item.duration >= 15 && item.duration <= 300);
+                // Client-side filtering: 
+                // We are very lenient now: 2s to 10mins.
+                const validDurationItems = results.filter((item: any) => item.duration >= 2 && item.duration <= 600);
                 const candidates = validDurationItems.length > 0 ? validDurationItems : results;
 
-                // Pick random candidate
-                const maxIndex = Math.min(candidates.length, 5);
+                // Pick a random one from the top 10 to ensure variety but relevance
+                const maxIndex = Math.min(candidates.length, 10);
                 const randomIndex = Math.floor(Math.random() * maxIndex);
                 const sound = candidates[randomIndex];
                 
-                if (sound.previews && sound.previews['preview-hq-mp3']) {
-                    setAmbienceUrl(sound.previews['preview-hq-mp3']);
+                // ROBUST PREVIEW SELECTION: Try HQ, fall back to LQ
+                let previewUrl = sound.previews['preview-hq-mp3'];
+                if (!previewUrl) previewUrl = sound.previews['preview-lq-mp3'];
+                if (!previewUrl) previewUrl = sound.previews['preview-hq-ogg']; // Rare but possible
+
+                if (previewUrl) {
+                    // FORCE HTTPS: Crucial for production/preview environments to avoid Mixed Content errors
+                    setAmbienceUrl(forceHttps(previewUrl));
                     setAmbienceName(sound.name);
                     setIsLoadingAmbience(false);
                     return;
                 }
             }
             
-            // Final Fallback: Synthetic
-            console.warn("[Freesound] Zero results found after cascading search. Using Synthetic.");
+            // Final Fallback: Synthetic (Only if API is down or returns literally 0 items for "ambience")
+            console.warn("[Freesound] All searches exhausted. Using Synthetic.");
             setUsingSyntheticAmbience(true);
             setIsLoadingAmbience(false);
         }
@@ -391,8 +424,20 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
     fadeOutAmbience();
   };
 
-  const onAmbienceError = () => {
-      console.warn("[Freesound] Audio load failed (CORS/Network), switching to synthetic fallback.");
+  const onAmbienceError = (e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
+      const target = e.currentTarget;
+      const src = target.src || "unknown";
+      
+      // Sanitized Error Logging
+      let errorCode = "UNKNOWN";
+      
+      if (target.error) {
+          errorCode = target.error.code.toString();
+      }
+
+      console.warn(`[Freesound] Audio load failed for URL: ${src}. (Code: ${errorCode}). Switching to synthetic.`);
+      
+      // Automatically switch to fallback
       setUsingSyntheticAmbience(true);
   };
 
@@ -437,8 +482,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
     
     if (playPromise !== undefined) {
       playPromise.catch(error => {
-        console.warn("Ambience auto-play prevented, trying fallback");
-        // Don't switch to synthetic here immediately, browser might just need user interaction
+        // Just log a string, do not log the error object if it's complex
+        console.warn("Ambience auto-play prevented by browser policy.");
       });
     }
 
@@ -549,8 +594,11 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
         <audio
             ref={ambienceRef}
             src={ambienceUrl}
+            key={ambienceUrl} /* Forces re-mount if URL changes */
             loop
             preload="auto"
+            /* REMOVED CROSSORIGIN to fix Code 4 Errors */
+            referrerPolicy="no-referrer" /* IMPORTANT FOR CDNS */
             onError={onAmbienceError}
         />
       )}
