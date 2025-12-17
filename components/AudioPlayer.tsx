@@ -20,6 +20,69 @@ const API_KEY = import.meta.env.VITE_FREESOUND_API_KEY || "UyddwR1Kqoj3J1tSagw6o
 
 const BASE_URL = "https://freesound.org/apiv2/search/text/";
 
+// DISABLE FREESOUND: Set to true if CDN is blocked by network
+const DISABLE_FREESOUND = false; // Try Freesound API
+
+// Diagnostic function to test API and CDN accessibility
+const testFreesoundApi = async () => {
+    try {
+        const testUrl = `${BASE_URL}?query=test&fields=id,name,previews&page_size=5&token=${API_KEY}`;
+        console.log('[Freesound Diagnostic] Testing API with URL:', testUrl);
+
+        const res = await fetch(testUrl);
+        console.log('[Freesound Diagnostic] API Response Status:', res.status);
+
+        if (!res.ok) {
+            if (res.status === 401) {
+                console.error('[Freesound Diagnostic] ❌ API Key is INVALID or EXPIRED');
+                console.error('[Freesound Diagnostic] Please get a new key from: https://freesound.org/apiv2/apply');
+                return false;
+            }
+            const errText = await res.text();
+            console.error('[Freesound Diagnostic] API Error:', res.status, errText);
+            return false;
+        }
+
+        const data = await res.json();
+        console.log('[Freesound Diagnostic] ✅ API Key is VALID');
+        console.log('[Freesound Diagnostic] Results returned:', data.results?.length || 0);
+
+        if (data.results && data.results.length > 0) {
+            const firstSound = data.results[0];
+            console.log('[Freesound Diagnostic] Sample preview URL:', firstSound.previews?.['preview-hq-mp3']);
+
+            // Test if preview URL is accessible
+            if (firstSound.previews?.['preview-hq-mp3']) {
+                const previewUrl = firstSound.previews['preview-hq-mp3'];
+                console.log('[Freesound Diagnostic] Testing CDN access to:', previewUrl);
+
+                try {
+                    const cdnTest = await fetch(previewUrl, { method: 'HEAD' });
+                    console.log('[Freesound Diagnostic] CDN Response Status:', cdnTest.status);
+
+                    if (cdnTest.ok) {
+                        console.log('[Freesound Diagnostic] ✅ CDN is ACCESSIBLE');
+                        return true;
+                    } else {
+                        console.warn('[Freesound Diagnostic] ⚠️ CDN returned error:', cdnTest.status);
+                        return false;
+                    }
+                } catch (cdnError) {
+                    console.error('[Freesound Diagnostic] ❌ CDN is UNREACHABLE from your network');
+                    console.error('[Freesound Diagnostic] Error:', cdnError);
+                    console.error('[Freesound Diagnostic] This is a network/firewall blocking issue, not a code issue');
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    } catch (error) {
+        console.error('[Freesound Diagnostic] Test failed:', error);
+        return false;
+    }
+};
+
 // Helper: Map Spanish topics to English queries
 const mapTopicToEnglishQuery = (topic?: string): string => {
   if (!topic) return "room tone";
@@ -206,6 +269,14 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
     };
 
     const fetchAmbience = async () => {
+        // Check if Freesound is disabled
+        if (DISABLE_FREESOUND) {
+            console.log('[Freesound] Disabled due to network restrictions. Using synthetic ambience.');
+            setUsingSyntheticAmbience(true);
+            setIsLoadingAmbience(false);
+            return;
+        }
+
         setAmbienceUrl(null);
         setUsingSyntheticAmbience(false);
         setIsLoadingAmbience(true);
@@ -304,6 +375,11 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
               syntheticCtxRef.current.close();
           }
       };
+  }, []);
+
+  // Run diagnostic on mount to test Freesound API and CDN
+  useEffect(() => {
+      testFreesoundApi();
   }, []);
 
   // --- SYNTHETIC AMBIENCE GENERATOR: "WARM ROOM TONE" (Not Sea/Wind) ---
