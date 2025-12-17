@@ -1,0 +1,5 @@
+{
+  "name": "EscuchaLAB",
+  "description": "An AI-powered Spanish listening practice tool generating level-appropriate dialogues, audio, and exercises based on the CEFR framework.",
+  "requestFramePermissions": []
+}
