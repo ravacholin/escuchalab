@@ -4,9 +4,9 @@ import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from 
 
 // Helper to get key from storage
 const getApiKey = (): string => {
-    const key = localStorage.getItem('gemini_api_key');
-    if (!key) throw new Error("API Key no encontrada. Por favor, reinicia la app e ingrésala.");
-    return key;
+  const key = localStorage.getItem('gemini_api_key');
+  if (!key) throw new Error("API Key no encontrada. Por favor, reinicia la app e ingrésala.");
+  return key;
 };
 
 const GENERATION_MODEL = "gemini-2.5-flash";
@@ -24,45 +24,45 @@ async function withRetry<T>(fn: () => Promise<T>, retries = 2, delay = 1000): Pr
 }
 
 function cleanJsonString(str: string): string {
-    let cleaned = str.trim();
-    if (cleaned.startsWith("```")) {
-        cleaned = cleaned.replace(/^```(json)?/, "").replace(/```$/, "").trim();
-    }
-    return cleaned;
+  let cleaned = str.trim();
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(json)?/, "").replace(/```$/, "").trim();
+  }
+  return cleaned;
 }
 
 // Sanitize text for TTS to avoid "non-audio response" errors caused by stage directions or formatting
 function sanitizeForTTS(text: string): string {
-    if (!text) return "";
-    return text
-        .replace(/[\*\[\]\(\)]/g, '') // Remove * [ ] ( ) characters often used for actions/emotions
-        .replace(/\s+/g, ' ')         // Normalize whitespace
-        .trim();
+  if (!text) return "";
+  return text
+    .replace(/[\*\[\]\(\)]/g, '') // Remove * [ ] ( ) characters often used for actions/emotions
+    .replace(/\s+/g, ' ')         // Normalize whitespace
+    .trim();
 }
 
 // --- VALIDATION HELPER ---
 const isValidExercise = (ex: any): boolean => {
-    if (!ex || !ex.type || !ex.question) return false;
+  if (!ex || !ex.type || !ex.question) return false;
 
-    switch (ex.type) {
-        case 'multiple_choice':
-            return Array.isArray(ex.options) && ex.options.length >= 2 && !!ex.correctAnswer;
-        case 'ordering':
-            return Array.isArray(ex.options) && ex.options.length >= 2 && Array.isArray(ex.correctAnswer);
-        case 'classification':
-            return Array.isArray(ex.rows) && ex.rows.length > 0 && 
-                   Array.isArray(ex.columns) && ex.columns.length > 0 && 
-                   typeof ex.correctAnswer === 'object';
-        case 'cloze':
-            return !!ex.textWithGaps && 
-                   typeof ex.gapOptions === 'object' && 
-                   Object.keys(ex.gapOptions).length > 0;
-        case 'true_false':
-            if (ex.rows) return Array.isArray(ex.rows) && ex.rows.length > 0;
-            return true;
-        default:
-            return false;
-    }
+  switch (ex.type) {
+    case 'multiple_choice':
+      return Array.isArray(ex.options) && ex.options.length >= 2 && !!ex.correctAnswer;
+    case 'ordering':
+      return Array.isArray(ex.options) && ex.options.length >= 2 && Array.isArray(ex.correctAnswer);
+    case 'classification':
+      return Array.isArray(ex.rows) && ex.rows.length > 0 &&
+        Array.isArray(ex.columns) && ex.columns.length > 0 &&
+        typeof ex.correctAnswer === 'object';
+    case 'cloze':
+      return !!ex.textWithGaps &&
+        typeof ex.gapOptions === 'object' &&
+        Object.keys(ex.gapOptions).length > 0;
+    case 'true_false':
+      if (ex.rows) return Array.isArray(ex.rows) && ex.rows.length > 0;
+      return true;
+    default:
+      return false;
+  }
 };
 
 // --- CONFIGURATION: PERFILES LINGÜÍSTICOS AVANZADOS ---
@@ -124,9 +124,9 @@ const getExerciseInstructions = (level: Level, mode: AppMode): string => {
   if (mode === AppMode.Vocabulary) {
     return `MODO: VOCABULARIO INTENSIVO. Genera 1 COMPRENSIÓN (true_false). Genera 3 VOCABULARIO: Definiciones (multiple_choice), Sinonimia (classification), Precisión (cloze).`;
   }
-  
+
   if (level === Level.Intro) {
-      return `NIVEL A0 (REALISTA - "KEYWORD SPOTTING").
+    return `NIVEL A0 (REALISTA - "KEYWORD SPOTTING").
       IMPORTANTE: Aunque el audio es rápido y natural, los ejercicios deben basarse en extraer el dato específico que has incluido obligatoriamente.
       
       2 Ejercicios de COMPRENSIÓN (Multiple Choice):
@@ -146,7 +146,7 @@ const getExerciseInstructions = (level: Level, mode: AppMode): string => {
 
 export const generateLessonPlan = async (
   level: Level,
-  topic: string, 
+  topic: string,
   length: Length,
   textType: TextType,
   accent: Accent,
@@ -163,25 +163,25 @@ export const generateLessonPlan = async (
   // REGLAS ESPECÍFICAS DE NIVEL
   let constraint = "";
   if (level === Level.Intro) {
-      // DYNAMIC A0 INJECTION
-      const t = topic.toLowerCase();
-      let mandatoryInclusion = "";
+    // DYNAMIC A0 INJECTION
+    const t = topic.toLowerCase();
+    let mandatoryInclusion = "";
 
-      if (t.includes("deletrear") || t.includes("apellido") || t.includes("nombre")) {
-          mandatoryInclusion = "MANDATORY: One speaker MUST SPELL a name/surname letter by letter (e.g., 'G-A-R-C-I-A'). It must be clear.";
-      } else if (t.includes("teléfono") || t.includes("whatsapp")) {
-          mandatoryInclusion = "MANDATORY: One speaker MUST dictate a phone number digit by digit (e.g., '6-5-4...').";
-      } else if (t.includes("precio") || t.includes("cuenta") || t.includes("cuesta")) {
-          mandatoryInclusion = "MANDATORY: Mention specific prices with cents (e.g., '14 euros con 95').";
-      } else if (t.includes("dirección") || t.includes("calle")) {
-          mandatoryInclusion = "MANDATORY: Mention a specific street name and number.";
-      } else if (t.includes("hora") || t.includes("cita")) {
-          mandatoryInclusion = "MANDATORY: Mention specific times (e.g., 'A las 5 y media').";
-      } else if (t.includes("correo") || t.includes("email")) {
-          mandatoryInclusion = "MANDATORY: Dictate an email address using 'arroba', 'punto', 'guion bajo'.";
-      }
+    if (t.includes("deletrear") || t.includes("apellido") || t.includes("nombre")) {
+      mandatoryInclusion = "MANDATORY: One speaker MUST SPELL a name/surname letter by letter (e.g., 'G-A-R-C-I-A'). It must be clear.";
+    } else if (t.includes("teléfono") || t.includes("whatsapp")) {
+      mandatoryInclusion = "MANDATORY: One speaker MUST dictate a phone number digit by digit (e.g., '6-5-4...').";
+    } else if (t.includes("precio") || t.includes("cuenta") || t.includes("cuesta")) {
+      mandatoryInclusion = "MANDATORY: Mention specific prices with cents (e.g., '14 euros con 95').";
+    } else if (t.includes("dirección") || t.includes("calle")) {
+      mandatoryInclusion = "MANDATORY: Mention a specific street name and number.";
+    } else if (t.includes("hora") || t.includes("cita")) {
+      mandatoryInclusion = "MANDATORY: Mention specific times (e.g., 'A las 5 y media').";
+    } else if (t.includes("correo") || t.includes("email")) {
+      mandatoryInclusion = "MANDATORY: Dictate an email address using 'arroba', 'punto', 'guion bajo'.";
+    }
 
-      constraint = `
+    constraint = `
       NIVEL A0 (REALISTA - INMERSIÓN TOTAL):
       - Genera un diálogo 100% NATURAL y FLUIDO entre nativos.
       - VELOCIDAD NORMAL. NO hables lento. NO simplifiques las frases. NO limites el vocabulario.
@@ -189,34 +189,34 @@ export const generateLessonPlan = async (
       - El objetivo es que el estudiante capture ese dato específico en un entorno ruidoso/rápido.
       `;
   } else if (level === Level.Beginner) {
-      constraint = `NIVEL A1-A2: Frases de longitud media, vocabulario frecuente.`;
+    constraint = `NIVEL A1-A2: Frases de longitud media, vocabulario frecuente.`;
   } else {
-      constraint = `NIVEL MCER: ${level}. Naturalidad y coherencia con el nivel.`;
+    constraint = `NIVEL MCER: ${level}. Naturalidad y coherencia con el nivel.`;
   }
 
 
   if (mode === AppMode.AccentChallenge) {
-      const allAccents = Object.values(Accent);
-      const shuffled = allAccents.sort(() => 0.5 - Math.random());
-      const accent1 = shuffled[0];
-      const accent2 = shuffled[1];
-      
-      profileInstruction = `
+    const allAccents = Object.values(Accent);
+    const shuffled = allAccents.sort(() => 0.5 - Math.random());
+    const accent1 = shuffled[0];
+    const accent2 = shuffled[1];
+
+    profileInstruction = `
       RETO DE ACENTOS. IGNORA ACENTO SELECCIONADO.
       HABLANTE A: ${DIALECT_PROFILES[accent1]}. HABLANTE B: ${DIALECT_PROFILES[accent2]}.
       Tema: Choque cultural/léxico.
       PROTOCOLO ANTI-SPOILER: Título misterioso. Descripción neutra. NO mencionar países en metadatos.
       `;
-      finalTopic = "Encuentro cultural / Confusión de palabras";
-      numSpeakers = 2;
+    finalTopic = "Encuentro cultural / Confusión de palabras";
+    numSpeakers = 2;
 
   } else if (mode === AppMode.Vocabulary) {
-      const baseProfile = DIALECT_PROFILES[accent];
-      profileInstruction = `${baseProfile}. OBJETIVO: DENSIDAD LÉXICA ALTA sobre "${topic}". AMBOS HABLANTES USAN ESTE ACENTO.`;
+    const baseProfile = DIALECT_PROFILES[accent];
+    profileInstruction = `${baseProfile}. OBJETIVO: DENSIDAD LÉXICA ALTA sobre "${topic}". AMBOS HABLANTES USAN ESTE ACENTO.`;
 
   } else {
-      const baseProfile = DIALECT_PROFILES[accent];
-      profileInstruction = `${baseProfile}. CONSISTENCIA: AMBOS HABLANTES SON NATIVOS DE ESTA REGIÓN. Prohibido mezclar con neutro.`;
+    const baseProfile = DIALECT_PROFILES[accent];
+    profileInstruction = `${baseProfile}. CONSISTENCIA: AMBOS HABLANTES SON NATIVOS DE ESTA REGIÓN. Prohibido mezclar con neutro.`;
   }
 
   const exerciseLogic = getExerciseInstructions(level, mode);
@@ -226,7 +226,7 @@ export const generateLessonPlan = async (
     "title": "String",
     "situationDescription": "String",
     "communicativeFunction": "String",
-    "freesoundSearchQuery": "String",
+    "ambientKeywords": "String",
     "characters": [{ "name": "String", "gender": "Male" | "Female" }],
     "dialogue": [{ "speaker": "String", "text": "String", "emotion": "String" }],
     "exercises": {
@@ -247,7 +247,7 @@ export const generateLessonPlan = async (
   PERFIL: ${profileInstruction}
   RESTRICCIONES NIVEL: ${constraint}
   EJERCICIOS: ${exerciseLogic}
-  AMBIENTE: Genera "freesoundSearchQuery" en inglés.
+  AMBIENTE: Genera "ambientKeywords" en inglés (3-5 palabras clave).
 
   JSON Structure: ${jsonStructure}
   `;
@@ -258,15 +258,15 @@ export const generateLessonPlan = async (
       contents: prompt,
       config: {
         systemInstruction: "Eres experto lingüista. Genera JSON válido.",
-        responseMimeType: "application/json", 
-        temperature: 0.7, 
+        responseMimeType: "application/json",
+        temperature: 0.7,
       },
     }));
 
     if (!response.text) throw new Error("API devolvió vacío");
     const jsonStr = cleanJsonString(response.text);
     const plan = JSON.parse(jsonStr) as LessonPlan;
-    
+
     if (!plan.dialogue) plan.dialogue = [];
     if (!plan.exercises) plan.exercises = { comprehension: [], vocabulary: [] };
 
@@ -281,9 +281,9 @@ export const generateLessonPlan = async (
 };
 
 export const generateAudio = async (
-    dialogue: LessonPlan['dialogue'], 
-    characters: Character[],
-    accent: Accent 
+  dialogue: LessonPlan['dialogue'],
+  characters: Character[],
+  accent: Accent
 ): Promise<string> => {
   // DYNAMIC INSTANTIATION WITH STORED KEY
   const ai = new GoogleGenAI({ apiKey: getApiKey() });
@@ -292,10 +292,10 @@ export const generateAudio = async (
 
   const speakerCounts: Record<string, number> = {};
   dialogue.forEach(d => {
-      if (d.speaker) speakerCounts[d.speaker.trim()] = (speakerCounts[d.speaker.trim()] || 0) + 1;
+    if (d.speaker) speakerCounts[d.speaker.trim()] = (speakerCounts[d.speaker.trim()] || 0) + 1;
   });
-  
-  const sortedSpeakers = Object.keys(speakerCounts).sort((a,b) => speakerCounts[b] - speakerCounts[a]);
+
+  const sortedSpeakers = Object.keys(speakerCounts).sort((a, b) => speakerCounts[b] - speakerCounts[a]);
   if (sortedSpeakers.length === 0) return "";
 
   const isMultiSpeaker = sortedSpeakers.length >= 2;
@@ -305,18 +305,18 @@ export const generateAudio = async (
   if (isMultiSpeaker) {
     const s1 = sortedSpeakers[0];
     const s2 = sortedSpeakers[1];
-    
+
     // Internal mapping to SpeakerA/SpeakerB for robust config matching
     const mapToInternal = (original: string) => {
-        // Robust checking for substring matches
-        if (original.includes(s1) || s1.includes(original)) return "SpeakerA";
-        if (original.includes(s2) || s2.includes(original)) return "SpeakerB";
-        return "SpeakerA"; // Fallback
+      // Robust checking for substring matches
+      if (original.includes(s1) || s1.includes(original)) return "SpeakerA";
+      if (original.includes(s2) || s2.includes(original)) return "SpeakerB";
+      return "SpeakerA"; // Fallback
     };
 
     const getVoice = (name: string, defaultVoice: string) => {
-        const char = characters.find(c => c.name === name || name.includes(c.name));
-        return char?.gender === 'Female' ? 'Kore' : (char?.gender === 'Male' ? 'Fenrir' : defaultVoice);
+      const char = characters.find(c => c.name === name || name.includes(c.name));
+      return char?.gender === 'Female' ? 'Kore' : (char?.gender === 'Male' ? 'Fenrir' : defaultVoice);
     };
 
     speechConfig = {
@@ -329,37 +329,37 @@ export const generateAudio = async (
     };
 
     textPrompt = dialogue
-        .filter(d => d.speaker && (d.speaker.includes(s1) || d.speaker.includes(s2) || s1.includes(d.speaker) || s2.includes(d.speaker)))
-        .map(d => {
-            const cleanText = sanitizeForTTS(d.text);
-            if (!cleanText) return null;
-            return `${mapToInternal(d.speaker)}: ${cleanText}`;
-        })
-        .filter(Boolean) // Remove nulls
-        .join('\n');
+      .filter(d => d.speaker && (d.speaker.includes(s1) || d.speaker.includes(s2) || s1.includes(d.speaker) || s2.includes(d.speaker)))
+      .map(d => {
+        const cleanText = sanitizeForTTS(d.text);
+        if (!cleanText) return null;
+        return `${mapToInternal(d.speaker)}: ${cleanText}`;
+      })
+      .filter(Boolean) // Remove nulls
+      .join('\n');
 
   } else {
     // Single Speaker Logic
     const s1 = sortedSpeakers[0];
     const char = characters.find(c => c.name === s1 || s1.includes(c.name));
-    
-    speechConfig = { 
-        voiceConfig: { 
-            prebuiltVoiceConfig: { 
-                voiceName: char?.gender === 'Female' ? 'Kore' : 'Puck' 
-            } 
-        } 
+
+    speechConfig = {
+      voiceConfig: {
+        prebuiltVoiceConfig: {
+          voiceName: char?.gender === 'Female' ? 'Kore' : 'Puck'
+        }
+      }
     };
 
     textPrompt = dialogue
-        .map(d => sanitizeForTTS(d.text))
-        .filter(t => t.length > 0)
-        .join('\n\n');
+      .map(d => sanitizeForTTS(d.text))
+      .filter(t => t.length > 0)
+      .join('\n\n');
   }
 
   // Final validation before sending
   if (textPrompt.length === 0) {
-      throw new Error("No hay texto válido para generar audio.");
+    throw new Error("No hay texto válido para generar audio.");
   }
 
   if (textPrompt.length > 4000) textPrompt = textPrompt.substring(0, 4000);
@@ -368,17 +368,17 @@ export const generateAudio = async (
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
       model: AUDIO_MODEL,
       // CORRECT STRUCTURE: Array of objects with parts
-      contents: [{ parts: [{ text: textPrompt }] }], 
-      config: { 
-          responseModalities: ['AUDIO'], 
-          speechConfig: speechConfig 
+      contents: [{ parts: [{ text: textPrompt }] }],
+      config: {
+        responseModalities: ['AUDIO'],
+        speechConfig: speechConfig
       }
     }));
-    
+
     // Check if we actually got audio data
     const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!audioData) {
-        throw new Error("El modelo no devolvió datos de audio (posible bloqueo de contenido).");
+      throw new Error("El modelo no devolvió datos de audio (posible bloqueo de contenido).");
     }
 
     return audioData;
@@ -387,7 +387,7 @@ export const generateAudio = async (
     // Extract meaningful message from API error if possible
     let msg = error.message || "Error desconocido";
     if (msg.includes("non-audio response") || msg.includes("INVALID_ARGUMENT")) {
-         msg = "El modelo de audio rechazó el contenido del diálogo.";
+      msg = "El modelo de audio rechazó el contenido del diálogo.";
     }
     throw new Error(`Error TTS: ${msg}`);
   }

@@ -1,123 +1,14 @@
 
 import React, { useRef, useState, useEffect } from 'react';
-import { Play, Pause, RotateCcw, Activity, Waves, Radio, Sparkles, CloudDownload, Loader2 } from 'lucide-react';
-import { TopicEnum } from '../types';
+import { Play, Pause, RotateCcw, Activity, Radio, Sparkles } from 'lucide-react';
 
 interface AudioPlayerProps {
   speechSrc: string; // Base64 raw PCM
   recommendedSpeed?: number;
   topic?: string;
-  explicitQuery?: string; // New prop for AI-generated English keywords
-  hideTrackInfo?: boolean; // New prop to hide source metadata (spoilers)
+  ambientKeywords?: string; // AI-generated English keywords
+  hideTrackInfo?: boolean; // Hide source metadata
 }
-
-// ----------------------------------------------------------------------
-// FREESOUND CONFIGURATION
-// ----------------------------------------------------------------------
-
-// API Key (Client Secret) - Loaded from environment variables
-const API_KEY = import.meta.env.VITE_FREESOUND_API_KEY || "UyddwR1Kqoj3J1tSagw6oLTBKETViLioFdGjF0Nl";
-
-const BASE_URL = "https://freesound.org/apiv2/search/text/";
-
-// DISABLE FREESOUND: Set to true if CDN is blocked by network
-const DISABLE_FREESOUND = false; // Try Freesound API
-
-// Diagnostic function to test API and CDN accessibility
-const testFreesoundApi = async () => {
-  try {
-    const testUrl = `${BASE_URL}?query=test&fields=id,name,previews&page_size=5&token=${API_KEY}`;
-    console.log('[Freesound Diagnostic] Testing API with URL:', testUrl);
-
-    const res = await fetch(testUrl);
-    console.log('[Freesound Diagnostic] API Response Status:', res.status);
-
-    if (!res.ok) {
-      if (res.status === 401) {
-        console.error('[Freesound Diagnostic] ❌ API Key is INVALID or EXPIRED');
-        console.error('[Freesound Diagnostic] Please get a new key from: https://freesound.org/apiv2/apply');
-        return false;
-      }
-      const errText = await res.text();
-      console.error('[Freesound Diagnostic] API Error:', res.status, errText);
-      return false;
-    }
-
-    const data = await res.json();
-    console.log('[Freesound Diagnostic] ✅ API Key is VALID');
-    console.log('[Freesound Diagnostic] Results returned:', data.results?.length || 0);
-
-    if (data.results && data.results.length > 0) {
-      const firstSound = data.results[0];
-      console.log('[Freesound Diagnostic] Sample preview URL:', firstSound.previews?.['preview-hq-mp3']);
-
-      // Test if preview URL is accessible
-      if (firstSound.previews?.['preview-hq-mp3']) {
-        const previewUrl = firstSound.previews['preview-hq-mp3'];
-        console.log('[Freesound Diagnostic] Testing CDN access to:', previewUrl);
-
-        try {
-          const cdnTest = await fetch(previewUrl, { method: 'HEAD' });
-          console.log('[Freesound Diagnostic] CDN Response Status:', cdnTest.status);
-
-          if (cdnTest.ok) {
-            console.log('[Freesound Diagnostic] ✅ CDN is ACCESSIBLE');
-            return true;
-          } else {
-            console.warn('[Freesound Diagnostic] ⚠️ CDN returned error:', cdnTest.status);
-            return false;
-          }
-        } catch (cdnError) {
-          console.error('[Freesound Diagnostic] ❌ CDN is UNREACHABLE from your network');
-          console.error('[Freesound Diagnostic] Error:', cdnError);
-          console.error('[Freesound Diagnostic] This is a network/firewall blocking issue, not a code issue');
-          return false;
-        }
-      }
-    }
-
-    return true;
-  } catch (error) {
-    console.error('[Freesound Diagnostic] Test failed:', error);
-    return false;
-  }
-};
-
-// Helper: Map Spanish topics to English queries
-const mapTopicToEnglishQuery = (topic?: string): string => {
-  if (!topic) return "room tone";
-  const t = topic.toLowerCase();
-
-  // Transport
-  if (t.match(/\b(tren|metro|subte|ferrocarril|vagón|estación|andén)\b/)) return "train station";
-  if (t.match(/\b(aeropuerto|terminal|avión|vuelo|despegue)\b/)) return "airport ambience";
-  if (t.match(/\b(coche|auto|conducir|taxi|uber|carro|tráfico|semáforo)\b/)) return "city traffic";
-  if (t.match(/\b(autobús|bus|colectivo|guagua)\b/)) return "bus interior";
-
-  // City / Street
-  if (t.match(/\b(calle|avenida|ciudad|paseo|plaza|centro|direcciones)\b/)) return "city street";
-
-  // Social / Crowd
-  if (t.match(/\b(bar|pub|cervecería|tasca|copas|discoteca|antro|fiesta)\b/)) return "bar crowd";
-  if (t.match(/\b(restaurante|comida|cena|café|bistro|desayuno|almuerzo)\b/)) return "restaurant busy";
-  if (t.match(/\b(tienda|compras|mercado|super|supermercado|shopping)\b/)) return "supermarket";
-  if (t.match(/\b(social|amigos|reunión|cumpleaños|gente)\b/)) return "people talking";
-
-  // Work / Focus
-  if (t.match(/\b(trabajo|oficina|negocios|jefe|despacho|banco|reunión)\b/)) return "office ambience";
-  if (t.match(/\b(médico|doctor|hospital|salud|enfermera|consulta|clínica|farmacia)\b/)) return "hospital waiting room";
-  if (t.match(/\b(biblioteca|escuela|clase|aula|universidad|silencio)\b/)) return "library ambience";
-
-  // Nature
-  if (t.match(/\b(parque|jardín|campo|bosque|pájaro)\b/)) return "park birds";
-  if (t.match(/\b(playa|mar|océano|costa|arena)\b/)) return "ocean waves";
-  if (t.match(/\b(lluvia|tormenta|trueno|llover)\b/)) return "rain window";
-
-  // Home / Cozy
-  if (t.match(/\b(casa|hogar|familia|sofá|salón|habitación|hotel|recepción|lobby)\b/)) return "room tone";
-
-  return "ambience";
-};
 
 // ----------------------------------------------------------------------
 // HELPER: Convert raw PCM to WAV Blob
@@ -156,25 +47,13 @@ function writeString(view: DataView, offset: number, string: string) {
   }
 }
 
-// Helper to force HTTPS on URLs to avoid mixed content blocking
-const forceHttps = (url: string) => {
-  if (!url) return url;
-  if (url.startsWith("http://")) {
-    return url.replace("http://", "https://");
-  }
-  return url;
-};
-
 const SPEEDS = [0.8, 1.0, 1.1, 1.25, 1.4, 1.5];
 
-const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed = 1.0, topic, explicitQuery, hideTrackInfo = false }) => {
+const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed = 1.0, topic, ambientKeywords }) => {
   // Channel 1: Speech
   const speechRef = useRef<HTMLAudioElement | null>(null);
 
-  // Channel 2: Ambience (HTML5 Audio from Freesound)
-  const ambienceRef = useRef<HTMLAudioElement | null>(null);
-
-  // Channel 3: Ambience Fallback (Web Audio API - Generative)
+  // Channels: Synthetic Ambience (Web Audio API)
   const syntheticCtxRef = useRef<AudioContext | null>(null);
   const syntheticGainRef = useRef<GainNode | null>(null);
   const syntheticNodesRef = useRef<AudioNode[]>([]);
@@ -186,12 +65,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
   const [error, setError] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState(recommendedSpeed);
 
-  // Settings & State
-  const [ambienceVolume, setAmbienceVolume] = useState(0.40);
-  const [usingSyntheticAmbience, setUsingSyntheticAmbience] = useState(true); // Always use synthetic - Freesound removed
-  const [ambienceUrl, setAmbienceUrl] = useState<string | null>(null);
-  const [isLoadingAmbience, setIsLoadingAmbience] = useState(false);
-  const [ambienceName, setAmbienceName] = useState<string>("");
+  // Settings
+  const [ambienceVolume, setAmbienceVolume] = useState(0.35);
 
   // Sync state with prop
   useEffect(() => {
@@ -222,150 +97,12 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
     }
   }, [playbackRate, speechUrl]);
 
-  // ----------------------------------------------------------------------
-  // ROBUST FREESOUND FETCHING LOGIC (URL PARAM AUTH)
-  // ----------------------------------------------------------------------
-  useEffect(() => {
-    let isMounted = true;
-
-    // --- Search Helper using URL Parameter Auth (Most Robust) ---
-    const searchApi = async (query: string, strategy: 'quality' | 'popular' | 'generic') => {
-      try {
-        const fields = "id,name,previews,duration,username,num_downloads,avg_rating";
-        let sortParam = "";
-
-        // Strategy determines sorting
-        if (strategy === 'quality') sortParam = "&sort=rating_desc";
-        if (strategy === 'popular') sortParam = "&sort=downloads_desc";
-        // 'generic' uses default relevance sorting (no param)
-
-        // AUTHENTICATION:
-        // We append `&token=${API_KEY}` directly to the URL.
-        // This is the standard way to authenticate public requests in Freesound APIv2.
-        const url = `${BASE_URL}?query=${encodeURIComponent(query)}&fields=${fields}${sortParam}&page_size=30&token=${API_KEY}`;
-
-        console.log(`[Freesound] Searching (${strategy}): "${query}"`);
-
-        // Note: No headers object needed for URL Param auth
-        const res = await fetch(url);
-
-        if (!res.ok) {
-          const errText = await res.text();
-          // Specific Debugging for 401
-          if (res.status === 401) {
-            console.error("FREESOUND AUTH ERROR (401): The API Key was rejected.");
-            console.error("CHECK: Did you copy the 'Client ID' (short) instead of the 'Client Secret' (long)?");
-            console.error("Current Key Length:", API_KEY.length);
-          }
-          throw new Error(`API Error ${res.status}: ${errText}`);
-        }
-
-        const data = await res.json();
-        return data.results || [];
-      } catch (e) {
-        console.warn(`[Freesound] Search failed for "${query}" (${strategy})`, e);
-        return [];
-      }
-    };
-
-    const fetchAmbience = async () => {
-      // Check if Freesound is disabled
-      if (DISABLE_FREESOUND) {
-        console.log('[Freesound] Disabled due to network restrictions. Using synthetic ambience.');
-        setUsingSyntheticAmbience(true);
-        setIsLoadingAmbience(false);
-        return;
-      }
-
-      setAmbienceUrl(null);
-      setUsingSyntheticAmbience(false);
-      setIsLoadingAmbience(true);
-      setAmbienceName("");
-
-      // 1. Determine Search Terms
-      const primaryTerm = (explicitQuery && explicitQuery.trim().length > 0) ? explicitQuery.trim() : "";
-      const secondaryTerm = mapTopicToEnglishQuery(topic);
-      const fallbackTerm = "ambience";
-
-      // 2. Perform Cascading Search (3 Layers)
-      let results = [];
-
-      // Layer 1: Specific Term + High Quality (Rating)
-      if (primaryTerm) {
-        results = await searchApi(primaryTerm, 'quality');
-        if (results.length === 0) {
-          // Try Popularity if Quality fails
-          results = await searchApi(primaryTerm, 'popular');
-        }
-      }
-
-      // Layer 2: Mapped Term + Popularity (If Layer 1 failed)
-      if (results.length === 0 && secondaryTerm !== primaryTerm) {
-        console.log(`[Freesound] Falling back to category: "${secondaryTerm}"`);
-        results = await searchApi(secondaryTerm, 'popular');
-        if (results.length === 0) {
-          // Try Relevance if Popularity fails
-          results = await searchApi(secondaryTerm, 'generic');
-        }
-      }
-
-      // Layer 3: "Ambience" + Popularity (Ultimate safety net)
-      if (results.length === 0) {
-        console.log(`[Freesound] Falling back to generic: "${fallbackTerm}"`);
-        // For the ultimate fallback, use Relevance (generic) to ensure ANY result
-        results = await searchApi(fallbackTerm, 'generic');
-      }
-
-      // 3. Process Results
-      if (isMounted) {
-        if (results.length > 0) {
-          // Client-side filtering: 
-          // We are very lenient now: 2s to 10mins.
-          const validDurationItems = results.filter((item: any) => item.duration >= 2 && item.duration <= 600);
-          const candidates = validDurationItems.length > 0 ? validDurationItems : results;
-
-          // Pick a random one from the top 10 to ensure variety but relevance
-          const maxIndex = Math.min(candidates.length, 10);
-          const randomIndex = Math.floor(Math.random() * maxIndex);
-          const sound = candidates[randomIndex];
-
-          // ROBUST PREVIEW SELECTION: Try HQ, fall back to LQ
-          let previewUrl = sound.previews['preview-hq-mp3'];
-          if (!previewUrl) previewUrl = sound.previews['preview-lq-mp3'];
-          if (!previewUrl) previewUrl = sound.previews['preview-hq-ogg']; // Rare but possible
-
-          if (previewUrl) {
-            // FORCE HTTPS: Crucial for production/preview environments to avoid Mixed Content errors
-            setAmbienceUrl(forceHttps(previewUrl));
-            setAmbienceName(sound.name);
-            setIsLoadingAmbience(false);
-            return;
-          }
-        }
-
-        // Final Fallback: Synthetic (Only if API is down or returns literally 0 items for "ambience")
-        console.warn("[Freesound] All searches exhausted. Using Synthetic.");
-        setUsingSyntheticAmbience(true);
-        setIsLoadingAmbience(false);
-      }
-    };
-
-    // fetchAmbience(); // DISABLED - Using only synthetic ambience
-
-    return () => { isMounted = false; };
-  }, [topic, explicitQuery]);
-
   // Apply Ambience Volume
   useEffect(() => {
-    // HTML5 Audio
-    if (ambienceRef.current && !usingSyntheticAmbience) {
-      ambienceRef.current.volume = ambienceVolume;
-    }
-    // Synthetic Audio
-    if (syntheticGainRef.current && usingSyntheticAmbience) {
+    if (syntheticGainRef.current) {
       syntheticGainRef.current.gain.setTargetAtTime(ambienceVolume, syntheticCtxRef.current?.currentTime || 0, 0.1);
     }
-  }, [ambienceVolume, usingSyntheticAmbience]);
+  }, [ambienceVolume]);
 
   // Cleanup Web Audio on unmount
   useEffect(() => {
@@ -377,12 +114,20 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
     };
   }, []);
 
-  // Freesound diagnostic disabled - using only synthetic ambience
-  // useEffect(() => {
-  //     testFreesoundApi();
-  // }, []);
+  // --- SEMANTIC ENVIRONMENT MAPPING ---
+  const getEnvironmentProfile = (topic?: string, query?: string) => {
+    const t = (topic || "").toLowerCase();
+    const q = (query || "").toLowerCase();
+    const combined = `${t} ${q}`;
 
-  // --- SYNTHETIC AMBIENCE GENERATOR: "RICH ENVIRONMENT" ---
+    if (combined.match(/\b(city|traffic|street|car|bus|train|metro|road|avenida|calle|tráfico|autopista|estación|andén|transporte)\b/)) return "CITY";
+    if (combined.match(/\b(café|restaurant|bar|pub|comida|cena|almuerzo|bistro|mercado|supermarket|tienda|ventas|shopping)\b/)) return "CAFE";
+    if (combined.match(/\b(office|work|trabajo|oficina|bank|hospital|library|school|clase|aula|reunión|negocios|médico)\b/)) return "OFFICE";
+    if (combined.match(/\b(nature|park|forest|beach|ocean|waves|rain|lluvia|parque|jardín|bosque|campo|viento|trueno|mar)\b/)) return "NATURE";
+    return "ROOM";
+  };
+
+  // --- SYNTHETIC AMBIENCE GENERATOR ---
   const initSyntheticAmbience = () => {
     try {
       if (!syntheticCtxRef.current) {
@@ -392,15 +137,14 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
         syntheticGainRef.current!.connect(syntheticCtxRef.current!.destination);
       }
 
-      if (syntheticCtxRef.current!.state === 'suspended') {
-        syntheticCtxRef.current!.resume();
-      }
-
       const ctx = syntheticCtxRef.current!;
+      if (ctx.state === 'suspended') ctx.resume();
+
       const masterGain = syntheticGainRef.current!;
       const nodes: AudioNode[] = [];
+      const profile = getEnvironmentProfile(topic, ambientKeywords);
 
-      // 1. BROWN NOISE (Deep Rumble)
+      // 1. BROWN NOISE (Foundation Depth)
       const brownBuffer = ctx.createBuffer(1, 4 * ctx.sampleRate, ctx.sampleRate);
       const brownOut = brownBuffer.getChannelData(0);
       let brownLast = 0;
@@ -412,159 +156,111 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
       const brownSource = ctx.createBufferSource();
       brownSource.buffer = brownBuffer;
       brownSource.loop = true;
-
-      const brownFilter = ctx.createBiquadFilter();
-      brownFilter.type = "lowpass";
-      brownFilter.frequency.value = 150;
-      brownSource.connect(brownFilter);
-
-      const brownGain = ctx.createGain();
-      brownGain.gain.value = 0.6;
-      brownFilter.connect(brownGain);
-      brownGain.connect(masterGain);
+      const bFilter = ctx.createBiquadFilter();
+      bFilter.type = "lowpass";
+      bFilter.frequency.value = profile === "CITY" ? 220 : 130;
+      const bGain = ctx.createGain();
+      bGain.gain.value = profile === "CITY" ? 0.8 : 0.5;
+      brownSource.connect(bFilter);
+      bFilter.connect(bGain);
+      bGain.connect(masterGain);
       brownSource.start();
-      nodes.push(brownSource, brownFilter, brownGain);
+      nodes.push(brownSource, bFilter, bGain);
 
-      // 2. PINK NOISE (Environment Air/Hiss) - Approximated
+      // 2. PINK NOISE (Environment Air)
       const pinkBuffer = ctx.createBuffer(1, 4 * ctx.sampleRate, ctx.sampleRate);
       const pinkOut = pinkBuffer.getChannelData(0);
       let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
       for (let i = 0; i < pinkBuffer.length; i++) {
         const white = Math.random() * 2 - 1;
-        b0 = 0.99886 * b0 + white * 0.0555179;
-        b1 = 0.99332 * b1 + white * 0.0750759;
-        b2 = 0.96900 * b2 + white * 0.1538520;
-        b3 = 0.86650 * b3 + white * 0.3104856;
-        b4 = 0.55000 * b4 + white * 0.5329522;
-        b5 = -0.7616 * b5 - white * 0.0168980;
-        pinkOut[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
-        pinkOut[i] *= 0.11;
-        b6 = white * 0.115926;
+        b0 = 0.99886 * b0 + white * 0.0555179; b1 = 0.99332 * b1 + white * 0.0750759;
+        b2 = 0.969 * b2 + white * 0.153852; b3 = 0.8665 * b3 + white * 0.3104856;
+        b4 = 0.55 * b4 + white * 0.5329522; b5 = -0.7616 * b5 - white * 0.016898;
+        pinkOut[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362; pinkOut[i] *= 0.11; b6 = white * 0.115926;
       }
       const pinkSource = ctx.createBufferSource();
       pinkSource.buffer = pinkBuffer;
       pinkSource.loop = true;
-
-      const pinkFilter = ctx.createBiquadFilter();
-      pinkFilter.type = "lowpass";
-      pinkFilter.frequency.value = 2000;
-      pinkSource.connect(pinkFilter);
-
-      // Modulate Pink Noise for "Breathing" Environment
-      const pinkLFO = ctx.createOscillator();
-      pinkLFO.type = "sine";
-      pinkLFO.frequency.value = 0.15; // Slow movement
-      const pinkLFOGain = ctx.createGain();
-      pinkLFOGain.gain.value = 0.2;
-      pinkLFO.connect(pinkLFOGain);
-
-      const pinkGain = ctx.createGain();
-      pinkGain.gain.value = 0.3;
-      pinkLFOGain.connect(pinkGain.gain);
-
-      pinkFilter.connect(pinkGain);
-      pinkGain.connect(masterGain);
+      const pFilter = ctx.createBiquadFilter();
+      pFilter.type = "lowpass";
+      pFilter.frequency.value = profile === "NATURE" ? 4500 : 2500;
+      const pLFO = ctx.createOscillator();
+      pLFO.type = "sine";
+      pLFO.frequency.value = profile === "CITY" ? 0.5 : 0.1;
+      const pLFOGain = ctx.createGain();
+      pLFOGain.gain.value = 0.25;
+      pLFO.connect(pLFOGain);
+      const pGain = ctx.createGain();
+      pGain.gain.value = 0.4;
+      pLFOGain.connect(pGain.gain);
+      pinkSource.connect(pFilter);
+      pFilter.connect(pGain);
+      pGain.connect(masterGain);
       pinkSource.start();
-      pinkLFO.start();
-      nodes.push(pinkSource, pinkFilter, pinkGain, pinkLFO, pinkLFOGain);
+      pLFO.start();
+      nodes.push(pinkSource, pFilter, pGain, pLFO, pLFOGain);
 
-      // 3. TEXTURE: CRACKLE (Vinyl/Dust)
-      const crackleBuffer = ctx.createBuffer(1, 2 * ctx.sampleRate, ctx.sampleRate);
-      const crackleOut = crackleBuffer.getChannelData(0);
-      for (let i = 0; i < crackleBuffer.length; i++) {
-        // Poisson-like distribution for clicks
-        if (Math.random() > 0.9995) {
-          crackleOut[i] = (Math.random() * 2 - 1) * 0.5;
-        } else {
-          crackleOut[i] = 0;
-        }
+      // 3. TEXTURE LAYER (Click/Dust/Rustle)
+      const textBuffer = ctx.createBuffer(1, 2 * ctx.sampleRate, ctx.sampleRate);
+      const textOut = textBuffer.getChannelData(0);
+      const d = profile === "NATURE" ? 0.998 : (profile === "CAFE" ? 0.9996 : 0.9998);
+      for (let i = 0; i < textBuffer.length; i++) {
+        if (Math.random() > d) textOut[i] = (Math.random() * 2 - 1) * 0.4;
+        else textOut[i] = 0;
       }
-      const crackleSource = ctx.createBufferSource();
-      crackleSource.buffer = crackleBuffer;
-      crackleSource.loop = true;
+      const tSource = ctx.createBufferSource();
+      tSource.buffer = textBuffer;
+      tSource.loop = true;
+      const tFilter = ctx.createBiquadFilter();
+      tFilter.type = profile === "NATURE" ? "lowpass" : "bandpass";
+      tFilter.frequency.value = profile === "NATURE" ? 2800 : 5500;
+      const tGain = ctx.createGain();
+      tGain.gain.value = 0.15;
+      tSource.connect(tFilter);
+      tFilter.connect(tGain);
+      tGain.connect(masterGain);
+      tSource.start();
+      nodes.push(tSource, tFilter, tGain);
 
-      const crackleFilter = ctx.createBiquadFilter();
-      crackleFilter.type = "bandpass";
-      crackleFilter.frequency.value = 5000;
-      crackleFilter.Q.value = 1.0;
-      crackleSource.connect(crackleFilter);
-
-      const crackleGain = ctx.createGain();
-      crackleGain.gain.value = 0.15;
-      crackleFilter.connect(crackleGain);
-      crackleGain.connect(masterGain);
-      crackleSource.start();
-      nodes.push(crackleSource, crackleFilter, crackleGain);
-
-      // 4. "LIFE" PULSES (Random distant events)
-      const schedulePulse = () => {
+      // 4. THEMATIC LIFE PULSES
+      const spawn = () => {
         if (syntheticNodesRef.current.length === 0) return;
-
-        const osc = ctx.createOscillator();
+        const o = ctx.createOscillator();
         const g = ctx.createGain();
-        osc.type = "sine";
-        // Random frequency for different "clinks/taps"
-        osc.frequency.value = 200 + Math.random() * 800;
-
         const now = ctx.currentTime;
+        let f = 400, gv = 0.015, dur = 0.5;
+        switch (profile) {
+          case "CITY": o.type = "sawtooth"; f = 200 + Math.random() * 400; dur = 2.0;
+            o.frequency.exponentialRampToValueAtTime(f * 1.05, now + dur); break;
+          case "CAFE": o.type = "triangle"; f = 2200 + Math.random() * 1000; gv = 0.005; dur = 0.1; break;
+          case "OFFICE": o.type = "sine"; f = 1000 + Math.random() * 500; gv = 0.006; dur = 0.05; break;
+          case "NATURE": o.type = "sine"; f = 1500 + Math.random() * 2500; gv = 0.004; dur = 0.3;
+            o.frequency.exponentialRampToValueAtTime(f * 0.8, now + dur); break;
+        }
         g.gain.setValueAtTime(0, now);
-        g.gain.linearRampToValueAtTime(0.02 * Math.random(), now + 0.05);
-        g.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
-
-        osc.connect(g);
-        g.connect(masterGain);
-        osc.start(now);
-        osc.stop(now + 1);
-
-        // Clean up these transient nodes
-        setTimeout(() => {
-          osc.disconnect();
-          g.disconnect();
-        }, 1500);
-
-        // Schedule next pulse randomly
-        const nextTime = 3000 + Math.random() * 7000;
-        setTimeout(schedulePulse, nextTime);
+        g.gain.linearRampToValueAtTime(gv, now + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+        o.connect(g); g.connect(masterGain);
+        o.start(now); o.stop(now + dur + 0.1);
+        const next = (profile === "OFFICE" ? 500 : 4000) + Math.random() * 9000;
+        setTimeout(spawn, next);
       };
-      setTimeout(schedulePulse, 2000);
-
-      // 5. MAINS HUM (Subtle body)
-      const hum = ctx.createOscillator();
-      hum.type = "sine";
-      hum.frequency.value = 50;
-      const humGain = ctx.createGain();
-      humGain.gain.value = 0.03;
-      hum.connect(humGain);
-      humGain.connect(masterGain);
-      hum.start();
-      nodes.push(hum, humGain);
+      setTimeout(spawn, 2000);
 
       syntheticNodesRef.current = nodes;
-
-      // Master Fade In
-      masterGain.gain.value = 0;
+      masterGain.gain.setValueAtTime(0, ctx.currentTime);
       masterGain.gain.linearRampToValueAtTime(ambienceVolume, ctx.currentTime + 3);
-
-    } catch (e) {
-      console.error("Synthetic Ambience Init Failed", e);
-    }
+    } catch (e) { console.error(e); }
   };
 
   const stopSyntheticAmbience = () => {
-    if (syntheticNodesRef.current.length > 0) {
-      syntheticNodesRef.current.forEach(node => {
-        try {
-          if (node instanceof AudioBufferSourceNode || node instanceof OscillatorNode) {
-            node.stop();
-          }
-          node.disconnect();
-        } catch (e) { }
-      });
-      syntheticNodesRef.current = [];
-    }
+    syntheticNodesRef.current.forEach(n => {
+      try { if (n instanceof AudioBufferSourceNode || n instanceof OscillatorNode) n.stop(); n.disconnect(); } catch (e) { }
+    });
+    syntheticNodesRef.current = [];
   };
 
-  // --- DIALOGUE PROCESSING: REVERB & COMPRESSION ---
+  // --- DIALOGUE SPATIALIZATION ---
   const setupSpeechProcessing = (audioElement: HTMLAudioElement) => {
     try {
       if (!syntheticCtxRef.current) {
@@ -573,342 +269,118 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
       }
       const ctx = syntheticCtxRef.current!;
       const source = ctx.createMediaElementSource(audioElement);
+      const profile = getEnvironmentProfile(topic, ambientKeywords);
 
-      // 1. Dynamics Compressor (Make dialogue consistent)
-      const compressor = ctx.createDynamicsCompressor();
-      compressor.threshold.setValueAtTime(-24, ctx.currentTime);
-      compressor.knee.setValueAtTime(30, ctx.currentTime);
-      compressor.ratio.setValueAtTime(4, ctx.currentTime);
-      compressor.attack.setValueAtTime(0.003, ctx.currentTime);
-      compressor.release.setValueAtTime(0.25, ctx.currentTime);
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.setValueAtTime(-18, ctx.currentTime);
+      comp.ratio.setValueAtTime(4, ctx.currentTime);
 
-      // 2. Algorithmic Reverb simulation (Small Room)
-      // Since setting up a Convolver with a generated buffer is complex inside a component,
-      // we use a series of delay lines (feedback comb filters) for a simple but effective reverb.
-      const reverbGain = ctx.createGain();
-      reverbGain.gain.value = 0.12; // Mix level
+      const rGain = ctx.createGain();
+      rGain.gain.value = profile === "CAFE" ? 0.22 : (profile === "ROOM" ? 0.16 : 0.06);
 
-      const delay = ctx.createDelay();
-      delay.delayTime.value = 0.035; // 35ms early reflection
+      const dly = ctx.createDelay();
+      dly.delayTime.value = profile === "CAFE" ? 0.045 : 0.032;
+      const fb = ctx.createGain(); fb.gain.value = 0.38;
+      const f = ctx.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = profile === "OFFICE" ? 2200 : 1300;
 
-      const feedback = ctx.createGain();
-      feedback.gain.value = 0.3; // Tail length
-
-      const filter = ctx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.value = 1500; // Damped reverb
-
-      source.connect(compressor);
-      compressor.connect(ctx.destination); // Dry path
-
-      // Wet path
-      compressor.connect(delay);
-      delay.connect(filter);
-      filter.connect(feedback);
-      feedback.connect(delay); // Feedback loop
-      filter.connect(reverbGain);
-      reverbGain.connect(ctx.destination);
-
-      return { compressor, reverbGain, source };
-    } catch (e) {
-      console.warn("Speech processing setup failed:", e);
-      return null;
-    }
+      source.connect(comp); comp.connect(ctx.destination);
+      comp.connect(dly); dly.connect(f); f.connect(fb); fb.connect(dly); f.connect(rGain); rGain.connect(ctx.destination);
+      return { comp, rGain, source };
+    } catch (e) { return null; }
   };
 
-  // --- HTML5 AUDIO HANDLERS ---
-  const onTimeUpdate = () => {
-    if (speechRef.current) {
-      setCurrentTime(speechRef.current.currentTime);
-    }
-  };
-
+  const onTimeUpdate = () => { if (speechRef.current) setCurrentTime(speechRef.current.currentTime); };
   const onLoadedMetadata = () => {
     if (speechRef.current) {
       setDuration(speechRef.current.duration);
       speechRef.current.playbackRate = playbackRate;
-
-      // Setup processing on load
       setupSpeechProcessing(speechRef.current);
     }
   };
+  const onEnded = () => { setIsPlaying(false); setCurrentTime(0); fadeOut(); };
 
-  const onEnded = () => {
-    setIsPlaying(false);
-    setCurrentTime(0);
-    fadeOutAmbience();
-  };
-
-  const onAmbienceError = (e: React.SyntheticEvent<HTMLAudioElement, Event>) => {
-    const target = e.currentTarget;
-    const error = target.error;
-
-    if (error) {
-      const errorMap: Record<number, string> = {
-        1: 'MEDIA_ERR_ABORTED',
-        2: 'MEDIA_ERR_NETWORK',
-        3: 'MEDIA_ERR_DECODE',
-        4: 'MEDIA_ERR_SRC_NOT_SUPPORTED'
-      };
-
-      console.warn(`[Freesound] ${errorMap[error.code] || 'UNKNOWN'} (Code ${error.code})`);
-    }
-
-    console.warn('[Freesound] Switching to synthetic ambience fallback.');
-
-    // Automatically switch to fallback
-    setUsingSyntheticAmbience(true);
-  };
-
-  // --- MIXER LOGIC ---
-
-  const fadeOutAmbience = () => {
-    // HTML5 Fade Out
-    if (ambienceRef.current && !usingSyntheticAmbience) {
-      const fade = setInterval(() => {
-        if (!ambienceRef.current) { clearInterval(fade); return; }
-        if (ambienceRef.current.volume > 0.05) {
-          ambienceRef.current.volume -= 0.05;
-        } else {
-          ambienceRef.current.volume = 0;
-          ambienceRef.current.pause();
-          clearInterval(fade);
-        }
-      }, 50);
-    }
-
-    // Synthetic Fade Out
-    if (usingSyntheticAmbience && syntheticGainRef.current && syntheticCtxRef.current) {
+  const fadeOut = () => {
+    if (syntheticGainRef.current && syntheticCtxRef.current) {
       const now = syntheticCtxRef.current.currentTime;
       syntheticGainRef.current.gain.cancelScheduledValues(now);
-      syntheticGainRef.current.gain.setValueAtTime(syntheticGainRef.current.gain.value, now);
-      syntheticGainRef.current.gain.linearRampToValueAtTime(0, now + 1.5);
-      setTimeout(() => stopSyntheticAmbience(), 1600);
+      syntheticGainRef.current.gain.linearRampToValueAtTime(0, now + 2);
+      setTimeout(() => stopSyntheticAmbience(), 2100);
     }
-  };
-
-  const fadeInAmbience = () => {
-    // Synthetic
-    if (usingSyntheticAmbience) {
-      initSyntheticAmbience();
-      return;
-    }
-
-    // HTML5
-    if (!ambienceRef.current) return;
-    ambienceRef.current.volume = 0;
-    const playPromise = ambienceRef.current.play();
-
-    if (playPromise !== undefined) {
-      playPromise.catch(error => {
-        console.warn("Ambience auto-play prevented by browser policy.");
-      });
-    }
-
-    const fade = setInterval(() => {
-      if (!ambienceRef.current) { clearInterval(fade); return; }
-      if (ambienceRef.current.volume < ambienceVolume) {
-        const nextVol = ambienceRef.current.volume + 0.05;
-        ambienceRef.current.volume = Math.min(nextVol, ambienceVolume);
-      } else {
-        clearInterval(fade);
-      }
-    }, 50);
   };
 
   const togglePlay = () => {
     if (!speechRef.current) return;
-
-    if (speechRef.current.playbackRate !== playbackRate) {
-      speechRef.current.playbackRate = playbackRate;
-    }
-
-    if (isPlaying) {
-      speechRef.current.pause();
-      fadeOutAmbience();
-    } else {
-      speechRef.current.play();
-      if (!usingSyntheticAmbience && ambienceRef.current) {
-        ambienceRef.current.currentTime = 0;
-      }
-      fadeInAmbience();
-    }
+    if (isPlaying) { speechRef.current.pause(); fadeOut(); }
+    else { speechRef.current.play(); initSyntheticAmbience(); }
     setIsPlaying(!isPlaying);
   };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!speechRef.current) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const percent = x / rect.width;
-    const newTime = percent * duration;
-
-    speechRef.current.currentTime = newTime;
-    setCurrentTime(newTime);
-  };
-
-  const cycleSpeed = () => {
-    const currentIndex = SPEEDS.indexOf(playbackRate);
-    let matchIndex = currentIndex;
-    if (currentIndex === -1) {
-      matchIndex = SPEEDS.findIndex(s => Math.abs(s - playbackRate) < 0.01);
-      if (matchIndex === -1) matchIndex = 1;
-    }
-    const nextIndex = (matchIndex + 1) % SPEEDS.length;
-    setPlaybackRate(SPEEDS[nextIndex]);
+    const percent = (e.clientX - rect.left) / rect.width;
+    const nt = percent * duration;
+    speechRef.current.currentTime = nt; setCurrentTime(nt);
   };
 
   const reset = () => {
     if (!speechRef.current) return;
-    speechRef.current.currentTime = 0;
-    setCurrentTime(0);
-    speechRef.current.play();
-
-    if (usingSyntheticAmbience) {
-      stopSyntheticAmbience();
-      initSyntheticAmbience();
-    } else if (ambienceRef.current) {
-      ambienceRef.current.currentTime = 0;
-      ambienceRef.current.play();
-      ambienceRef.current.volume = ambienceVolume;
-    }
-
+    speechRef.current.currentTime = 0; setCurrentTime(0);
+    speechRef.current.play(); stopSyntheticAmbience(); initSyntheticAmbience();
     setIsPlaying(true);
   };
 
-  const formatTime = (time: number) => {
-    if (isNaN(time)) return "00:00";
-    const minutes = Math.floor(time / 60);
-    const seconds = Math.floor(time % 60);
-    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  const formatTime = (t: number) => {
+    if (isNaN(t)) return "00:00";
+    const m = Math.floor(t / 60); const s = Math.floor(t % 60);
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  if (error) {
-    return (
-      <div className="w-full h-24 border border-red-900 bg-red-950/10 flex items-center justify-center font-mono text-red-500 text-xs">
-        FALLO_SISTEMA // {error}
-      </div>
-    )
-  }
+  if (error) return (
+    <div className="w-full h-24 border border-red-900 bg-red-950/10 flex items-center justify-center font-mono text-red-500 text-xs uppercase">
+      Falló Sistema // {error}
+    </div>
+  );
+
+  const env = getEnvironmentProfile(topic, ambientKeywords);
 
   return (
     <div className="border border-zinc-800 bg-black relative">
+      {speechUrl && <audio ref={speechRef} src={speechUrl} onTimeUpdate={onTimeUpdate} onLoadedMetadata={onLoadedMetadata} onEnded={onEnded} onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} />}
 
-      {/* CHANNEL 1: SPEECH (Hidden) */}
-      {speechUrl && (
-        <audio
-          ref={speechRef}
-          src={speechUrl}
-          onTimeUpdate={onTimeUpdate}
-          onLoadedMetadata={onLoadedMetadata}
-          onEnded={onEnded}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-        />
-      )}
-
-      {/* CHANNEL 2: AMBIENCE (Hidden, Loop) */}
-      {ambienceUrl && !usingSyntheticAmbience && (
-        <audio
-          ref={ambienceRef}
-          src={ambienceUrl}
-          key={ambienceUrl} /* Forces re-mount if URL changes */
-          loop
-          preload="auto"
-          crossOrigin="anonymous"
-          referrerPolicy="origin"
-          onError={onAmbienceError}
-        />
-      )}
-
-      {/* Main Grid Interface */}
       <div className="grid grid-cols-[1fr_auto] border-b border-zinc-800">
-        {/* Timeline & Info */}
         <div className="flex flex-col">
-          {/* Timeline */}
-          <div
-            className="h-12 bg-zinc-950 relative cursor-pointer group border-b border-zinc-800 overflow-hidden"
-            onClick={handleSeek}
-          >
-            {/* Progress Bar */}
-            <div
-              className="h-full bg-white absolute top-0 left-0 pointer-events-none transition-all duration-75 linear mix-blend-difference"
-              style={{ width: `${(currentTime / duration) * 100}%` }}
-            />
-
-            {/* Time Display Overlay */}
+          <div className="h-12 bg-zinc-950 relative cursor-pointer group border-b border-zinc-800 overflow-hidden" onClick={handleSeek}>
+            <div className="h-full bg-white absolute top-0 left-0 pointer-events-none transition-all duration-75 linear mix-blend-difference" style={{ width: `${(currentTime / duration) * 100}%` }} />
             <div className="absolute inset-0 flex items-center justify-between px-4 pointer-events-none">
               <span className="font-mono text-xs text-zinc-500 group-hover:text-white transition-colors">{formatTime(currentTime)}</span>
               <span className="font-mono text-xs text-zinc-500 group-hover:text-white transition-colors">{formatTime(duration)}</span>
             </div>
-
-            {/* Scanline effect */}
-            <div className="absolute inset-0 bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhYWGMYAEYB8RmROaABADeOQ8CXl/xfgAAAABJRU5ErkJggg==')] opacity-20 pointer-events-none"></div>
           </div>
 
-          {/* Meta Data Row */}
           <div className="flex items-center justify-between px-4 py-3 bg-black">
             <div className="flex items-center gap-2">
-              {isLoadingAmbience ? (
-                <Loader2 size={14} className="text-zinc-500 animate-spin" />
-              ) : usingSyntheticAmbience ? (
-                <Sparkles size={14} className="text-zinc-300 animate-pulse" />
-              ) : (
-                <Activity size={14} className={`text-zinc-500 ${isPlaying ? 'animate-pulse text-zinc-200' : ''}`} />
-              )}
-
-              <div className="flex flex-col">
-                <span className={`font-mono text-[10px] uppercase tracking-widest transition-colors ${isLoadingAmbience ? 'text-zinc-400 animate-pulse' :
-                    usingSyntheticAmbience ? 'text-zinc-300' : 'text-zinc-500'
-                  }`}>
-                  {isLoadingAmbience
-                    ? 'BUSCANDO FREESOUND...'
-                    : usingSyntheticAmbience
-                      ? 'RUIDO SALA (SINTÉTICO)'
-                      : (isPlaying ? 'FREESOUND ACTIVO' : 'SISTEMA STANDBY')}
-                </span>
-                {!usingSyntheticAmbience && !isLoadingAmbience && ambienceName && !hideTrackInfo && (
-                  <span className="font-mono text-[8px] uppercase text-zinc-700 max-w-[150px] truncate hidden sm:block">
-                    SRC: {ambienceName}
-                  </span>
-                )}
-              </div>
+              {isPlaying ? <Sparkles size={14} className="text-zinc-300 animate-pulse" /> : <Activity size={14} className="text-zinc-500" />}
+              <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-300">Ambiente: {env}</span>
             </div>
             <div className="flex items-center gap-4">
-              {/* Mixer Control (Ambience Volume) */}
               <div className="flex items-center gap-2 group">
-                {usingSyntheticAmbience ? (
-                  <Radio size={12} className="text-zinc-300" />
-                ) : (
-                  <Waves size={12} className={ambienceVolume > 0 ? "text-zinc-300" : "text-zinc-700"} />
-                )}
-                <input
-                  type="range"
-                  min="0"
-                  max="1.0"
-                  step="0.05"
-                  value={ambienceVolume}
-                  onChange={(e) => setAmbienceVolume(parseFloat(e.target.value))}
-                  className={`w-16 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:h-2 
-                                    ${usingSyntheticAmbience ? '[&::-webkit-slider-thumb]:bg-white' : '[&::-webkit-slider-thumb]:bg-white'}
-                                `}
-                  title="Volumen Ambiente"
-                />
+                <Radio size={12} className="text-zinc-300" />
+                <input type="range" min="0" max="1.0" step="0.05" value={ambienceVolume} onChange={(e) => setAmbienceVolume(parseFloat(e.target.value))} className="w-16 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer" title="Volumen Ambiente" />
               </div>
-              <div className="w-[1px] h-3 bg-zinc-800"></div>
-              <div className="flex items-center gap-2 font-mono text-[10px] text-zinc-700">
-                <span className="text-white font-bold">VEL: {playbackRate}x</span>
-              </div>
+              <div className="w-[1px] h-3 bg-zinc-800" />
+              <span className="font-mono text-[10px] text-white font-bold">{playbackRate}x</span>
             </div>
           </div>
         </div>
-
-        {/* Side Controls (Square) */}
         <div className="flex flex-col border-l border-zinc-800 w-16">
           <button
-            onClick={cycleSpeed}
+            onClick={() => {
+              const ci = SPEEDS.indexOf(playbackRate);
+              const ni = (ci + 1) % SPEEDS.length;
+              setPlaybackRate(SPEEDS[ni]);
+            }}
             className="flex-1 border-b border-zinc-800 flex flex-col items-center justify-center hover:bg-white hover:text-black transition-colors group"
-            title="Velocidad de reproducción"
           >
             <span className="font-mono text-[10px] font-bold block">{playbackRate}x</span>
             <span className="text-[8px] uppercase text-zinc-600 group-hover:text-black">Vel</span>
@@ -916,26 +388,14 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
         </div>
       </div>
 
-      {/* Main Transport Controls */}
       <div className="grid grid-cols-2">
-        <button
-          onClick={togglePlay}
-          disabled={!speechUrl}
-          className="h-16 flex items-center justify-center gap-2 border-r border-zinc-800 hover:bg-white hover:text-black transition-colors disabled:opacity-50 disabled:hover:bg-black disabled:hover:text-white group"
-        >
+        <button onClick={togglePlay} disabled={!speechUrl} className="h-16 flex items-center justify-center gap-2 border-r border-zinc-800 hover:bg-white hover:text-black transition-colors disabled:opacity-50 group">
           {isPlaying ? <Pause size={20} className="fill-current" /> : <Play size={20} className="fill-current" />}
-          <span className="font-display font-bold uppercase tracking-wider text-sm">
-            {isPlaying ? 'Parar' : 'Repr.'}
-          </span>
+          <span className="font-display font-bold uppercase tracking-wider text-sm">{isPlaying ? 'Parar' : 'Repr.'}</span>
         </button>
-
-        <button
-          onClick={reset}
-          disabled={!speechUrl}
-          className="h-16 flex items-center justify-center gap-2 hover:bg-white hover:text-black transition-colors disabled:opacity-50 disabled:hover:bg-black disabled:hover:text-white text-zinc-400 hover:text-black"
-        >
-          <RotateCcw size={18} />
-          <span className="font-mono text-xs uppercase tracking-widest">Inicio</span>
+        <button onClick={reset} disabled={!speechUrl} className="h-16 flex items-center justify-center gap-2 hover:bg-white hover:text-black transition-colors disabled:opacity-50 group">
+          <RotateCcw size={20} className="group-hover:rotate-[-45deg] transition-transform" />
+          <span className="font-display font-bold uppercase tracking-wider text-sm">Reset</span>
         </button>
       </div>
     </div>

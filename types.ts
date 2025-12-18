@@ -66,22 +66,22 @@ export interface ExerciseOption {
 export interface Exercise {
   id: string;
   type: 'multiple_choice' | 'true_false' | 'ordering' | 'classification' | 'cloze';
-  question: string; 
-  
+  question: string;
+
   // Opciones simples (Multiple Choice, Single Answer)
   options?: ExerciseOption[];
-  
+
   // Estructuras de Tabla / Lista (Classification, True/False List, Matching)
-  rows?: ExerciseOption[]; 
+  rows?: ExerciseOption[];
   columns?: ExerciseOption[];
 
   // Estructuras de Texto con Huecos (Cloze)
-  textWithGaps?: string; 
-  gapOptions?: Record<string, ExerciseOption[]>; 
+  textWithGaps?: string;
+  gapOptions?: Record<string, ExerciseOption[]>;
 
   // Respuesta Polimórfica:
-  correctAnswer: string | string[] | Record<string, string>; 
-  
+  correctAnswer: string | string[] | Record<string, string>;
+
   explanation: string;
 }
 
@@ -89,12 +89,12 @@ export interface LessonPlan {
   title: string;
   situationDescription: string;
   communicativeFunction: string;
-  freesoundSearchQuery?: string; // Keywords in English for ambient noise
+  ambientKeywords?: string; // Keywords in English for ambient noise
   characters: Character[];
   dialogue: DialogueLine[];
   exercises: {
     comprehension: Exercise[];
-    vocabulary: Exercise[]; 
+    vocabulary: Exercise[];
   };
 }
 
