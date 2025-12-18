@@ -9,11 +9,23 @@ const getApiKey = (): string => {
   return key;
 };
 
-const GENERATION_MODEL = "gemini-2.0-flash";
-const AUDIO_MODEL = "gemini-2.0-flash-exp-tts";
+const GENERATION_MODEL = "gemini-2.5-flash";
+const AUDIO_MODEL = "gemini-2.5-flash-preview-tts";
+
+let lastKey = "";
+let aiInstance: GoogleGenAI | null = null;
+
+const getAi = () => {
+  const key = getApiKey();
+  if (key !== lastKey || !aiInstance) {
+    lastKey = key;
+    aiInstance = new GoogleGenAI({ apiKey: key });
+  }
+  return aiInstance;
+};
 
 // --- HELPERS ---
-async function withRetry<T>(fn: () => Promise<T>, retries = 2, delay = 1000): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 2, delay = 500): Promise<T> {
   try {
     return await fn();
   } catch (error: any) {
@@ -154,7 +166,7 @@ export const generateLessonPlan = async (
 ): Promise<LessonPlan> => {
 
   // DYNAMIC INSTANTIATION WITH STORED KEY
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const ai = getAi();
 
   let profileInstruction = "";
   let finalTopic = topic;
@@ -246,6 +258,7 @@ export const generateLessonPlan = async (
   CONTEXT: ${profileInstruction}
   RULES: ${constraint}
   EXERCISES: ${exerciseLogic}
+  LENGTH: STICK TO ${length}.
   AMBIENT: Generate "ambientKeywords" (3 keywords).
 
   Structure: ${jsonStructure}
@@ -256,9 +269,9 @@ export const generateLessonPlan = async (
       model: GENERATION_MODEL,
       contents: prompt,
       config: {
-        systemInstruction: "Eres experto lingüista. Genera JSON válido.",
+        systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
         responseMimeType: "application/json",
-        temperature: 0.7,
+        temperature: 0.0,
       },
     }));
 
@@ -285,7 +298,7 @@ export const generateAudio = async (
   accent: Accent
 ): Promise<string> => {
   // DYNAMIC INSTANTIATION WITH STORED KEY
-  const ai = new GoogleGenAI({ apiKey: getApiKey() });
+  const ai = getAi();
 
   if (!dialogue || dialogue.length === 0) return "";
 
@@ -366,11 +379,11 @@ export const generateAudio = async (
   try {
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
       model: AUDIO_MODEL,
-      // CORRECT STRUCTURE: Array of objects with parts
       contents: [{ parts: [{ text: textPrompt }] }],
       config: {
         responseModalities: ['AUDIO'],
-        speechConfig: speechConfig
+        speechConfig: speechConfig,
+        temperature: 0.0
       }
     }));
 
