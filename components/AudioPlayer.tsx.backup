@@ -188,7 +188,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
   
   // Settings & State
   const [ambienceVolume, setAmbienceVolume] = useState(0.40);
-  const [usingSyntheticAmbience, setUsingSyntheticAmbience] = useState(true); // Always use synthetic - Freesound removed
+  const [usingSyntheticAmbience, setUsingSyntheticAmbience] = useState(false);
   const [ambienceUrl, setAmbienceUrl] = useState<string | null>(null);
   const [isLoadingAmbience, setIsLoadingAmbience] = useState(false);
   const [ambienceName, setAmbienceName] = useState<string>("");
@@ -350,7 +350,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
         }
     };
 
-    // fetchAmbience(); // DISABLED - Using only synthetic ambience
+    fetchAmbience();
 
     return () => { isMounted = false; };
   }, [topic, explicitQuery]);
@@ -377,10 +377,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ speechSrc, recommendedSpeed =
       };
   }, []);
 
-  // Freesound diagnostic disabled - using only synthetic ambience
-  // useEffect(() => {
-  //     testFreesoundApi();
-  // }, []);
+  // Run diagnostic on mount to test Freesound API and CDN
+  useEffect(() => {
+      testFreesoundApi();
+  }, []);
 
   // --- SYNTHETIC AMBIENCE GENERATOR: "WARM ROOM TONE" (Not Sea/Wind) ---
   const initSyntheticAmbience = () => {
