@@ -276,7 +276,7 @@ const App: React.FC = () => {
           <div className="w-full md:w-1/2 border-r border-zinc-800 p-8 md:p-12 flex flex-col justify-between relative bg-[url('https://grainy-gradients.vercel.app/noise.svg')] bg-opacity-20 hidden md:flex">
               <div className="relative z-10">
                 <div className="mb-8">
-                  <img src="/escucha-logo.svg" alt="EscuchaLAB" className="w-full max-w-[620px] drop-shadow-[0_0_40px_rgba(255,255,255,0.08)]" />
+                  <img src="/escucha-logo.png" alt="EscuchaLAB" className="w-full max-w-[620px] drop-shadow-[0_0_40px_rgba(255,255,255,0.08)]" />
                 </div>
                 <p className="font-mono text-sm text-zinc-400 max-w-md leading-relaxed uppercase">
                     Sistema avanzado de inmersión lingüística generado por inteligencia artificial.
@@ -299,7 +299,7 @@ const App: React.FC = () => {
               <div className="min-h-full flex flex-col">
                   {/* Mobile Header */}
                   <div className="md:hidden p-8 pb-0">
-                      <img src="/escucha-logo.svg" alt="EscuchaLAB" className="w-56" />
+                      <img src="/escucha-logo.png" alt="EscuchaLAB" className="w-56" />
                   </div>
 
                   <div className="flex-1 p-8 md:p-12 space-y-10">
