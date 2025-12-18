@@ -9,8 +9,8 @@ const getApiKey = (): string => {
   return key;
 };
 
-const GENERATION_MODEL = "gemini-2.5-flash";
-const AUDIO_MODEL = "gemini-2.5-flash-preview-tts";
+const GENERATION_MODEL = "gemini-2.0-flash";
+const AUDIO_MODEL = "gemini-2.0-flash-exp-tts";
 
 // --- HELPERS ---
 async function withRetry<T>(fn: () => Promise<T>, retries = 2, delay = 1000): Promise<T> {
@@ -241,15 +241,14 @@ export const generateLessonPlan = async (
   const lengthInstruction = (level === Level.Intro) ? "Longitud: Natural y fluida, ignorando límites estrictos de turnos si corta la naturalidad." : `Longitud: ${length}.`;
 
   const prompt = `
-  Genera lección escucha español (JSON).
-  Modo: ${mode}. Nivel: ${level}. Tema: ${finalTopic}. Formato: ${textType}. Hablantes: ${numSpeakers}. ${lengthInstruction}
+  JSON Lesson (Spanish). Modo: ${mode}. Nivel: ${level}. Tema: ${finalTopic}. Accent: ${accent}.
   
-  PERFIL: ${profileInstruction}
-  RESTRICCIONES NIVEL: ${constraint}
-  EJERCICIOS: ${exerciseLogic}
-  AMBIENTE: Genera "ambientKeywords" en inglés (3-5 palabras clave).
+  CONTEXT: ${profileInstruction}
+  RULES: ${constraint}
+  EXERCISES: ${exerciseLogic}
+  AMBIENT: Generate "ambientKeywords" (3 keywords).
 
-  JSON Structure: ${jsonStructure}
+  Structure: ${jsonStructure}
   `;
 
   try {
