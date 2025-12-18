@@ -1,0 +1,12 @@
+<svg width="1600" height="800" viewBox="0 0 1600 800" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">EscuchaLAB logo</title>
+  <desc id="desc">Stylized flask with heartbeat play symbol and Escucha LAB logotype</desc>
+  <g stroke="white" stroke-width="32" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <path d="M320 96h224v132l122 286h-140l-56-96-88 96H240l128-286z"/>
+    <polyline points="176,450 256,450 288,364 312,530 356,270 392,510 448,270 520,450 632,450"/>
+  </g>
+  <polygon points="348,360 456,432 348,504" fill="white"/>
+  <text x="800" y="240" fill="white" font-family="'Bebas Neue','Space Grotesk','Inter','Helvetica Neue',Arial,sans-serif" font-size="140" letter-spacing="2">ESCUCHA</text>
+  <text x="800" y="450" fill="white" font-family="'Bebas Neue','Space Grotesk','Inter','Helvetica Neue',Arial,sans-serif" font-size="250" letter-spacing="2">LAB</text>
+  <rect x="800" y="590" width="760" height="30" fill="white" rx="14"/>
+</svg>
