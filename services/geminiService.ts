@@ -318,24 +318,27 @@ export const generateAudio = async (
     const s1 = sortedSpeakers[0];
     const s2 = sortedSpeakers[1];
 
-    // Internal mapping to Speaker1/Speaker2 (required by Gemini TTS API)
-    const mapToInternal = (original: string) => {
-      // Robust checking for substring matches
-      if (original.includes(s1) || s1.includes(original)) return "Speaker1";
-      if (original.includes(s2) || s2.includes(original)) return "Speaker2";
-      return "Speaker1"; // Fallback
-    };
-
     const getVoice = (name: string, defaultVoice: string) => {
       const char = characters.find(c => c.name === name || name.includes(c.name));
       return char?.gender === 'Female' ? 'Kore' : (char?.gender === 'Male' ? 'Fenrir' : defaultVoice);
     };
 
+    // Use actual speaker names directly (not internal mapping)
     speechConfig = {
       multiSpeakerVoiceConfig: {
         speakerVoiceConfigs: [
-          { speaker: "Speaker1", voiceConfig: { prebuiltVoiceConfig: { voiceName: getVoice(s1, 'Puck') } } },
-          { speaker: "Speaker2", voiceConfig: { prebuiltVoiceConfig: { voiceName: getVoice(s2, 'Kore') } } }
+          {
+            speaker: s1,
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: getVoice(s1, 'Fenrir') }
+            }
+          },
+          {
+            speaker: s2,
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: getVoice(s2, 'Kore') }
+            }
+          }
         ]
       }
     };
@@ -345,7 +348,7 @@ export const generateAudio = async (
       .map(d => {
         const cleanText = sanitizeForTTS(d.text);
         if (!cleanText) return null;
-        return `${mapToInternal(d.speaker)}: ${cleanText}`;
+        return `${d.speaker}: ${cleanText}`;
       })
       .filter(Boolean) // Remove nulls
       .join('\n');
@@ -383,8 +386,7 @@ export const generateAudio = async (
       contents: [{ parts: [{ text: textPrompt }] }],
       config: {
         responseModalities: [Modality.AUDIO],
-        speechConfig: speechConfig,
-        temperature: 0.0
+        speechConfig: speechConfig
       }
     }));
 
