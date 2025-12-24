@@ -318,12 +318,12 @@ export const generateAudio = async (
     const s1 = sortedSpeakers[0];
     const s2 = sortedSpeakers[1];
 
-    // Internal mapping to SpeakerA/SpeakerB for robust config matching
+    // Internal mapping to Speaker1/Speaker2 (required by Gemini TTS API)
     const mapToInternal = (original: string) => {
       // Robust checking for substring matches
-      if (original.includes(s1) || s1.includes(original)) return "SpeakerA";
-      if (original.includes(s2) || s2.includes(original)) return "SpeakerB";
-      return "SpeakerA"; // Fallback
+      if (original.includes(s1) || s1.includes(original)) return "Speaker1";
+      if (original.includes(s2) || s2.includes(original)) return "Speaker2";
+      return "Speaker1"; // Fallback
     };
 
     const getVoice = (name: string, defaultVoice: string) => {
@@ -334,8 +334,8 @@ export const generateAudio = async (
     speechConfig = {
       multiSpeakerVoiceConfig: {
         speakerVoiceConfigs: [
-          { speaker: "SpeakerA", voiceConfig: { prebuiltVoiceConfig: { voiceName: getVoice(s1, 'Puck') } } },
-          { speaker: "SpeakerB", voiceConfig: { prebuiltVoiceConfig: { voiceName: getVoice(s2, 'Kore') } } }
+          { speaker: "Speaker1", voiceConfig: { prebuiltVoiceConfig: { voiceName: getVoice(s1, 'Puck') } } },
+          { speaker: "Speaker2", voiceConfig: { prebuiltVoiceConfig: { voiceName: getVoice(s2, 'Kore') } } }
         ]
       }
     };
@@ -377,6 +377,7 @@ export const generateAudio = async (
   if (textPrompt.length > 4000) textPrompt = textPrompt.substring(0, 4000);
 
   try {
+    console.log(`[TTS] Generating audio with ${isMultiSpeaker ? 'multi-speaker' : 'single-speaker'} config...`);
     const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
       model: AUDIO_MODEL,
       contents: [{ parts: [{ text: textPrompt }] }],
@@ -387,19 +388,31 @@ export const generateAudio = async (
       }
     }));
 
+    console.log('[TTS] Response received, checking for audio data...');
+
     // Check if we actually got audio data
     const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
     if (!audioData) {
-      throw new Error("El modelo no devolvió datos de audio (posible bloqueo de contenido).");
+      console.error('[TTS] No audio data in response. Response structure:', JSON.stringify(response, null, 2));
+      throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
     }
 
+    console.log('[TTS] Audio generation successful');
     return audioData;
   } catch (error: any) {
     console.error("Audio Gen Error:", error);
+    console.error("Error details:", {
+      message: error.message,
+      name: error.name,
+      stack: error.stack
+    });
+
     // Extract meaningful message from API error if possible
     let msg = error.message || "Error desconocido";
     if (msg.includes("non-audio response") || msg.includes("INVALID_ARGUMENT")) {
       msg = "El modelo de audio rechazó el contenido del diálogo.";
+    } else if (msg.includes("timeout") || msg.includes("DEADLINE_EXCEEDED")) {
+      msg = "Tiempo de espera agotado. El audio puede ser muy largo, intenta reducir la longitud.";
     }
     throw new Error(`Error TTS: ${msg}`);
   }
