@@ -10,7 +10,7 @@ const getApiKey = (): string => {
 };
 
 const GENERATION_MODEL = "gemini-2.5-flash";
-const AUDIO_MODEL = "gemini-2.5-flash-tts";
+const AUDIO_MODEL = "gemini-2.5-flash-preview-tts";
 
 let lastKey = "";
 let aiInstance: GoogleGenAI | null = null;
