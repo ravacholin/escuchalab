@@ -1,5 +1,5 @@
 
-import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
+import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
 import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from "../types";
 
 // Helper to get key from storage
@@ -381,7 +381,7 @@ export const generateAudio = async (
       model: AUDIO_MODEL,
       contents: [{ parts: [{ text: textPrompt }] }],
       config: {
-        responseModalities: ['AUDIO'],
+        responseModalities: [Modality.AUDIO],
         speechConfig: speechConfig,
         temperature: 0.0
       }
