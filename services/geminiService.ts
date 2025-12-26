@@ -252,11 +252,14 @@ export const generateLessonPlan = async (
 
   const lengthInstruction = (level === Level.Intro) ? "Longitud: Natural y fluida, ignorando límites estrictos de turnos si corta la naturalidad." : `Longitud: ${length}.`;
 
+  const speakerConstraint = `CRITICAL: El diálogo debe tener EXACTAMENTE ${numSpeakers} ${numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES'} hablando. NUNCA más de 2 personajes. El sistema TTS solo soporta máximo 2 voces.`;
+
   const prompt = `
   JSON Lesson (Spanish). Modo: ${mode}. Nivel: ${level}. Tema: ${finalTopic}. Accent: ${accent}.
-  
+
   CONTEXT: ${profileInstruction}
   RULES: ${constraint}
+  SPEAKERS: ${speakerConstraint}
   EXERCISES: ${exerciseLogic}
   LENGTH: STICK TO ${length}.
   AMBIENT: Generate "ambientKeywords" (3 keywords).
@@ -281,6 +284,12 @@ export const generateLessonPlan = async (
 
     if (!plan.dialogue) plan.dialogue = [];
     if (!plan.exercises) plan.exercises = { comprehension: [], vocabulary: [] };
+
+    // Validate speaker count
+    const uniqueSpeakers = new Set(plan.dialogue.map(d => d.speaker?.trim()).filter(Boolean));
+    if (uniqueSpeakers.size > 2) {
+      throw new Error(`Error de validación: El diálogo tiene ${uniqueSpeakers.size} personajes hablando, pero el sistema TTS solo soporta máximo 2 voces. Personajes detectados: ${Array.from(uniqueSpeakers).join(', ')}`);
+    }
 
     if (plan.exercises.comprehension) plan.exercises.comprehension = plan.exercises.comprehension.filter(isValidExercise);
     if (plan.exercises.vocabulary) plan.exercises.vocabulary = plan.exercises.vocabulary.filter(isValidExercise);
