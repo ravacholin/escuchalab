@@ -745,6 +745,58 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
                     { label: "Consejo Amoroso", value: "Dar un consejo simple sobre relaciones", icon: Heart },
                     { label: "Describir Personalidad", value: "Describir a alguien con adjetivos básicos", icon: Smile }
                 ]
+            },
+            {
+                label: "Podcast de Mascotas",
+                value: "Podcast sobre cuidados básicos de mascotas en casa",
+                registerInstruction: "Registro cercano y cuidadoso. Tratamiento tú. Descripciones claras, sin lunfardo ni exageraciones.",
+                icon: Dog,
+                actions: [
+                    { label: "Rutina Diaria", value: "Contar la rutina de cuidado de la mascota", icon: Clock },
+                    { label: "Alimentación", value: "Describir qué come y por qué", icon: Apple },
+                    { label: "Visita al Veterinario", value: "Narrar una visita reciente", icon: Stethoscope },
+                    { label: "Comportamiento", value: "Explicar un comportamiento típico", icon: MessageCircle },
+                    { label: "Consejo Básico", value: "Dar un consejo simple de cuidado", icon: Hand }
+                ]
+            },
+            {
+                label: "Podcast de Transporte Diario",
+                value: "Podcast sobre desplazamientos cotidianos y horarios",
+                registerInstruction: "Registro conversacional práctico. Tratamiento tú. Vocabulario simple de movilidad; sin lunfardo.",
+                icon: Bus,
+                actions: [
+                    { label: "Ruta Habitual", value: "Contar la ruta que toma cada día", icon: Map },
+                    { label: "Abono o Billete", value: "Explicar cómo compra el billete", icon: Ticket },
+                    { label: "Retraso", value: "Narrar un retraso y su impacto", icon: AlertTriangle },
+                    { label: "Hora Pico", value: "Describir la hora más complicada", icon: Clock },
+                    { label: "Consejo de Viaje", value: "Dar un consejo práctico", icon: ThumbsUp }
+                ]
+            },
+            {
+                label: "Podcast de Compras Online",
+                value: "Podcast sobre compras por internet y experiencias",
+                registerInstruction: "Registro neutral y claro. Tratamiento tú. Sin lunfardo; vocabulario básico de comercio.",
+                icon: CreditCard,
+                actions: [
+                    { label: "Búsqueda de Ofertas", value: "Contar cómo encuentra ofertas", icon: Search },
+                    { label: "Envío", value: "Describir tiempos y seguimiento de envío", icon: Truck },
+                    { label: "Devolución", value: "Explicar cómo hizo una devolución", icon: Receipt },
+                    { label: "Método de Pago", value: "Mencionar el método de pago usado", icon: Wallet },
+                    { label: "Experiencia", value: "Decir si quedó satisfecho", icon: Smile }
+                ]
+            },
+            {
+                label: "Podcast de Cocina Casera",
+                value: "Podcast con recetas sencillas de casa",
+                registerInstruction: "Registro cercano e instructivo. Tratamiento tú. Sin lunfardo; pasos claros.",
+                icon: Utensils,
+                actions: [
+                    { label: "Receta Simple", value: "Explicar una receta fácil", icon: Menu },
+                    { label: "Ingredientes", value: "Enumerar ingredientes básicos", icon: ListChecks },
+                    { label: "Error Común", value: "Contar un error que evitó", icon: AlertTriangle },
+                    { label: "Truco", value: "Compartir un truco de cocina", icon: Lightbulb },
+                    { label: "Resultado", value: "Describir el resultado final", icon: Star }
+                ]
             }
         ],
         [Level.Intermediate]: [
@@ -837,6 +889,45 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
                     { label: "Disciplina", value: "Describir disciplina mental y hábitos", icon: Brain },
                     { label: "Análisis de Partido", value: "Analizar un partido con detalle", icon: Tv },
                     { label: "Rutina de Entrenamiento", value: "Narrar una rutina semanal", icon: Dumbbell }
+                ]
+            },
+            {
+                label: "Podcast de Turismo Cultural",
+                value: "Podcast sobre visitas culturales y patrimonio local",
+                registerInstruction: "Registro semi-formal descriptivo. Tratamiento tú. Tono respetuoso, sin lunfardo.",
+                icon: Landmark,
+                actions: [
+                    { label: "Lugar Patrimonial", value: "Describir un lugar cultural importante", icon: MapPin },
+                    { label: "Contexto Histórico", value: "Dar contexto histórico básico", icon: BookOpen },
+                    { label: "Costo y Horarios", value: "Informar costos y horarios de visita", icon: Clock },
+                    { label: "Recomendación", value: "Recomendar una visita", icon: ThumbsUp },
+                    { label: "Problema Logístico", value: "Contar un problema de acceso y solución", icon: AlertTriangle }
+                ]
+            },
+            {
+                label: "Podcast de Gestión del Tiempo",
+                value: "Podcast sobre organización personal y productividad",
+                registerInstruction: "Registro semi-formal práctico. Tratamiento tú. Sin lunfardo; consejos concretos.",
+                icon: ListChecks,
+                actions: [
+                    { label: "Método", value: "Explicar un método de organización", icon: Lightbulb },
+                    { label: "Herramienta", value: "Mencionar una herramienta útil", icon: Laptop },
+                    { label: "Obstáculo", value: "Contar un obstáculo común", icon: AlertCircle },
+                    { label: "Ajuste", value: "Explicar cómo ajustó su rutina", icon: ArrowRight },
+                    { label: "Consejo Final", value: "Dar un consejo breve", icon: ThumbsUp }
+                ]
+            },
+            {
+                label: "Podcast de Salud Laboral",
+                value: "Podcast sobre bienestar en el trabajo",
+                registerInstruction: "Registro semi-formal profesional. Tratamiento tú. Tono cuidadoso, sin lunfardo.",
+                icon: BriefcaseBusiness,
+                actions: [
+                    { label: "Estrés Laboral", value: "Describir señales de estrés", icon: BatteryLow },
+                    { label: "Equilibrio", value: "Contar cómo busca equilibrio", icon: Scale },
+                    { label: "Política de Empresa", value: "Mencionar una política de bienestar", icon: FileText },
+                    { label: "Ejemplo Personal", value: "Narrar un caso personal", icon: MessageCircle },
+                    { label: "Recomendación", value: "Dar una recomendación práctica", icon: ThumbsUp }
                 ]
             }
         ],
@@ -943,6 +1034,58 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
                     { label: "Relato Terapéutico", value: "Narrar un caso con empatía", icon: MessageCircle },
                     { label: "Consejo Profesional", value: "Dar un consejo profesional", icon: Stethoscope },
                     { label: "Mitos", value: "Desmentir mitos comunes", icon: X }
+                ]
+            },
+            {
+                label: "Podcast de Derecho y Sociedad",
+                value: "Podcast de análisis legal con impacto social",
+                registerInstruction: "Registro formal analítico. Tratamiento tú. Léxico jurídico claro, sin lunfardo.",
+                icon: Gavel,
+                actions: [
+                    { label: "Caso Paradigmático", value: "Describir un caso relevante", icon: FileText },
+                    { label: "Marco Legal", value: "Explicar el marco legal aplicable", icon: Scale },
+                    { label: "Crítica", value: "Ofrecer una crítica argumentada", icon: ThumbsDown },
+                    { label: "Precedente", value: "Mencionar un precedente", icon: BookOpen },
+                    { label: "Conclusión", value: "Cerrar con una conclusión", icon: CheckCircle }
+                ]
+            },
+            {
+                label: "Podcast de Ética e IA",
+                value: "Podcast sobre inteligencia artificial y dilemas éticos",
+                registerInstruction: "Registro formal reflexivo. Tratamiento tú. Precisión conceptual, sin coloquialismos.",
+                icon: Brain,
+                actions: [
+                    { label: "Dilema Ético", value: "Plantear un dilema ético concreto", icon: AlertTriangle },
+                    { label: "Regulación", value: "Hablar de marcos regulatorios", icon: FileText },
+                    { label: "Caso Real", value: "Contar un caso real relevante", icon: Search },
+                    { label: "Postura", value: "Defender una postura argumentada", icon: Scale },
+                    { label: "Cierre", value: "Cerrar con una reflexión", icon: Eye }
+                ]
+            },
+            {
+                label: "Podcast de Historia Contemporánea",
+                value: "Podcast de análisis histórico del siglo XX y XXI",
+                registerInstruction: "Registro formal narrativo. Tratamiento tú. Tono sobrio, sin lunfardo.",
+                icon: BookOpen,
+                actions: [
+                    { label: "Contexto", value: "Dar contexto histórico", icon: Calendar },
+                    { label: "Fuente Primaria", value: "Citar una fuente primaria", icon: FileText },
+                    { label: "Debate Historiográfico", value: "Mencionar un debate entre historiadores", icon: MessageCircle },
+                    { label: "Impacto", value: "Explicar el impacto social", icon: Globe },
+                    { label: "Conclusión", value: "Cerrar con conclusión", icon: CheckCircle }
+                ]
+            },
+            {
+                label: "Podcast de Estrategia Empresarial",
+                value: "Podcast sobre dirección y estrategia de empresas",
+                registerInstruction: "Registro semi-formal técnico. Tratamiento tú. Vocabulario de negocios preciso, sin lunfardo.",
+                icon: Briefcase,
+                actions: [
+                    { label: "Diagnóstico", value: "Describir un diagnóstico de la empresa", icon: Search },
+                    { label: "Competencia", value: "Analizar a la competencia", icon: Scale },
+                    { label: "Riesgo", value: "Identificar riesgos clave", icon: AlertTriangle },
+                    { label: "Decisión", value: "Explicar una decisión estratégica", icon: ArrowRight },
+                    { label: "Indicadores", value: "Mencionar indicadores de éxito", icon: PieChart }
                 ]
             }
         ]
@@ -1093,6 +1236,58 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
                     { label: "Hidratación", value: "Recomendar beber agua", icon: Droplet },
                     { label: "Actualización", value: "Anunciar actualización en horas", icon: Clock }
                 ]
+            },
+            {
+                label: "Ferias y Mercados",
+                value: "Boletín sobre ferias barriales con controles sanitarios",
+                registerInstruction: "Registro: formal informativo. Lunfardo: no. Datos precisos y útiles.",
+                icon: ShoppingBag,
+                actions: [
+                    { label: "Ubicación", value: "Informar ubicación de la feria", icon: MapPin },
+                    { label: "Horario", value: "Dar horario de apertura", icon: Clock },
+                    { label: "Precios Referencia", value: "Informar precios orientativos", icon: DollarSign },
+                    { label: "Normas Sanitarias", value: "Recordar normas sanitarias", icon: ShieldAlert },
+                    { label: "Convocatoria", value: "Invitar a asistir", icon: ThumbsUp }
+                ]
+            },
+            {
+                label: "Seguridad Vial",
+                value: "Boletín de seguridad vial con controles y accidentes menores",
+                registerInstruction: "Registro: formal informativo. Lunfardo: no. Mensajes claros y preventivos.",
+                icon: ShieldAlert,
+                actions: [
+                    { label: "Control", value: "Informar un control de tránsito", icon: AlertTriangle },
+                    { label: "Accidente Menor", value: "Reportar un accidente sin heridos", icon: Car },
+                    { label: "Desvío", value: "Anunciar desvío por operativo", icon: Map },
+                    { label: "Consejo Peatones", value: "Dar consejo a peatones", icon: Hand },
+                    { label: "Emergencias", value: "Recordar número de emergencias", icon: Phone }
+                ]
+            },
+            {
+                label: "Consumo y Energía",
+                value: "Boletín sobre tarifas y consumo eléctrico residencial",
+                registerInstruction: "Registro: formal económico. Lunfardo: no. Información precisa y útil.",
+                icon: Lightbulb,
+                actions: [
+                    { label: "Tarifa", value: "Informar ajuste tarifario", icon: FileText },
+                    { label: "Ahorro", value: "Dar un consejo de ahorro", icon: PiggyBank },
+                    { label: "Pico de Demanda", value: "Avisar horarios de mayor demanda", icon: Clock },
+                    { label: "Corte Programado", value: "Anunciar corte programado", icon: AlertCircle },
+                    { label: "Recomendación", value: "Recomendar uso responsable", icon: ThumbsUp }
+                ]
+            },
+            {
+                label: "Turismo Local",
+                value: "Boletín turístico con datos de ocupación y actividades",
+                registerInstruction: "Registro: formal informativo. Lunfardo: no. Tono objetivo.",
+                icon: MapPin,
+                actions: [
+                    { label: "Ocupación", value: "Informar nivel de ocupación hotelera", icon: Bed },
+                    { label: "Actividad", value: "Anunciar una actividad turística", icon: Ticket },
+                    { label: "Dato de Afluencia", value: "Dar un dato de visitantes", icon: PieChart },
+                    { label: "Recomendación", value: "Sugerir un paseo", icon: ThumbsUp },
+                    { label: "Consejo Tránsito", value: "Advertir sobre accesos", icon: Car }
+                ]
             }
         ],
         [Level.Intermediate]: [
@@ -1185,6 +1380,45 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
                     { label: "Impacto Importaciones", value: "Explicar impacto en importaciones", icon: TrendingUp },
                     { label: "Cita de Analista", value: "Citar un analista", icon: MessageCircle },
                     { label: "Resumen Final", value: "Cerrar con resumen claro", icon: CheckCircle }
+                ]
+            },
+            {
+                label: "Infraestructura Urbana",
+                value: "Noticias sobre obra pública con plazos y licitaciones",
+                registerInstruction: "Registro: formal informativo. Lunfardo: no. Datos verificables.",
+                icon: Wrench,
+                actions: [
+                    { label: "Obra", value: "Informar avance de obra", icon: Hammer },
+                    { label: "Plazos", value: "Dar plazos estimados", icon: Calendar },
+                    { label: "Impacto", value: "Explicar impacto en servicios", icon: AlertTriangle },
+                    { label: "Licitación", value: "Mencionar proceso de licitación", icon: FileText },
+                    { label: "Desvíos", value: "Informar desvíos temporales", icon: Map }
+                ]
+            },
+            {
+                label: "Educación Superior",
+                value: "Boletín universitario con cupos y becas",
+                registerInstruction: "Registro: formal educativo. Lunfardo: no. Información clara y ordenada.",
+                icon: GraduationCap,
+                actions: [
+                    { label: "Inscripción", value: "Informar fechas de inscripción", icon: Calendar },
+                    { label: "Cupos", value: "Dar datos de cupos disponibles", icon: PieChart },
+                    { label: "Becas", value: "Anunciar becas abiertas", icon: FileText },
+                    { label: "Declaración Rector", value: "Leer declaración del rector", icon: MessageCircle },
+                    { label: "Calendario", value: "Recordar calendario académico", icon: Clock }
+                ]
+            },
+            {
+                label: "Seguridad Ciudadana",
+                value: "Noticias sobre operativos y estadísticas de seguridad",
+                registerInstruction: "Registro: formal informativo. Lunfardo: no. Tono sobrio.",
+                icon: Siren,
+                actions: [
+                    { label: "Operativo", value: "Reportar un operativo policial", icon: ShieldAlert },
+                    { label: "Estadísticas", value: "Dar un dato estadístico", icon: PieChart },
+                    { label: "Declaración Oficial", value: "Leer una declaración oficial", icon: MessageCircle },
+                    { label: "Investigación", value: "Informar estado de una investigación", icon: Search },
+                    { label: "Recomendación", value: "Dar una recomendación preventiva", icon: Hand }
                 ]
             }
         ],
@@ -1291,6 +1525,32 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
                     { label: "Opiniones Contrapuestas", value: "Comparar opiniones distintas", icon: Scale },
                     { label: "Contexto Histórico", value: "Dar contexto histórico", icon: BookOpen },
                     { label: "Cierre Reflexivo", value: "Cerrar con reflexión", icon: Brain }
+                ]
+            },
+            {
+                label: "Debate Electoral",
+                value: "Informe sobre debate electoral con propuestas y cruces",
+                registerInstruction: "Registro: formal político e impersonal. Lunfardo: no. Resumen objetivo.",
+                icon: Flag,
+                actions: [
+                    { label: "Encuestas", value: "Dar datos de encuestas", icon: PieChart },
+                    { label: "Propuestas", value: "Resumir propuestas clave", icon: FileText },
+                    { label: "Cruce", value: "Describir un cruce relevante", icon: AlertTriangle },
+                    { label: "Fiscalización", value: "Informar sobre fiscalización", icon: ShieldAlert },
+                    { label: "Cierre", value: "Cerrar con dato relevante", icon: CheckCircle }
+                ]
+            },
+            {
+                label: "Informe de Defensa",
+                value: "Informe sobre cooperación militar y presupuesto de defensa",
+                registerInstruction: "Registro: formal internacional. Lunfardo: no. Datos precisos y tono sobrio.",
+                icon: ShieldAlert,
+                actions: [
+                    { label: "Despliegue", value: "Informar sobre despliegue", icon: Map },
+                    { label: "Presupuesto", value: "Dar cifra presupuestaria", icon: PieChart },
+                    { label: "Cooperación", value: "Explicar un acuerdo de cooperación", icon: FileText },
+                    { label: "Riesgos", value: "Mencionar riesgos regionales", icon: AlertTriangle },
+                    { label: "Declaración", value: "Leer declaración oficial", icon: MessageCircle }
                 ]
             }
         ]
@@ -1441,6 +1701,58 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
                     { label: "Qué No", value: "Decir qué no le gustó", icon: ThumbsDown },
                     { label: "Invitación", value: "Invitar a otros", icon: Ticket }
                 ]
+            },
+            {
+                label: "Mudanza",
+                value: "Monólogo sobre una mudanza a un departamento pequeño",
+                registerInstruction: "Registro: informal narrativo. Primera persona. Lunfardo: no.",
+                icon: Home,
+                actions: [
+                    { label: "Preparación", value: "Contar cómo preparó las cajas", icon: ListChecks },
+                    { label: "Ayuda", value: "Mencionar quién ayudó", icon: Hand },
+                    { label: "Problema", value: "Contar un problema durante la mudanza", icon: AlertTriangle },
+                    { label: "Emoción", value: "Expresar cómo se sintió", icon: Heart },
+                    { label: "Resultado", value: "Decir cómo terminó todo", icon: CheckCircle }
+                ]
+            },
+            {
+                label: "Primer Día de Gimnasio",
+                value: "Monólogo sobre el primer día de gimnasio",
+                registerInstruction: "Registro: informal motivador. Primera persona. Lunfardo: no.",
+                icon: Dumbbell,
+                actions: [
+                    { label: "Expectativa", value: "Contar qué esperaba", icon: Lightbulb },
+                    { label: "Ejercicio", value: "Describir un ejercicio que hizo", icon: Hand },
+                    { label: "Dificultad", value: "Contar una dificultad", icon: AlertCircle },
+                    { label: "Consejo", value: "Dar un consejo simple", icon: ThumbsUp },
+                    { label: "Emoción", value: "Decir cómo se sintió", icon: Smile }
+                ]
+            },
+            {
+                label: "Aprender a Conducir",
+                value: "Monólogo sobre clases de conducción en ciudad",
+                registerInstruction: "Registro: informal claro. Primera persona. Lunfardo: no.",
+                icon: Car,
+                actions: [
+                    { label: "Clases", value: "Contar cómo son las clases", icon: Calendar },
+                    { label: "Error", value: "Mencionar un error cometido", icon: AlertTriangle },
+                    { label: "Instructor", value: "Describir al instructor", icon: UserPlus },
+                    { label: "Miedo", value: "Expresar un miedo", icon: Frown },
+                    { label: "Progreso", value: "Contar un avance", icon: TrendingUp }
+                ]
+            },
+            {
+                label: "Celebración de Barrio",
+                value: "Monólogo sobre una fiesta barrial con música y comidas",
+                registerInstruction: "Registro: informal descriptivo. Primera persona. Lunfardo: no.",
+                icon: Music,
+                actions: [
+                    { label: "Preparación", value: "Describir la preparación", icon: ListChecks },
+                    { label: "Actividad", value: "Contar una actividad principal", icon: Flag },
+                    { label: "Encuentro", value: "Mencionar con quién se encontró", icon: UserPlus },
+                    { label: "Comida", value: "Describir la comida típica", icon: Utensils },
+                    { label: "Cierre", value: "Cerrar con una sensación final", icon: Heart }
+                ]
             }
         ],
         [Level.Intermediate]: [
@@ -1533,6 +1845,45 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
                     { label: "Argumento", value: "Desarrollar argumento principal", icon: Scale },
                     { label: "Ejemplo", value: "Dar un ejemplo concreto", icon: Search },
                     { label: "Cierre Emotivo", value: "Cerrar con tono emotivo", icon: Heart }
+                ]
+            },
+            {
+                label: "Cambio de Trabajo",
+                value: "Monólogo sobre dejar un empleo y empezar otro",
+                registerInstruction: "Registro: semi-formal reflexivo. Primera persona. Lunfardo: no.",
+                icon: Briefcase,
+                actions: [
+                    { label: "Motivo", value: "Explicar el motivo del cambio", icon: MessageCircle },
+                    { label: "Transición", value: "Contar cómo fue la transición", icon: ArrowRight },
+                    { label: "Miedo", value: "Expresar un miedo o duda", icon: Frown },
+                    { label: "Aprendizaje", value: "Describir un aprendizaje", icon: Lightbulb },
+                    { label: "Resultado", value: "Contar el resultado final", icon: CheckCircle }
+                ]
+            },
+            {
+                label: "Proyecto Creativo",
+                value: "Monólogo sobre un proyecto artístico personal",
+                registerInstruction: "Registro: semi-formal narrativo. Primera persona. Lunfardo: no.",
+                icon: Palette,
+                actions: [
+                    { label: "Idea", value: "Describir la idea inicial", icon: Lightbulb },
+                    { label: "Proceso", value: "Contar el proceso de trabajo", icon: ListChecks },
+                    { label: "Bloqueo", value: "Mencionar un bloqueo creativo", icon: AlertCircle },
+                    { label: "Solución", value: "Explicar cómo lo resolvió", icon: Wrench },
+                    { label: "Balance", value: "Hacer un balance final", icon: Scale }
+                ]
+            },
+            {
+                label: "Viaje en Solitario",
+                value: "Monólogo sobre viajar solo por primera vez",
+                registerInstruction: "Registro: semi-formal narrativo. Primera persona. Lunfardo: no.",
+                icon: Plane,
+                actions: [
+                    { label: "Decisión", value: "Contar por qué decidió viajar", icon: CheckCircle },
+                    { label: "Logística", value: "Describir la logística del viaje", icon: Calendar },
+                    { label: "Desafío", value: "Contar un desafío", icon: AlertTriangle },
+                    { label: "Encuentro", value: "Narrar un encuentro interesante", icon: UserPlus },
+                    { label: "Reflexión", value: "Cerrar con una reflexión", icon: Brain }
                 ]
             }
         ],
@@ -1639,6 +1990,19 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
                     { label: "Comparación", value: "Hacer una comparación graciosa", icon: Scale },
                     { label: "Remate", value: "Preparar el remate", icon: Megaphone },
                     { label: "Cierre", value: "Cerrar con broma", icon: ThumbsUp }
+                ]
+            },
+            {
+                label: "Discurso de Despedida",
+                value: "Monólogo de despedida en un cierre de etapa",
+                registerInstruction: "Registro: formal emotivo. Primera persona. Lunfardo: no.",
+                icon: Heart,
+                actions: [
+                    { label: "Agradecimiento", value: "Agradecer a personas clave", icon: ThumbsUp },
+                    { label: "Recuerdo", value: "Recordar un momento importante", icon: Star },
+                    { label: "Legado", value: "Hablar del legado dejado", icon: BookOpen },
+                    { label: "Consejo", value: "Dar un consejo final", icon: Lightbulb },
+                    { label: "Cierre", value: "Cerrar con una frase emotiva", icon: MessageCircle }
                 ]
             }
         ]
