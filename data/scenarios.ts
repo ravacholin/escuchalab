@@ -26,6 +26,7 @@ export interface ScenarioAction {
 export interface ScenarioContext {
     label: string;
     value: string; // The physical setting description
+    registerInstruction: string; // Precise register/formality guidance for the scenario
     icon: React.ElementType;
     actions: ScenarioAction[]; // CHILDREN ACTIONS specific to this place
 }
@@ -36,6 +37,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Datos de Contacto",
                 value: "Intercambio de información personal social ruido ambiente",
+                registerInstruction: "Registro social informal y cortés. Tratamiento: tú. Frases breves y claras para pedir, confirmar y repetir datos. Evitar lunfardo fuerte, insultos o bromas.",
                 icon: Phone,
                 actions: [
                     { label: "Número de WhatsApp", value: "Pedir y anotar un número de teléfono. UNO de los hablantes dicta los dígitos lentamente o agrupados.", icon: Hash },
@@ -46,6 +48,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Recepción de Hotel",
                 value: "Recepción hotel check-in formal mostrador",
+                registerInstruction: "Registro formal de atención al cliente. Tratamiento: usted. Fórmulas de cortesía (buenos días, por favor, gracias). Prohibido coloquialismos, jerga o sarcasmo.",
                 icon: Bed,
                 actions: [
                     { label: "Deletrear Apellido", value: "El recepcionista no entiende el apellido y pide deletrearlo letra por letra.", icon: FileText },
@@ -56,6 +59,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Compras y Dinero",
                 value: "Tienda caja pagar ruido supermercado",
+                registerInstruction: "Registro de servicio en caja: formal neutro, tratamiento usted, confirmaciones de precio y cambio. Sin lunfardo, sin diminutivos excesivos, sin bromas.",
                 icon: Wallet,
                 actions: [
                     { label: "Precio Exacto", value: "El cajero dice el total con céntimos (ej: 14,95€) y el cliente busca cambio.", icon: Euro },
@@ -66,6 +70,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Transporte / Ciudad",
                 value: "Calle taxi parada autobús ruido tráfico",
+                registerInstruction: "Registro urbano funcional y cortés. Tratamiento usted con desconocidos; instrucciones directas. Evitar jerga local demasiado marcada, insultos o chistes.",
                 icon: Car,
                 actions: [
                     { label: "Dirección Exacta", value: "Decir al taxista la calle y el número exacto del portal.", icon: MapPin },
@@ -76,6 +81,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Citas y Agenda",
                 value: "Oficina administración teléfono cita médica",
+                registerInstruction: "Registro administrativo formal. Tratamiento: usted. Lenguaje preciso para fechas y horarios. Prohibido coloquialismos, muletillas y familiaridad.",
                 icon: Clock,
                 actions: [
                     { label: "Fecha de Nacimiento", value: "Dar la fecha de nacimiento para un formulario (día, mes, año).", icon: FileText },
@@ -88,6 +94,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Cafetería / Restaurante",
                 value: "Cafetería restaurante bar ruidoso servicio mesa",
+                registerInstruction: "Registro de atención en restaurante: cortés y semi-formal. Cliente trata de usted al camarero, peticiones claras. Evitar jerga fuerte o insultos.",
                 icon: Coffee,
                 actions: [
                     { label: "Pedir la Cuenta", value: "Cliente pide la cuenta y pregunta si aceptan tarjeta", icon: Receipt },
@@ -105,6 +112,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Mercado Callejero",
                 value: "Mercado aire libre fruta verdura ruido regateo",
+                registerInstruction: "Registro informal pero respetuoso. Tratamiento tú o usted según distancia; regateo amable. Permitidas expresiones coloquiales suaves, prohibidos insultos.",
                 icon: Apple,
                 actions: [
                     { label: "Preguntar Precio Kilo", value: "Preguntar a cuánto están las naranjas hoy", icon: DollarSign },
@@ -120,6 +128,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Cine / Taquilla",
                 value: "Cine taquilla palomitas cola entrada",
+                registerInstruction: "Registro de ventanilla formal neutro. Tratamiento: usted. Frases cortas y directas. Sin jerga ni bromas excesivas.",
                 icon: Film,
                 actions: [
                     { label: "Comprar Entradas", value: "Dos entradas para la película de las 7", icon: Ticket },
@@ -133,6 +142,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Oficina de Correos",
                 value: "Oficina correos paquete ventanilla cola",
+                registerInstruction: "Registro formal de trámite. Tratamiento: usted. Vocabulario funcional (envío, plazo, formulario). Prohibido coloquialismos.",
                 icon: Stamp,
                 actions: [
                     { label: "Enviar Paquete", value: "Quiere enviar una caja a otro país", icon: Rocket },
@@ -146,6 +156,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Estación de Tren/Bus",
                 value: "Estación tren andén taquilla transporte público",
+                registerInstruction: "Registro funcional y cortés en transporte público. Tratamiento: usted. Instrucciones precisas de horarios y andenes. Sin jerga ni insultos.",
                 icon: Train,
                 actions: [
                     { label: "Comprar Billete Ida", value: "Comprar un billete sencillo para el próximo tren", icon: Ticket },
@@ -161,6 +172,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Biblioteca",
                 value: "Biblioteca silencio libros estudio",
+                registerInstruction: "Registro formal suave y tranquilo. Tratamiento: usted. Volumen bajo y cortesía estricta. Prohibidos coloquialismos ruidosos.",
                 icon: BookOpen,
                 actions: [
                     { label: "Hacerse Socio", value: "Quiere el carnet de la biblioteca", icon: UserPlus },
@@ -174,6 +186,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Hotel (Recepción)",
                 value: "Hotel lobby recepción turismo mostrador",
+                registerInstruction: "Registro de hotelería formal. Tratamiento: usted. Lenguaje cordial, sin familiaridad ni jerga.",
                 icon: Bed,
                 actions: [
                     { label: "Hacer Check-in", value: "Llegada al hotel, dar pasaporte y recibir llave", icon: Key },
@@ -189,6 +202,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "En la Calle (Ciudad)",
                 value: "Calle ciudad exterior tráfico ruido peatones",
+                registerInstruction: "Registro informal cortés entre desconocidos. Tratamiento: usted o tú según cercanía, pero sin confianza excesiva. Evitar lunfardo fuerte.",
                 icon: Map,
                 actions: [
                     { label: "Preguntar Dirección", value: "Perdido, pregunta cómo llegar a la Plaza Mayor", icon: MapPin },
@@ -203,6 +217,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Tienda de Ropa",
                 value: "Tienda ropa centro comercial probadores",
+                registerInstruction: "Registro comercial formal neutro. Tratamiento: usted. Solicitudes claras sobre talla y precio. Sin jerga ni bromas.",
                 icon: ShoppingBag,
                 actions: [
                     { label: "Pedir Talla Diferente", value: "La prenda es pequeña, necesita una talla más grande", icon: Search },
@@ -217,6 +232,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Farmacia",
                 value: "Farmacia mostrador salud medicina",
+                registerInstruction: "Registro sanitario formal y respetuoso. Tratamiento: usted. Lenguaje claro sobre síntomas y dosis. Prohibido coloquialismos.",
                 icon: Pill,
                 actions: [
                     { label: "Pedir Analgésico", value: "Le duele la cabeza y pide algo para el dolor", icon: Pill },
@@ -232,6 +248,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Comisaría de Policía",
                 value: "Comisaría policía oficina denuncias serio",
+                registerInstruction: "Registro institucional muy formal. Tratamiento: usted. Relato claro y sobrio, sin ironías ni coloquialismos. Prohibido lunfardo.",
                 icon: Siren,
                 actions: [
                     { label: "Denunciar Robo Cartera", value: "Explicar que le robaron la cartera en el metro", icon: Wallet },
@@ -245,6 +262,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Soporte Técnico",
                 value: "Oficina informática teléfono ordenadores cables",
+                registerInstruction: "Registro técnico semi-formal. Tratamiento: usted. Descripciones precisas de fallos y pasos. Evitar jerga vulgar.",
                 icon: Headphones,
                 actions: [
                     { label: "Internet no Funciona", value: "El router tiene luz roja y no hay wifi", icon: Wifi },
@@ -258,6 +276,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Cena con Amigos",
                 value: "Restaurante cena amigos ambiente relajado risas",
+                registerInstruction: "Registro informal entre amigos. Tratamiento: tú/vos según acento. Permitidos coloquialismos suaves y risas, pero sin insultos fuertes.",
                 icon: Utensils,
                 actions: [
                     { label: "Dividir la Cuenta (Lío)", value: "Intentan pagar a escote pero las cuentas no salen y discuten", icon: DollarSign },
@@ -273,6 +292,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Trabajo / Oficina",
                 value: "Oficina trabajo reunión formal despacho",
+                registerInstruction: "Registro laboral semi-formal. Tratamiento: usted con superiores y tú con pares. Lenguaje profesional, sin lunfardo ni sarcasmo agresivo.",
                 icon: Briefcase,
                 actions: [
                     { label: "Justificar Retraso", value: "Llega tarde y tiene que inventar una excusa creíble al jefe", icon: Clock },
@@ -288,6 +308,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Agencia Inmobiliaria",
                 value: "Oficina inmobiliaria fotos pisos planos mesa",
+                registerInstruction: "Registro formal de negociación. Tratamiento: usted. Vocabulario de alquiler/contrato claro. Prohibido coloquialismos.",
                 icon: Building,
                 actions: [
                     { label: "Buscar Alquiler", value: "Describir qué tipo de piso busca y presupuesto", icon: Home },
@@ -301,6 +322,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Gimnasio",
                 value: "Gimnasio pesas máquinas música eco sudor",
+                registerInstruction: "Registro informal respetuoso. Tratamiento: tú entre usuarios; usted con recepción si se queja. Evitar groserías.",
                 icon: Dumbbell,
                 actions: [
                     { label: "Pedir Turno Máquina", value: "Preguntar cuánto le queda al otro en la máquina", icon: Clock },
@@ -314,6 +336,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Taller Mecánico",
                 value: "Taller mecánico coches herramientas ruido grasa",
+                registerInstruction: "Registro de servicio técnico semi-formal. Tratamiento: usted. Explicaciones concretas de averías y presupuestos. Sin jerga vulgar.",
                 icon: Wrench,
                 actions: [
                     { label: "Describir Ruido Raro", value: "El coche hace 'clac clac' al girar", icon: HelpCircle },
@@ -327,6 +350,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Entrevista de Trabajo",
                 value: "Despacho entrevista formal nervios curriculum",
+                registerInstruction: "Registro estrictamente formal. Tratamiento: usted. Respuestas profesionales, sin coloquialismos ni muletillas.",
                 icon: HeartHandshake,
                 actions: [
                     { label: "Hablar de Defectos", value: "Responder a la pregunta 'cuál es tu mayor defecto'", icon: Frown },
@@ -340,6 +364,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Veterinario",
                 value: "Clínica veterinaria perro gato sala espera",
+                registerInstruction: "Registro clínico formal. Tratamiento: usted. Descripciones claras de síntomas y tratamientos. Evitar jerga y bromas.",
                 icon: Dog,
                 actions: [
                     { label: "Gato no Come", value: "Explicar que la mascota está triste y no come", icon: Frown },
@@ -353,6 +378,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Banco / Finanzas",
                 value: "Banco oficina cajero dinero silencio",
+                registerInstruction: "Registro financiero formal. Tratamiento: usted. Precisión en cifras y términos bancarios. Prohibidos coloquialismos y chistes.",
                 icon: Landmark,
                 actions: [
                     { label: "Abrir Cuenta", value: "Preguntar requisitos y comisiones para abrir cuenta", icon: FileText },
@@ -365,6 +391,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Consulta Médica",
                 value: "Hospital médico consulta privado silencio",
+                registerInstruction: "Registro sanitario formal. Tratamiento: usted. Lenguaje claro y respetuoso, sin coloquialismos ni humor.",
                 icon: Stethoscope,
                 actions: [
                     { label: "Describir Dolor Raro", value: "Explicar un dolor difuso que va y viene", icon: Frown },
@@ -378,6 +405,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Peluquería",
                 value: "Peluquería salón secadores tijeras espejo",
+                registerInstruction: "Registro cercano pero respetuoso. Tratamiento: tú o usted según edad, tono amable. Evitar groserías.",
                 icon: Scissors,
                 actions: [
                     { label: "Explicar Corte", value: "Explicar detalladamente cómo quiere el flequillo", icon: Hand },
@@ -392,6 +420,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Backstage Concierto",
                 value: "Backstage concierto camerino música ruido caos",
+                registerInstruction: "Registro coloquial profesional del espectáculo. Tratamiento tú entre equipo, pero sin insultos extremos. Permitida jerga técnica musical.",
                 icon: Guitar,
                 actions: [
                     { label: "Exigencias de Rider", value: "La estrella se queja de que el agua no es de la marca correcta", icon: Star },
@@ -405,6 +434,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Redacción Periódico",
                 value: "Redacción periodismo ordenadores estrés noticias",
+                registerInstruction: "Registro profesional periodístico. Tratamiento tú entre colegas, lenguaje preciso y urgente. Prohibido lunfardo vulgar.",
                 icon: Newspaper,
                 actions: [
                     { label: "Cambio de Portada", value: "El director cambia la noticia principal a última hora", icon: AlertTriangle },
@@ -418,6 +448,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Start-up Tecnológica",
                 value: "Oficina moderna start-up sofás pizarras inglés",
+                registerInstruction: "Registro semi-formal con jerga tecnológica permitida. Tratamiento tú entre equipo. Evitar vulgaridades.",
                 icon: Rocket,
                 actions: [
                     { label: "Pitch a Inversores", value: "Vender la idea de la empresa usando jerga (growth, kpi)", icon: TrendingUp },
@@ -431,6 +462,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Juicio / Legal",
                 value: "Juzgado tribunal sala legal serio eco",
+                registerInstruction: "Registro legal muy formal. Tratamiento: usted. Léxico jurídico y tono respetuoso. Prohibido coloquialismos.",
                 icon: Gavel,
                 actions: [
                     { label: "Interrogatorio Hostil", value: "Abogado presiona a un testigo para que confiese contradicciones", icon: Zap },
@@ -444,6 +476,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Galería de Arte",
                 value: "Museo galería arte moderno silencioso pasos",
+                registerInstruction: "Registro culto y moderadamente formal. Tratamiento: usted o tú según cercanía, pero con vocabulario artístico. Sin jerga vulgar.",
                 icon: Palette,
                 actions: [
                     { label: "Crítica Pretenciosa", value: "Usar lenguaje muy culto y vacío para criticar un cuadro", icon: Brain },
@@ -457,6 +490,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Terapia Psicológica",
                 value: "Consulta diván silencio reloj tic-tac íntimo",
+                registerInstruction: "Registro íntimo y respetuoso. Tratamiento: usted si es primera sesión; tono cuidadoso. Evitar sarcasmo o bromas.",
                 icon: Brain,
                 actions: [
                     { label: "Confesión Traumática", value: "Revelar un evento del pasado que nunca contó a nadie", icon: Lock },
@@ -470,6 +504,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Entrevista Política/Radio",
                 value: "Estudio radio entrevista micrófono tensión",
+                registerInstruction: "Registro formal de entrevista pública. Tratamiento: usted. Preguntas directas y respuestas medidas. Prohibido coloquialismos.",
                 icon: Mic,
                 actions: [
                     { label: "Evasión de Respuesta", value: "El político habla mucho sin responder la pregunta difícil", icon: MessageCircle },
@@ -483,6 +518,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Cata de Vinos / Lujo",
                 value: "Bodega restaurante lujo copas vino silencio",
+                registerInstruction: "Registro formal y sofisticado. Tratamiento: usted. Léxico sensorial y cortesía estricta. Sin jerga vulgar.",
                 icon: Wine,
                 actions: [
                     { label: "Descripción Sensorial", value: "Describir el sabor del vino con adjetivos imposibles (madera, cuero)", icon: Sparkles },
@@ -495,6 +531,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Clase Universidad",
                 value: "Aula magna universidad eco profesor alumnos",
+                registerInstruction: "Registro académico formal. Tratamiento: usted al profesor, tú entre alumnos. Lenguaje preciso, sin coloquialismos.",
                 icon: School,
                 actions: [
                     { label: "Pregunta Pedante", value: "Alumno pregunta solo para demostrar que sabe más que el profe", icon: GraduationCap },
@@ -508,6 +545,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Rodaje de Cine",
                 value: "Set rodaje cámaras luces silencio acción",
+                registerInstruction: "Registro profesional con urgencia. Tratamiento tú entre equipo, instrucciones claras. Evitar insultos fuertes.",
                 icon: Camera,
                 actions: [
                     { label: "Actor Diva", value: "El protagonista se niega a salir porque el café está frío", icon: Star },
@@ -521,6 +559,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Comunidad de Vecinos",
                 value: "Reunión vecinos portal escalera quejas",
+                registerInstruction: "Registro semi-formal vecinal. Tratamiento usted en reunión oficial. Lenguaje directo pero respetuoso. Prohibido insultos.",
                 icon: Building,
                 actions: [
                     { label: "Derrama (Gasto Extra)", value: "Discutir porque hay que pagar el ascensor nuevo", icon: Euro },
@@ -534,6 +573,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Maternidad / Paternidad",
                 value: "Parque infantil bebés padres biberón",
+                registerInstruction: "Registro informal entre padres, tono empático. Tratamiento tú. Evitar sarcasmo o insultos.",
                 icon: Baby,
                 actions: [
                     { label: "Consejos No Pedidos", value: "Alguien critica cómo educas a tu hijo", icon: MessageCircle },
@@ -547,6 +587,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Negociación de Paz",
                 value: "Sala reuniones ONU banderas serio tensión",
+                registerInstruction: "Registro diplomático extremadamente formal. Tratamiento: usted. Tono protocolar y preciso. Prohibido coloquialismos.",
                 icon: Globe,
                 actions: [
                     { label: "Traducción Errónea", value: "Un error del traductor casi causa una guerra", icon: MessageCircle },
@@ -563,6 +604,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Presentación",
                 value: "Estudio podcast entrevista básica presentación personal",
+                registerInstruction: "Registro conversacional semi-formal. Tratamiento tú entre entrevistador e invitado. Frases claras, sin jerga ni muletillas excesivas.",
                 icon: Mic,
                 actions: [
                     { label: "Saludo Inicial", value: "Saludar al público y presentar al invitado con frases cortas", icon: MessageCircle },
@@ -575,6 +617,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Comida",
                 value: "Podcast culinario gustos básicos en cocina",
+                registerInstruction: "Registro cercano y descriptivo. Tratamiento tú. Vocabulario simple de sabores; sin lunfardo ni groserías.",
                 icon: Coffee,
                 actions: [
                     { label: "Comida Favorita", value: "Decir cuál es la comida favorita y por qué", icon: Heart },
@@ -587,6 +630,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Rutina",
                 value: "Entrevista sobre rutina diaria mañana tarde noche",
+                registerInstruction: "Registro conversacional sencillo. Tratamiento tú. Narración ordenada, sin jerga fuerte.",
                 icon: Clock,
                 actions: [
                     { label: "Mañana", value: "Describir qué hace al levantarse", icon: Sun },
@@ -599,6 +643,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Lugares",
                 value: "Podcast de ciudad lugares favoritos y paseo",
+                registerInstruction: "Registro cercano informativo. Tratamiento tú. Descripciones claras de lugares; sin coloquialismos excesivos.",
                 icon: MapPin,
                 actions: [
                     { label: "Lugar Favorito", value: "Presentar un lugar que le gusta en su ciudad", icon: MapPin },
@@ -611,6 +656,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Compras",
                 value: "Podcast sobre compras básicas en tienda",
+                registerInstruction: "Registro conversacional neutral. Tratamiento tú. Comentarios concretos sobre compras; evitar lunfardo.",
                 icon: ShoppingBag,
                 actions: [
                     { label: "Última Compra", value: "Contar qué compró y cuándo", icon: Receipt },
@@ -625,6 +671,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Viajes Cortos",
                 value: "Entrevista sobre escapadas de fin de semana",
+                registerInstruction: "Registro narrativo cercano. Tratamiento tú. Relato ordenado con detalles simples; sin jerga vulgar.",
                 icon: Plane,
                 actions: [
                     { label: "Relatar el Viaje", value: "Contar un viaje breve con lugares visitados", icon: MapPin },
@@ -637,6 +684,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Salud",
                 value: "Podcast de bienestar y hábitos saludables",
+                registerInstruction: "Registro semi-formal y cuidadoso. Tratamiento tú. Consejos claros, sin coloquialismos ni bromas.",
                 icon: Stethoscope,
                 actions: [
                     { label: "Rutina de Ejercicio", value: "Describir una rutina simple de ejercicio", icon: Dumbbell },
@@ -649,6 +697,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Trabajo",
                 value: "Entrevista sobre trabajo cotidiano en oficina",
+                registerInstruction: "Registro profesional ligero. Tratamiento tú. Vocabulario laboral básico, sin jerga vulgar.",
                 icon: Briefcase,
                 actions: [
                     { label: "Mi Puesto", value: "Describir el puesto y tareas principales", icon: Briefcase },
@@ -661,6 +710,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Tecnología",
                 value: "Podcast sobre tecnología cotidiana y apps",
+                registerInstruction: "Registro conversacional con términos técnicos básicos. Tratamiento tú. Evitar jerga vulgar.",
                 icon: Laptop,
                 actions: [
                     { label: "App Favorita", value: "Explicar qué app usa más y para qué", icon: Phone },
@@ -673,6 +723,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Ocio",
                 value: "Podcast de ocio cultura y planes",
+                registerInstruction: "Registro cercano y ameno. Tratamiento tú. Comentarios claros; permitir coloquialismos suaves.",
                 icon: Music,
                 actions: [
                     { label: "Recomendar Película", value: "Contar una película reciente y por qué gusta", icon: Film },
@@ -685,6 +736,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Relaciones",
                 value: "Podcast sobre amistades y vida social",
+                registerInstruction: "Registro cercano y respetuoso. Tratamiento tú. Tono empático; evitar insultos o lunfardo fuerte.",
                 icon: Heart,
                 actions: [
                     { label: "Cómo nos Conocimos", value: "Contar cómo conoció a un amigo", icon: UserPlus },
@@ -699,6 +751,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Emprendimiento",
                 value: "Entrevista sobre emprendimiento y negocios",
+                registerInstruction: "Registro semi-formal profesional. Tratamiento tú. Léxico de negocios claro, sin vulgaridades.",
                 icon: TrendingUp,
                 actions: [
                     { label: "Motivación", value: "Explicar por qué decidió emprender", icon: Lightbulb },
@@ -711,6 +764,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Educación",
                 value: "Entrevista sobre educación y aprendizaje",
+                registerInstruction: "Registro semi-formal educativo. Tratamiento tú. Tono respetuoso, sin jerga vulgar.",
                 icon: School,
                 actions: [
                     { label: "Comparar Sistemas", value: "Comparar dos sistemas educativos", icon: Scale },
@@ -723,6 +777,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast Ambiental",
                 value: "Podcast de medio ambiente y sostenibilidad",
+                registerInstruction: "Registro informativo cercano. Tratamiento tú. Lenguaje claro y responsable; evitar coloquialismos fuertes.",
                 icon: Leaf,
                 actions: [
                     { label: "Problema Local", value: "Describir un problema ambiental local", icon: AlertTriangle },
@@ -735,6 +790,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Cultura",
                 value: "Podcast sobre cultura y sociedad",
+                registerInstruction: "Registro conversacional reflexivo. Tratamiento tú. Tono respetuoso, sin jerga vulgar.",
                 icon: Palette,
                 actions: [
                     { label: "Cambio Cultural", value: "Describir un cambio cultural reciente", icon: Globe },
@@ -747,6 +803,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Ciencia Popular",
                 value: "Podcast divulgativo con lenguaje claro",
+                registerInstruction: "Registro divulgativo semi-formal. Tratamiento tú. Explicaciones claras y sin tecnicismos excesivos. Sin lunfardo.",
                 icon: FlaskConical,
                 actions: [
                     { label: "Hallazgo", value: "Explicar un hallazgo científico reciente", icon: Sparkles },
@@ -759,6 +816,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Finanzas",
                 value: "Podcast de finanzas personales",
+                registerInstruction: "Registro semi-formal y preciso. Tratamiento tú. Números y términos claros; sin coloquialismos.",
                 icon: Landmark,
                 actions: [
                     { label: "Presupuesto", value: "Explicar cómo organiza el presupuesto", icon: PieChart },
@@ -771,6 +829,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Deportes",
                 value: "Podcast de deportes y rendimiento",
+                registerInstruction: "Registro cercano con vocabulario deportivo. Tratamiento tú. Permitido entusiasmo, sin insultos.",
                 icon: Dumbbell,
                 actions: [
                     { label: "Preparación", value: "Explicar cómo se prepara para competir", icon: Clock },
@@ -785,6 +844,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Investigación",
                 value: "Entrevista de investigación periodística",
+                registerInstruction: "Registro periodístico formal moderado. Tratamiento tú, pero tono serio y objetivo. Sin jerga vulgar.",
                 icon: Newspaper,
                 actions: [
                     { label: "Revelación", value: "Presentar una revelación relevante", icon: Megaphone },
@@ -797,6 +857,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Geopolítica",
                 value: "Podcast de análisis geopolítico",
+                registerInstruction: "Registro formal analítico. Tratamiento tú. Tono sobrio, sin coloquialismos ni ironías.",
                 icon: Globe,
                 actions: [
                     { label: "Conflicto", value: "Analizar un conflicto actual", icon: AlertTriangle },
@@ -809,6 +870,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Filosofía",
                 value: "Podcast de filosofía y ética",
+                registerInstruction: "Registro formal reflexivo. Tratamiento tú. Léxico abstracto y preciso; sin jerga vulgar.",
                 icon: Brain,
                 actions: [
                     { label: "Dilema Moral", value: "Plantear un dilema moral complejo", icon: Scale },
@@ -821,6 +883,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Economía",
                 value: "Podcast de economía y mercados",
+                registerInstruction: "Registro semi-formal técnico. Tratamiento tú. Vocabulario económico claro, sin coloquialismos.",
                 icon: PieChart,
                 actions: [
                     { label: "Inflación", value: "Explicar causas de la inflación", icon: TrendingUp },
@@ -833,6 +896,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Arte",
                 value: "Podcast de crítica artística",
+                registerInstruction: "Registro culto y analítico. Tratamiento tú. Lenguaje especializado, sin jerga vulgar.",
                 icon: Palette,
                 actions: [
                     { label: "Analizar Obra", value: "Analizar una obra con lenguaje experto", icon: Eye },
@@ -845,6 +909,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Ciencia",
                 value: "Podcast de ciencia y tecnología avanzada",
+                registerInstruction: "Registro formal técnico. Tratamiento tú. Precisión terminológica, sin coloquialismos.",
                 icon: Rocket,
                 actions: [
                     { label: "Avance Científico", value: "Explicar un avance reciente", icon: Sparkles },
@@ -857,6 +922,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Crimen",
                 value: "Podcast de crónica criminal",
+                registerInstruction: "Registro narrativo serio. Tratamiento tú. Tono respetuoso con víctimas; sin morbo ni jerga vulgar.",
                 icon: ShieldAlert,
                 actions: [
                     { label: "Narrar Caso", value: "Narrar un caso con detalle", icon: FileText },
@@ -869,6 +935,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Podcast de Psicología",
                 value: "Podcast de psicología profunda",
+                registerInstruction: "Registro profesional y empático. Tratamiento tú. Lenguaje cuidadoso, sin coloquialismos.",
                 icon: Brain,
                 actions: [
                     { label: "Explicar Trauma", value: "Explicar un trauma y su tratamiento", icon: Heart },
@@ -885,6 +952,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Boletín del Tiempo",
                 value: "Radio local reporte del clima sencillo",
+                registerInstruction: "Registro noticiero formal e impersonal. Sin primera persona. Frases informativas, sin coloquialismos ni muletillas.",
                 icon: Sun,
                 actions: [
                     { label: "Temperatura", value: "Decir la temperatura actual", icon: Thermometer },
@@ -897,6 +965,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Tráfico Local",
                 value: "Boletín de tráfico en la ciudad",
+                registerInstruction: "Registro informativo neutral. Datos de vías y tiempos con precisión. Prohibidos coloquialismos.",
                 icon: Car,
                 actions: [
                     { label: "Atasco", value: "Reportar un atasco en una calle", icon: AlertTriangle },
@@ -909,6 +978,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Noticias de Escuela",
                 value: "Boletín escolar para estudiantes",
+                registerInstruction: "Registro institucional formal, tono claro y directo. Sin jerga ni bromas.",
                 icon: School,
                 actions: [
                     { label: "Actividad", value: "Anunciar una actividad escolar", icon: Flag },
@@ -921,6 +991,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Servicios de la Ciudad",
                 value: "Radio municipal avisos básicos",
+                registerInstruction: "Registro municipal formal e impersonal. Mensajes claros y precisos. Sin coloquialismos.",
                 icon: Building,
                 actions: [
                     { label: "Basura", value: "Avisar cambio de horario de basura", icon: Trash2 },
@@ -933,6 +1004,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Agenda Cultural",
                 value: "Boletín cultural con eventos simples",
+                registerInstruction: "Registro informativo formal. Datos de evento y horarios sin adornos. Sin jerga.",
                 icon: Ticket,
                 actions: [
                     { label: "Concierto", value: "Anunciar un concierto local", icon: Music },
@@ -947,6 +1019,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Noticias Locales",
                 value: "Radio local noticia del barrio",
+                registerInstruction: "Registro noticioso formal. Objetivo, sin opinión personal ni coloquialismos.",
                 icon: Newspaper,
                 actions: [
                     { label: "Incidente Menor", value: "Contar un incidente menor en el barrio", icon: AlertTriangle },
@@ -959,6 +1032,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Deportes de Barrio",
                 value: "Boletín deportivo local",
+                registerInstruction: "Registro deportivo informativo formal. Puede haber entusiasmo moderado, pero sin jerga vulgar.",
                 icon: Dumbbell,
                 actions: [
                     { label: "Resultado", value: "Dar el resultado de un partido", icon: Star },
@@ -971,6 +1045,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Economía Doméstica",
                 value: "Boletín sobre precios y mercado",
+                registerInstruction: "Registro económico formal. Datos y consejos claros, sin coloquialismos.",
                 icon: DollarSign,
                 actions: [
                     { label: "Subida de Precio", value: "Informar subida de un producto", icon: TrendingUp },
@@ -983,6 +1058,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Salud Pública",
                 value: "Radio local recomendaciones de salud",
+                registerInstruction: "Registro sanitario formal. Tono calmado y objetivo. Sin coloquialismos.",
                 icon: Stethoscope,
                 actions: [
                     { label: "Campaña Vacunación", value: "Anunciar campaña de vacunación", icon: ShieldAlert },
@@ -995,6 +1071,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Transporte Regional",
                 value: "Noticias sobre buses y trenes",
+                registerInstruction: "Registro informativo formal. Horarios y rutas precisas. Sin jerga.",
                 icon: Train,
                 actions: [
                     { label: "Nuevo Horario", value: "Informar nuevo horario de buses", icon: Clock },
@@ -1007,6 +1084,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Clima Extremo",
                 value: "Boletín de clima con alertas",
+                registerInstruction: "Registro de alerta formal y serio. Mensajes claros, sin coloquialismos.",
                 icon: AlertOctagon,
                 actions: [
                     { label: "Alerta", value: "Declarar alerta por calor o frío", icon: AlertOctagon },
@@ -1021,6 +1099,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Política Municipal",
                 value: "Radio ciudad debate en ayuntamiento",
+                registerInstruction: "Registro político formal e impersonal. Resumen objetivo, sin opiniones personales.",
                 icon: Building,
                 actions: [
                     { label: "Debate", value: "Resumir un debate municipal", icon: MessageCircle },
@@ -1033,6 +1112,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Economía Nacional",
                 value: "Boletín sobre economía y empleo",
+                registerInstruction: "Registro económico formal. Datos verificables y tono objetivo. Sin coloquialismos.",
                 icon: PieChart,
                 actions: [
                     { label: "Dato de Inflación", value: "Dar un dato de inflación", icon: TrendingUp },
@@ -1045,6 +1125,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Tecnología y Sociedad",
                 value: "Noticias sobre tecnología y privacidad",
+                registerInstruction: "Registro informativo formal. Explicaciones claras de riesgos, sin jerga vulgar.",
                 icon: Laptop,
                 actions: [
                     { label: "Nuevo Servicio", value: "Presentar un nuevo servicio digital", icon: Sparkles },
@@ -1057,6 +1138,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Ciencia y Salud",
                 value: "Boletín con noticias científicas",
+                registerInstruction: "Registro divulgativo formal. Tono neutral, sin coloquialismos.",
                 icon: FlaskConical,
                 actions: [
                     { label: "Estudio Reciente", value: "Presentar un estudio reciente", icon: BookOpen },
@@ -1069,6 +1151,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Medio Ambiente",
                 value: "Noticias ambientales y emergencias",
+                registerInstruction: "Registro formal y urgente. Información precisa y objetiva. Sin coloquialismos.",
                 icon: TreePine,
                 actions: [
                     { label: "Incendio", value: "Reportar un incendio forestal", icon: AlertTriangle },
@@ -1081,6 +1164,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Tribunales",
                 value: "Noticias de juicio en curso",
+                registerInstruction: "Registro judicial formal. Lenguaje preciso, sin coloquialismos ni opiniones.",
                 icon: Gavel,
                 actions: [
                     { label: "Resumen del Caso", value: "Resumir el caso judicial", icon: FileText },
@@ -1093,6 +1177,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Economía Internacional",
                 value: "Boletín sobre comercio exterior",
+                registerInstruction: "Registro económico formal. Datos y análisis breves, sin coloquialismos.",
                 icon: Globe,
                 actions: [
                     { label: "Tipo de Cambio", value: "Dar el tipo de cambio actual", icon: Euro },
@@ -1107,6 +1192,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Última Hora",
                 value: "Radio nacional noticias de última hora",
+                registerInstruction: "Registro de última hora formal e impersonal. Prioriza hechos confirmados, sin coloquialismos.",
                 icon: AlertOctagon,
                 actions: [
                     { label: "Titular Urgente", value: "Leer un titular urgente", icon: Megaphone },
@@ -1119,6 +1205,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Cobertura de Crisis",
                 value: "Cobertura en directo de crisis",
+                registerInstruction: "Registro formal y sobrio. Información verificada y tono sereno, sin coloquialismos.",
                 icon: Siren,
                 actions: [
                     { label: "Balance de Daños", value: "Dar balance de daños", icon: AlertTriangle },
@@ -1131,6 +1218,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Investigación Especial",
                 value: "Informe de investigación periodística",
+                registerInstruction: "Registro periodístico formal. Tono objetivo y preciso, sin coloquialismos.",
                 icon: Search,
                 actions: [
                     { label: "Corrupción", value: "Destapar un caso de corrupción", icon: AlertTriangle },
@@ -1143,6 +1231,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Entrevista en Directo",
                 value: "Entrevista dura en directo",
+                registerInstruction: "Registro formal de entrevista. Preguntas firmes, sin coloquialismos ni chistes.",
                 icon: Mic,
                 actions: [
                     { label: "Pregunta Incómoda", value: "Hacer una pregunta difícil", icon: AlertTriangle },
@@ -1155,6 +1244,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Editorial del Día",
                 value: "Editorial con opinión argumentada",
+                registerInstruction: "Registro formal argumentativo. Opinión estructurada y respetuosa, sin coloquialismos.",
                 icon: MessageCircle,
                 actions: [
                     { label: "Opinión", value: "Dar una opinión clara", icon: ThumbsUp },
@@ -1167,6 +1257,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Economía de Mercados",
                 value: "Informe de mercados y bolsa",
+                registerInstruction: "Registro financiero formal. Datos y análisis sobrios, sin coloquialismos.",
                 icon: LineChart,
                 actions: [
                     { label: "Movimiento Bursátil", value: "Describir movimientos de bolsa", icon: TrendingUp },
@@ -1179,6 +1270,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Geopolítica",
                 value: "Informe internacional y diplomacia",
+                registerInstruction: "Registro internacional formal. Tono neutral y preciso, sin coloquialismos.",
                 icon: Globe,
                 actions: [
                     { label: "Cumbre Internacional", value: "Resumir una cumbre internacional", icon: Map },
@@ -1191,6 +1283,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Cultura y Sociedad",
                 value: "Debate cultural en radio",
+                registerInstruction: "Registro formal y reflexivo. Argumentos claros, sin coloquialismos.",
                 icon: Drama,
                 actions: [
                     { label: "Censura", value: "Debatir sobre censura cultural", icon: Ban },
@@ -1207,6 +1300,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Mi Día de Hoy",
                 value: "Monólogo simple sobre el día",
+                registerInstruction: "Registro narrativo simple y cercano. Primera persona. Frases claras, sin jerga vulgar.",
                 icon: Sun,
                 actions: [
                     { label: "Mañana", value: "Describir la mañana", icon: Sun },
@@ -1219,6 +1313,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Mi Familia",
                 value: "Monólogo sobre la familia",
+                registerInstruction: "Registro cercano y afectivo. Primera persona, tono cálido. Evitar coloquialismos fuertes.",
                 icon: Heart,
                 actions: [
                     { label: "Presentar Familia", value: "Decir cuántos son en la familia", icon: UserPlus },
@@ -1231,6 +1326,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Mi Barrio",
                 value: "Monólogo sobre el barrio",
+                registerInstruction: "Registro descriptivo sencillo. Primera persona. Lenguaje claro, sin jerga vulgar.",
                 icon: Map,
                 actions: [
                     { label: "Descripción", value: "Describir el barrio", icon: MapPin },
@@ -1243,6 +1339,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Mi Mascota",
                 value: "Monólogo sobre una mascota",
+                registerInstruction: "Registro cercano y tierno. Primera persona. Evitar coloquialismos fuertes.",
                 icon: Dog,
                 actions: [
                     { label: "Presentar Mascota", value: "Decir nombre y tipo", icon: Dog },
@@ -1255,6 +1352,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Recuerdo Feliz",
                 value: "Monólogo sobre un recuerdo feliz",
+                registerInstruction: "Registro emotivo y sencillo. Primera persona. Sin jerga vulgar.",
                 icon: Smile,
                 actions: [
                     { label: "Lugar del Recuerdo", value: "Decir dónde fue", icon: MapPin },
@@ -1269,6 +1367,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Viaje Corto",
                 value: "Relato de viaje breve",
+                registerInstruction: "Registro narrativo simple. Primera persona, orden cronológico. Sin coloquialismos fuertes.",
                 icon: Plane,
                 actions: [
                     { label: "Planificación", value: "Contar cómo planeó el viaje", icon: Calendar },
@@ -1281,6 +1380,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Primer Trabajo/Clase",
                 value: "Relato de primera experiencia",
+                registerInstruction: "Registro narrativo claro. Primera persona, tono respetuoso. Sin jerga vulgar.",
                 icon: Briefcase,
                 actions: [
                     { label: "Contexto", value: "Explicar cómo empezó", icon: BookOpen },
@@ -1293,6 +1393,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Día Difícil",
                 value: "Monólogo sobre un día complicado",
+                registerInstruction: "Registro emotivo pero claro. Primera persona. Evitar groserías.",
                 icon: Frown,
                 actions: [
                     { label: "Qué Salió Mal", value: "Explicar qué fue mal", icon: AlertTriangle },
@@ -1305,6 +1406,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Receta en Casa",
                 value: "Monólogo explicando receta sencilla",
+                registerInstruction: "Registro instructivo simple. Primera persona o impersonal. Vocabulario claro, sin coloquialismos.",
                 icon: Utensils,
                 actions: [
                     { label: "Ingredientes", value: "Listar ingredientes básicos", icon: Menu },
@@ -1317,6 +1419,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Una Amistad",
                 value: "Relato sobre amistad",
+                registerInstruction: "Registro cercano y positivo. Primera persona. Evitar jerga vulgar.",
                 icon: HeartHandshake,
                 actions: [
                     { label: "Cómo Se Conocieron", value: "Contar cómo se conocieron", icon: UserPlus },
@@ -1329,6 +1432,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Evento Cultural",
                 value: "Monólogo sobre evento cultural",
+                registerInstruction: "Registro descriptivo claro. Primera persona, tono respetuoso. Sin jerga vulgar.",
                 icon: Music,
                 actions: [
                     { label: "Dónde Fue", value: "Decir dónde fue", icon: MapPin },
@@ -1343,6 +1447,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Decisión Importante",
                 value: "Monólogo sobre una decisión",
+                registerInstruction: "Registro reflexivo semi-formal. Primera persona. Léxico claro, sin coloquialismos.",
                 icon: Scale,
                 actions: [
                     { label: "Contexto", value: "Explicar el contexto", icon: FileText },
@@ -1355,6 +1460,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Problema y Solución",
                 value: "Relato de un problema complejo",
+                registerInstruction: "Registro narrativo ordenado. Primera persona. Tono serio, sin jerga vulgar.",
                 icon: AlertTriangle,
                 actions: [
                     { label: "Problema", value: "Describir el problema", icon: AlertTriangle },
@@ -1367,6 +1473,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Historia de Superación",
                 value: "Monólogo sobre superación",
+                registerInstruction: "Registro motivador y claro. Primera persona. Evitar coloquialismos fuertes.",
                 icon: TrendingUp,
                 actions: [
                     { label: "Dificultad", value: "Describir dificultad inicial", icon: AlertCircle },
@@ -1379,6 +1486,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Relato de Ciudad",
                 value: "Monólogo sobre cambios en la ciudad",
+                registerInstruction: "Registro descriptivo semi-formal. Primera persona. Sin jerga vulgar.",
                 icon: Building,
                 actions: [
                     { label: "Cambio", value: "Explicar un cambio reciente", icon: Sparkles },
@@ -1391,6 +1499,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Crónica de Evento",
                 value: "Relato cronológico de un evento",
+                registerInstruction: "Registro narrativo ordenado. Primera persona. Sin coloquialismos fuertes.",
                 icon: Calendar,
                 actions: [
                     { label: "Inicio", value: "Describir el inicio", icon: Flag },
@@ -1403,6 +1512,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Reflexión Cultural",
                 value: "Monólogo sobre cultura y tradición",
+                registerInstruction: "Registro reflexivo y semi-formal. Primera persona. Léxico cuidado, sin jerga vulgar.",
                 icon: Palette,
                 actions: [
                     { label: "Tradición", value: "Explicar una tradición", icon: BookOpen },
@@ -1415,6 +1525,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Carta Abierta",
                 value: "Monólogo en forma de carta",
+                registerInstruction: "Registro epistolar formal. Primera persona dirigida a un destinatario, tono respetuoso. Sin coloquialismos.",
                 icon: FileText,
                 actions: [
                     { label: "Destinatario", value: "Decir a quién va la carta", icon: UserPlus },
@@ -1429,6 +1540,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Ensayo Personal",
                 value: "Monólogo con tesis y argumentos",
+                registerInstruction: "Registro formal argumentativo. Primera persona moderada. Léxico preciso, sin coloquialismos.",
                 icon: FileText,
                 actions: [
                     { label: "Tesis", value: "Presentar una tesis personal", icon: Lightbulb },
@@ -1441,6 +1553,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Confesión y Catarsis",
                 value: "Monólogo íntimo de confesión",
+                registerInstruction: "Registro íntimo y serio. Primera persona. Lenguaje cuidado, sin vulgaridades.",
                 icon: Heart,
                 actions: [
                     { label: "Confesión", value: "Confesar un hecho", icon: Lock },
@@ -1453,6 +1566,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Crónica de Investigación",
                 value: "Monólogo investigativo",
+                registerInstruction: "Registro periodístico formal. Primera persona con tono objetivo. Sin coloquialismos.",
                 icon: Search,
                 actions: [
                     { label: "Inicio", value: "Explicar cómo empezó", icon: Flag },
@@ -1465,6 +1579,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Relato Literario",
                 value: "Monólogo narrativo literario",
+                registerInstruction: "Registro literario cuidado. Primera persona o narrador, tono estilizado. Sin jerga vulgar.",
                 icon: BookOpen,
                 actions: [
                     { label: "Inicio Atmosférico", value: "Crear ambiente inicial", icon: Moon },
@@ -1477,6 +1592,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Discurso Motivacional",
                 value: "Monólogo motivacional",
+                registerInstruction: "Registro inspirador semi-formal. Primera persona. Lenguaje positivo, sin coloquialismos vulgares.",
                 icon: Megaphone,
                 actions: [
                     { label: "Historia Personal", value: "Contar historia personal", icon: Heart },
@@ -1489,6 +1605,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Análisis Social",
                 value: "Monólogo de análisis social",
+                registerInstruction: "Registro formal analítico. Primera persona moderada. Datos y argumentos claros, sin coloquialismos.",
                 icon: Globe,
                 actions: [
                     { label: "Problema Social", value: "Describir un problema social", icon: AlertTriangle },
@@ -1501,6 +1618,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Memoria Histórica",
                 value: "Monólogo sobre memoria histórica",
+                registerInstruction: "Registro formal y respetuoso. Primera persona o narrador, tono solemne. Sin coloquialismos.",
                 icon: BookOpen,
                 actions: [
                     { label: "Contexto", value: "Dar contexto histórico", icon: Calendar },
@@ -1513,6 +1631,7 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             {
                 label: "Monólogo Humorístico",
                 value: "Monólogo con humor",
+                registerInstruction: "Registro humorístico controlado. Primera persona, tono ligero. Permitidas expresiones coloquiales suaves, prohibidas groserías.",
                 icon: Smile,
                 actions: [
                     { label: "Tema Cotidiano", value: "Elegir un tema cotidiano", icon: Home },

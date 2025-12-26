@@ -165,7 +165,7 @@ const App: React.FC = () => {
             if (isCustomMode) {
                 finalTopic = customTopicInput;
             } else {
-                finalTopic = `Contexto Físico: ${selectedLocus.value} || Situación Específica: ${selectedModus.value}`;
+                finalTopic = `Contexto Físico: ${selectedLocus.value} || Situación Específica: ${selectedModus.value} || Registro: ${selectedLocus.registerInstruction}`;
             }
         }
 
