@@ -154,6 +154,20 @@ const getExerciseInstructions = (level: Level, mode: AppMode): string => {
   return `NIVEL C1-C2. 2 ejercicios COMPRENSIÓN (Matices/Ironía). 2 ejercicios VOCABULARIO (Jerga/Registro).`;
 };
 
+const getRegisterInstruction = (textType: TextType): string => {
+  switch (textType) {
+    case TextType.RadioNews:
+      return `REGISTRO NOTICIERO: Formal, neutro, objetivo e impersonal. Frases completas y tono informativo. PROHIBIDO: lunfardo, jerga, coloquialismos, muletillas, chistes, ironías, insultos o palabras como "weón", "güey", "boludo".`;
+    case TextType.PodcastInterview:
+      return `REGISTRO PODCAST-ENTREVISTA: Semi-formal y conversacional. Entrevistador con cortesía estándar; entrevistado puede ser cercano pero sin vulgaridades. PERMITIDO: coloquialismos leves y 1–2 expresiones dialectales suaves. PROHIBIDO: lunfardo fuerte, insultos, groserías o exceso de muletillas.`;
+    case TextType.Monologue:
+      return `REGISTRO MONÓLOGO/STORYTELLING: Narrativo cuidado y coherente. Puede ser cercano si es personal, pero con dicción clara. PERMITIDO: coloquialidad moderada y rasgos dialectales suaves si el contexto lo justifica. PROHIBIDO: jerga fuerte o insultos; no saturar con muletillas.`;
+    case TextType.Dialogue:
+    default:
+      return `REGISTRO DIÁLOGO: Conversación natural entre nativos. Ajusta formalidad según la situación: si hay jerarquía/servicio/trámite, usa trato formal; si es entre pares, registro informal respetuoso. PERMITIDO: coloquialismos y léxico dialectal del acento. EVITA: groserías o lunfardo excesivo salvo que el tema lo exija explícitamente.`;
+  }
+};
+
 // --- MAIN GENERATOR ---
 
 export const generateLessonPlan = async (
@@ -232,6 +246,7 @@ export const generateLessonPlan = async (
   }
 
   const exerciseLogic = getExerciseInstructions(level, mode);
+  const registerInstruction = getRegisterInstruction(textType);
 
   const jsonStructure = `
   {
@@ -265,6 +280,7 @@ export const generateLessonPlan = async (
 
   CONTEXT: ${profileInstruction}
   RULES: ${constraint}
+  REGISTER: ${registerInstruction}
   SPEAKERS: ${speakerEmphasis}
   EXERCISES: ${exerciseLogic}
   LENGTH: STICK TO ${length}.
