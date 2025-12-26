@@ -951,64 +951,64 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
         [Level.Intro]: [
             {
                 label: "Boletín del Tiempo",
-                value: "Radio local reporte del clima sencillo",
-                registerInstruction: "Registro noticiero formal e impersonal. Sin primera persona. Frases informativas, sin coloquialismos ni muletillas.",
+                value: "Radio local con reporte costero: viento, mareas y barrios afectados",
+                registerInstruction: "Registro: formal noticiero e impersonal, en tercera persona. Sin primera persona. Lunfardo: no. Dicción clara y ritmo informativo.",
                 icon: Sun,
                 actions: [
-                    { label: "Temperatura", value: "Decir la temperatura actual", icon: Thermometer },
-                    { label: "Pronóstico Mañana", value: "Indicar el clima de mañana", icon: Sun },
-                    { label: "Aviso de Lluvia", value: "Avisar que lloverá", icon: Umbrella },
-                    { label: "Consejo Ropa", value: "Recomendar llevar abrigo o paraguas", icon: Shirt },
-                    { label: "Hora del Reporte", value: "Decir la hora exacta del reporte", icon: Clock }
+                    { label: "Temperatura", value: "Informar temperatura actual por barrios", icon: Thermometer },
+                    { label: "Pronóstico Mañana", value: "Indicar el clima de mañana con rangos", icon: Sun },
+                    { label: "Aviso de Lluvia", value: "Avisar lluvia y ráfagas previstas", icon: Umbrella },
+                    { label: "Consejo Ropa", value: "Recomendar abrigo, piloto o paraguas", icon: Shirt },
+                    { label: "Hora del Reporte", value: "Anunciar la hora exacta del boletín", icon: Clock }
                 ]
             },
             {
                 label: "Tráfico Local",
-                value: "Boletín de tráfico en la ciudad",
-                registerInstruction: "Registro informativo neutral. Datos de vías y tiempos con precisión. Prohibidos coloquialismos.",
+                value: "Boletín de tráfico en hora pico con túnel, circunvalación y obras",
+                registerInstruction: "Registro: formal informativo y objetivo. Lunfardo: no. Sin opiniones; datos precisos de vías y tiempos.",
                 icon: Car,
                 actions: [
-                    { label: "Atasco", value: "Reportar un atasco en una calle", icon: AlertTriangle },
-                    { label: "Ruta Alternativa", value: "Dar una ruta alternativa sencilla", icon: Map },
-                    { label: "Calle Cerrada", value: "Anunciar un cierre temporal", icon: AlertOctagon },
-                    { label: "Tiempo Estimado", value: "Decir cuánto tarda el trayecto", icon: Clock },
+                    { label: "Atasco", value: "Reportar un atasco en un acceso principal", icon: AlertTriangle },
+                    { label: "Ruta Alternativa", value: "Dar una alternativa por avenidas secundarias", icon: Map },
+                    { label: "Calle Cerrada", value: "Anunciar cierre temporal por obras", icon: AlertOctagon },
+                    { label: "Tiempo Estimado", value: "Informar minutos estimados de demora", icon: Clock },
                     { label: "Consejo Transporte", value: "Sugerir usar bus o metro", icon: Bus }
                 ]
             },
             {
                 label: "Noticias de Escuela",
-                value: "Boletín escolar para estudiantes",
-                registerInstruction: "Registro institucional formal, tono claro y directo. Sin jerga ni bromas.",
+                value: "Boletín institucional de un instituto público con comunicados de dirección",
+                registerInstruction: "Registro: formal institucional y directo. Lunfardo: no. Tono claro, sin bromas ni familiaridad.",
                 icon: School,
                 actions: [
                     { label: "Actividad", value: "Anunciar una actividad escolar", icon: Flag },
                     { label: "Examen", value: "Recordar fecha de examen", icon: FileText },
                     { label: "Evento Deportivo", value: "Anunciar partido del colegio", icon: Dumbbell },
                     { label: "Cambio Horario", value: "Informar cambio de horario", icon: Clock },
-                    { label: "Mensaje Dirección", value: "Dar un mensaje de la dirección", icon: MessageCircle }
+                    { label: "Mensaje Dirección", value: "Leer un mensaje oficial de dirección", icon: MessageCircle }
                 ]
             },
             {
                 label: "Servicios de la Ciudad",
-                value: "Radio municipal avisos básicos",
-                registerInstruction: "Registro municipal formal e impersonal. Mensajes claros y precisos. Sin coloquialismos.",
+                value: "Radio municipal con avisos de recolección y cortes programados por barrios",
+                registerInstruction: "Registro: formal municipal e impersonal. Lunfardo: no. Mensajes breves y precisos.",
                 icon: Building,
                 actions: [
                     { label: "Basura", value: "Avisar cambio de horario de basura", icon: Trash2 },
-                    { label: "Corte de Agua/Luz", value: "Anunciar corte temporal", icon: AlertCircle },
-                    { label: "Horario Biblioteca", value: "Informar horario de la biblioteca", icon: BookOpen },
-                    { label: "Campaña Limpieza", value: "Anunciar campaña de limpieza", icon: Sparkles },
+                    { label: "Corte de Agua/Luz", value: "Anunciar corte temporal en zonas específicas", icon: AlertCircle },
+                    { label: "Horario Biblioteca", value: "Informar horario especial de la biblioteca", icon: BookOpen },
+                    { label: "Campaña Limpieza", value: "Anunciar campaña de limpieza barrial", icon: Sparkles },
                     { label: "Teléfono de Información", value: "Dar un número de contacto", icon: Phone }
                 ]
             },
             {
                 label: "Agenda Cultural",
-                value: "Boletín cultural con eventos simples",
-                registerInstruction: "Registro informativo formal. Datos de evento y horarios sin adornos. Sin jerga.",
+                value: "Agenda cultural de fin de semana con teatro independiente y feria del libro",
+                registerInstruction: "Registro: formal informativo. Lunfardo: no. Datos de fechas, horarios y sedes sin adornos.",
                 icon: Ticket,
                 actions: [
                     { label: "Concierto", value: "Anunciar un concierto local", icon: Music },
-                    { label: "Museo Gratis", value: "Informar día gratis en museo", icon: Palette },
+                    { label: "Museo Gratis", value: "Informar día gratuito en museo", icon: Palette },
                     { label: "Feria", value: "Invitar a una feria en la plaza", icon: MapPin },
                     { label: "Hora y Lugar", value: "Dar hora y lugar del evento", icon: Clock },
                     { label: "Invitación", value: "Animar a asistir", icon: ThumbsUp }
@@ -1018,8 +1018,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
         [Level.Beginner]: [
             {
                 label: "Noticias Locales",
-                value: "Radio local noticia del barrio",
-                registerInstruction: "Registro noticioso formal. Objetivo, sin opinión personal ni coloquialismos.",
+                value: "Noticia de barrio sobre cierre de puente peatonal y obras en la ribera",
+                registerInstruction: "Registro: formal noticioso y objetivo. Lunfardo: no. Sin opinión personal.",
                 icon: Newspaper,
                 actions: [
                     { label: "Incidente Menor", value: "Contar un incidente menor en el barrio", icon: AlertTriangle },
@@ -1031,8 +1031,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Deportes de Barrio",
-                value: "Boletín deportivo local",
-                registerInstruction: "Registro deportivo informativo formal. Puede haber entusiasmo moderado, pero sin jerga vulgar.",
+                value: "Boletín deportivo de liga barrial y torneo escolar de fin de semana",
+                registerInstruction: "Registro: formal deportivo con entusiasmo moderado. Lunfardo: no. Evitar gritos o jergas.",
                 icon: Dumbbell,
                 actions: [
                     { label: "Resultado", value: "Dar el resultado de un partido", icon: Star },
@@ -1044,8 +1044,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Economía Doméstica",
-                value: "Boletín sobre precios y mercado",
-                registerInstruction: "Registro económico formal. Datos y consejos claros, sin coloquialismos.",
+                value: "Boletín sobre precios de la canasta básica en mercados barriales",
+                registerInstruction: "Registro: formal económico. Lunfardo: no. Datos y consejos claros, sin opinología.",
                 icon: DollarSign,
                 actions: [
                     { label: "Subida de Precio", value: "Informar subida de un producto", icon: TrendingUp },
@@ -1057,8 +1057,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Salud Pública",
-                value: "Radio local recomendaciones de salud",
-                registerInstruction: "Registro sanitario formal. Tono calmado y objetivo. Sin coloquialismos.",
+                value: "Avisos de salud con campaña antigripal y horarios de centros",
+                registerInstruction: "Registro: formal sanitario y calmado. Lunfardo: no. Mensajes objetivos.",
                 icon: Stethoscope,
                 actions: [
                     { label: "Campaña Vacunación", value: "Anunciar campaña de vacunación", icon: ShieldAlert },
@@ -1070,8 +1070,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Transporte Regional",
-                value: "Noticias sobre buses y trenes",
-                registerInstruction: "Registro informativo formal. Horarios y rutas precisas. Sin jerga.",
+                value: "Noticias sobre buses interurbanos y tren regional por obras",
+                registerInstruction: "Registro: formal informativo. Lunfardo: no. Horarios y rutas precisas.",
                 icon: Train,
                 actions: [
                     { label: "Nuevo Horario", value: "Informar nuevo horario de buses", icon: Clock },
@@ -1083,8 +1083,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Clima Extremo",
-                value: "Boletín de clima con alertas",
-                registerInstruction: "Registro de alerta formal y serio. Mensajes claros, sin coloquialismos.",
+                value: "Alerta por ola de calor o tormenta con protocolo municipal",
+                registerInstruction: "Registro: formal de alerta y serio. Lunfardo: no. Mensajes directos y claros.",
                 icon: AlertOctagon,
                 actions: [
                     { label: "Alerta", value: "Declarar alerta por calor o frío", icon: AlertOctagon },
@@ -1098,8 +1098,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
         [Level.Intermediate]: [
             {
                 label: "Política Municipal",
-                value: "Radio ciudad debate en ayuntamiento",
-                registerInstruction: "Registro político formal e impersonal. Resumen objetivo, sin opiniones personales.",
+                value: "Sesión del concejo sobre presupuesto participativo del distrito",
+                registerInstruction: "Registro: formal político e impersonal. Lunfardo: no. Resumen objetivo sin opiniones.",
                 icon: Building,
                 actions: [
                     { label: "Debate", value: "Resumir un debate municipal", icon: MessageCircle },
@@ -1111,8 +1111,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Economía Nacional",
-                value: "Boletín sobre economía y empleo",
-                registerInstruction: "Registro económico formal. Datos verificables y tono objetivo. Sin coloquialismos.",
+                value: "Boletín con inflación mensual y datos de empleo juvenil",
+                registerInstruction: "Registro: formal económico. Lunfardo: no. Datos verificables y tono objetivo.",
                 icon: PieChart,
                 actions: [
                     { label: "Dato de Inflación", value: "Dar un dato de inflación", icon: TrendingUp },
@@ -1124,8 +1124,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Tecnología y Sociedad",
-                value: "Noticias sobre tecnología y privacidad",
-                registerInstruction: "Registro informativo formal. Explicaciones claras de riesgos, sin jerga vulgar.",
+                value: "Noticias sobre nueva ley de datos y filtración en app popular",
+                registerInstruction: "Registro: formal informativo. Lunfardo: no. Explicaciones claras de riesgos.",
                 icon: Laptop,
                 actions: [
                     { label: "Nuevo Servicio", value: "Presentar un nuevo servicio digital", icon: Sparkles },
@@ -1137,8 +1137,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Ciencia y Salud",
-                value: "Boletín con noticias científicas",
-                registerInstruction: "Registro divulgativo formal. Tono neutral, sin coloquialismos.",
+                value: "Boletín sobre estudio de salud pública y uso de antibióticos",
+                registerInstruction: "Registro: formal divulgativo. Lunfardo: no. Tono neutral y preciso.",
                 icon: FlaskConical,
                 actions: [
                     { label: "Estudio Reciente", value: "Presentar un estudio reciente", icon: BookOpen },
@@ -1150,8 +1150,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Medio Ambiente",
-                value: "Noticias ambientales y emergencias",
-                registerInstruction: "Registro formal y urgente. Información precisa y objetiva. Sin coloquialismos.",
+                value: "Noticias sobre incendio en parque natural con evacuación de campings",
+                registerInstruction: "Registro: formal y urgente. Lunfardo: no. Información precisa y objetiva.",
                 icon: TreePine,
                 actions: [
                     { label: "Incendio", value: "Reportar un incendio forestal", icon: AlertTriangle },
@@ -1163,8 +1163,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Tribunales",
-                value: "Noticias de juicio en curso",
-                registerInstruction: "Registro judicial formal. Lenguaje preciso, sin coloquialismos ni opiniones.",
+                value: "Noticias de juicio por fraude en licitaciones municipales",
+                registerInstruction: "Registro: formal judicial. Lunfardo: no. Lenguaje preciso, sin opiniones.",
                 icon: Gavel,
                 actions: [
                     { label: "Resumen del Caso", value: "Resumir el caso judicial", icon: FileText },
@@ -1176,8 +1176,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Economía Internacional",
-                value: "Boletín sobre comercio exterior",
-                registerInstruction: "Registro económico formal. Datos y análisis breves, sin coloquialismos.",
+                value: "Boletín sobre exportación de litio y nuevos aranceles",
+                registerInstruction: "Registro: formal económico. Lunfardo: no. Datos y análisis breves.",
                 icon: Globe,
                 actions: [
                     { label: "Tipo de Cambio", value: "Dar el tipo de cambio actual", icon: Euro },
@@ -1191,8 +1191,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
         [Level.Advanced]: [
             {
                 label: "Última Hora",
-                value: "Radio nacional noticias de última hora",
-                registerInstruction: "Registro de última hora formal e impersonal. Prioriza hechos confirmados, sin coloquialismos.",
+                value: "Última hora por sismo en la capital con cortes de energía",
+                registerInstruction: "Registro: formal de última hora e impersonal. Lunfardo: no. Prioriza hechos confirmados.",
                 icon: AlertOctagon,
                 actions: [
                     { label: "Titular Urgente", value: "Leer un titular urgente", icon: Megaphone },
@@ -1204,8 +1204,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Cobertura de Crisis",
-                value: "Cobertura en directo de crisis",
-                registerInstruction: "Registro formal y sobrio. Información verificada y tono sereno, sin coloquialismos.",
+                value: "Cobertura en directo de derrame químico en un río",
+                registerInstruction: "Registro: formal y sobrio. Lunfardo: no. Información verificada y tono sereno.",
                 icon: Siren,
                 actions: [
                     { label: "Balance de Daños", value: "Dar balance de daños", icon: AlertTriangle },
@@ -1217,8 +1217,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Investigación Especial",
-                value: "Informe de investigación periodística",
-                registerInstruction: "Registro periodístico formal. Tono objetivo y preciso, sin coloquialismos.",
+                value: "Informe de investigación sobre red de sobornos en obra pública",
+                registerInstruction: "Registro: formal periodístico. Lunfardo: no. Tono objetivo y preciso.",
                 icon: Search,
                 actions: [
                     { label: "Corrupción", value: "Destapar un caso de corrupción", icon: AlertTriangle },
@@ -1230,21 +1230,21 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Entrevista en Directo",
-                value: "Entrevista dura en directo",
-                registerInstruction: "Registro formal de entrevista. Preguntas firmes, sin coloquialismos ni chistes.",
+                value: "Segmento con resumen de preguntas y respuestas en conferencia de prensa",
+                registerInstruction: "Registro: formal informativo. Lunfardo: no. Narrador resume el intercambio sin diálogo directo.",
                 icon: Mic,
                 actions: [
-                    { label: "Pregunta Incómoda", value: "Hacer una pregunta difícil", icon: AlertTriangle },
-                    { label: "Respuesta Evasiva", value: "Detectar una evasiva", icon: Eye },
-                    { label: "Repregunta", value: "Hacer una repregunta firme", icon: Zap },
+                    { label: "Pregunta Incómoda", value: "Mencionar una pregunta difícil que se realizó", icon: AlertTriangle },
+                    { label: "Respuesta Evasiva", value: "Señalar una respuesta evasiva", icon: Eye },
+                    { label: "Repregunta", value: "Resumir una repregunta clave", icon: Zap },
                     { label: "Dato Contrastado", value: "Citar un dato verificado", icon: CheckCircle },
                     { label: "Cierre con Titular", value: "Cerrar con una frase potente", icon: Megaphone }
                 ]
             },
             {
                 label: "Editorial del Día",
-                value: "Editorial con opinión argumentada",
-                registerInstruction: "Registro formal argumentativo. Opinión estructurada y respetuosa, sin coloquialismos.",
+                value: "Editorial sobre política de vivienda y alquileres en la ciudad",
+                registerInstruction: "Registro: formal argumentativo. Lunfardo: no. Opinión estructurada y respetuosa.",
                 icon: MessageCircle,
                 actions: [
                     { label: "Opinión", value: "Dar una opinión clara", icon: ThumbsUp },
@@ -1256,8 +1256,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Economía de Mercados",
-                value: "Informe de mercados y bolsa",
-                registerInstruction: "Registro financiero formal. Datos y análisis sobrios, sin coloquialismos.",
+                value: "Informe de mercados con apertura de bolsa y riesgo país",
+                registerInstruction: "Registro: formal financiero. Lunfardo: no. Datos y análisis sobrios.",
                 icon: LineChart,
                 actions: [
                     { label: "Movimiento Bursátil", value: "Describir movimientos de bolsa", icon: TrendingUp },
@@ -1269,8 +1269,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Geopolítica",
-                value: "Informe internacional y diplomacia",
-                registerInstruction: "Registro internacional formal. Tono neutral y preciso, sin coloquialismos.",
+                value: "Informe sobre cumbre regional y tensión en frontera",
+                registerInstruction: "Registro: formal internacional. Lunfardo: no. Tono neutral y preciso.",
                 icon: Globe,
                 actions: [
                     { label: "Cumbre Internacional", value: "Resumir una cumbre internacional", icon: Map },
@@ -1282,8 +1282,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Cultura y Sociedad",
-                value: "Debate cultural en radio",
-                registerInstruction: "Registro formal y reflexivo. Argumentos claros, sin coloquialismos.",
+                value: "Debate cultural sobre inteligencia artificial en el arte",
+                registerInstruction: "Registro: formal y reflexivo. Lunfardo: no. Argumentos claros y ordenados.",
                 icon: Drama,
                 actions: [
                     { label: "Censura", value: "Debatir sobre censura cultural", icon: Ban },
@@ -1299,8 +1299,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
         [Level.Intro]: [
             {
                 label: "Mi Día de Hoy",
-                value: "Monólogo simple sobre el día",
-                registerInstruction: "Registro narrativo simple y cercano. Primera persona. Frases claras, sin jerga vulgar.",
+                value: "Monólogo sobre un día de trámites con lluvia y viaje en metro",
+                registerInstruction: "Registro: informal cercano. Primera persona. Lunfardo: no. Frases claras y simples.",
                 icon: Sun,
                 actions: [
                     { label: "Mañana", value: "Describir la mañana", icon: Sun },
@@ -1312,8 +1312,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Mi Familia",
-                value: "Monólogo sobre la familia",
-                registerInstruction: "Registro cercano y afectivo. Primera persona, tono cálido. Evitar coloquialismos fuertes.",
+                value: "Monólogo sobre un almuerzo dominical en un departamento pequeño",
+                registerInstruction: "Registro: informal afectivo. Primera persona, tono cálido. Lunfardo: no.",
                 icon: Heart,
                 actions: [
                     { label: "Presentar Familia", value: "Decir cuántos son en la familia", icon: UserPlus },
@@ -1325,8 +1325,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Mi Barrio",
-                value: "Monólogo sobre el barrio",
-                registerInstruction: "Registro descriptivo sencillo. Primera persona. Lenguaje claro, sin jerga vulgar.",
+                value: "Monólogo sobre un barrio con feria barrial, murales y plaza",
+                registerInstruction: "Registro: informal descriptivo. Primera persona. Lunfardo: no. Lenguaje claro.",
                 icon: Map,
                 actions: [
                     { label: "Descripción", value: "Describir el barrio", icon: MapPin },
@@ -1338,8 +1338,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Mi Mascota",
-                value: "Monólogo sobre una mascota",
-                registerInstruction: "Registro cercano y tierno. Primera persona. Evitar coloquialismos fuertes.",
+                value: "Monólogo sobre un perro rescatado y paseos por la plaza",
+                registerInstruction: "Registro: informal y tierno. Primera persona. Lunfardo: no.",
                 icon: Dog,
                 actions: [
                     { label: "Presentar Mascota", value: "Decir nombre y tipo", icon: Dog },
@@ -1351,8 +1351,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Recuerdo Feliz",
-                value: "Monólogo sobre un recuerdo feliz",
-                registerInstruction: "Registro emotivo y sencillo. Primera persona. Sin jerga vulgar.",
+                value: "Monólogo sobre un cumpleaños sorpresa en casa de la abuela",
+                registerInstruction: "Registro: informal emotivo. Primera persona. Lunfardo: no.",
                 icon: Smile,
                 actions: [
                     { label: "Lugar del Recuerdo", value: "Decir dónde fue", icon: MapPin },
@@ -1366,8 +1366,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
         [Level.Beginner]: [
             {
                 label: "Viaje Corto",
-                value: "Relato de viaje breve",
-                registerInstruction: "Registro narrativo simple. Primera persona, orden cronológico. Sin coloquialismos fuertes.",
+                value: "Relato de escapada a un pueblo costero con bus nocturno",
+                registerInstruction: "Registro: informal narrativo. Primera persona, orden cronológico. Lunfardo: no.",
                 icon: Plane,
                 actions: [
                     { label: "Planificación", value: "Contar cómo planeó el viaje", icon: Calendar },
@@ -1379,8 +1379,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Primer Trabajo/Clase",
-                value: "Relato de primera experiencia",
-                registerInstruction: "Registro narrativo claro. Primera persona, tono respetuoso. Sin jerga vulgar.",
+                value: "Relato del primer día en una cafetería universitaria",
+                registerInstruction: "Registro: informal respetuoso. Primera persona. Lunfardo: no.",
                 icon: Briefcase,
                 actions: [
                     { label: "Contexto", value: "Explicar cómo empezó", icon: BookOpen },
@@ -1392,8 +1392,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Día Difícil",
-                value: "Monólogo sobre un día complicado",
-                registerInstruction: "Registro emotivo pero claro. Primera persona. Evitar groserías.",
+                value: "Monólogo sobre un día complicado con corte de luz y llegar tarde",
+                registerInstruction: "Registro: informal emotivo pero claro. Primera persona. Lunfardo: no.",
                 icon: Frown,
                 actions: [
                     { label: "Qué Salió Mal", value: "Explicar qué fue mal", icon: AlertTriangle },
@@ -1405,8 +1405,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Receta en Casa",
-                value: "Monólogo explicando receta sencilla",
-                registerInstruction: "Registro instructivo simple. Primera persona o impersonal. Vocabulario claro, sin coloquialismos.",
+                value: "Monólogo explicando una tortilla de papas paso a paso",
+                registerInstruction: "Registro: informal instructivo. Primera persona o impersonal. Lunfardo: no.",
                 icon: Utensils,
                 actions: [
                     { label: "Ingredientes", value: "Listar ingredientes básicos", icon: Menu },
@@ -1418,8 +1418,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Una Amistad",
-                value: "Relato sobre amistad",
-                registerInstruction: "Registro cercano y positivo. Primera persona. Evitar jerga vulgar.",
+                value: "Relato de amistad nacida en un curso de idioma",
+                registerInstruction: "Registro: informal cercano y positivo. Primera persona. Lunfardo: no.",
                 icon: HeartHandshake,
                 actions: [
                     { label: "Cómo Se Conocieron", value: "Contar cómo se conocieron", icon: UserPlus },
@@ -1431,8 +1431,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Evento Cultural",
-                value: "Monólogo sobre evento cultural",
-                registerInstruction: "Registro descriptivo claro. Primera persona, tono respetuoso. Sin jerga vulgar.",
+                value: "Monólogo sobre un festival de cine barrial en un centro cultural",
+                registerInstruction: "Registro: informal descriptivo. Primera persona, tono respetuoso. Lunfardo: no.",
                 icon: Music,
                 actions: [
                     { label: "Dónde Fue", value: "Decir dónde fue", icon: MapPin },
@@ -1446,8 +1446,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
         [Level.Intermediate]: [
             {
                 label: "Decisión Importante",
-                value: "Monólogo sobre una decisión",
-                registerInstruction: "Registro reflexivo semi-formal. Primera persona. Léxico claro, sin coloquialismos.",
+                value: "Monólogo sobre la decisión de mudarse por una beca",
+                registerInstruction: "Registro: semi-formal reflexivo. Primera persona. Lunfardo: no.",
                 icon: Scale,
                 actions: [
                     { label: "Contexto", value: "Explicar el contexto", icon: FileText },
@@ -1459,8 +1459,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Problema y Solución",
-                value: "Relato de un problema complejo",
-                registerInstruction: "Registro narrativo ordenado. Primera persona. Tono serio, sin jerga vulgar.",
+                value: "Relato de un proyecto grupal que falló y cómo se reorganizó",
+                registerInstruction: "Registro: semi-formal narrativo. Primera persona. Lunfardo: no.",
                 icon: AlertTriangle,
                 actions: [
                     { label: "Problema", value: "Describir el problema", icon: AlertTriangle },
@@ -1472,8 +1472,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Historia de Superación",
-                value: "Monólogo sobre superación",
-                registerInstruction: "Registro motivador y claro. Primera persona. Evitar coloquialismos fuertes.",
+                value: "Monólogo sobre volver a entrenar tras una lesión deportiva",
+                registerInstruction: "Registro: informal motivador. Primera persona. Lunfardo: no.",
                 icon: TrendingUp,
                 actions: [
                     { label: "Dificultad", value: "Describir dificultad inicial", icon: AlertCircle },
@@ -1485,8 +1485,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Relato de Ciudad",
-                value: "Monólogo sobre cambios en la ciudad",
-                registerInstruction: "Registro descriptivo semi-formal. Primera persona. Sin jerga vulgar.",
+                value: "Monólogo sobre cambios en la ciudad por nueva línea de metro",
+                registerInstruction: "Registro: semi-formal descriptivo. Primera persona. Lunfardo: no.",
                 icon: Building,
                 actions: [
                     { label: "Cambio", value: "Explicar un cambio reciente", icon: Sparkles },
@@ -1498,8 +1498,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Crónica de Evento",
-                value: "Relato cronológico de un evento",
-                registerInstruction: "Registro narrativo ordenado. Primera persona. Sin coloquialismos fuertes.",
+                value: "Relato cronológico de una maratón solidaria en la ciudad",
+                registerInstruction: "Registro: semi-formal narrativo. Primera persona. Lunfardo: no.",
                 icon: Calendar,
                 actions: [
                     { label: "Inicio", value: "Describir el inicio", icon: Flag },
@@ -1511,8 +1511,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Reflexión Cultural",
-                value: "Monólogo sobre cultura y tradición",
-                registerInstruction: "Registro reflexivo y semi-formal. Primera persona. Léxico cuidado, sin jerga vulgar.",
+                value: "Monólogo sobre la tradición del mate y cambios generacionales",
+                registerInstruction: "Registro: semi-formal reflexivo. Primera persona. Lunfardo: no.",
                 icon: Palette,
                 actions: [
                     { label: "Tradición", value: "Explicar una tradición", icon: BookOpen },
@@ -1524,8 +1524,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Carta Abierta",
-                value: "Monólogo en forma de carta",
-                registerInstruction: "Registro epistolar formal. Primera persona dirigida a un destinatario, tono respetuoso. Sin coloquialismos.",
+                value: "Monólogo en forma de carta a la municipalidad por espacios verdes",
+                registerInstruction: "Registro: formal epistolar. Primera persona dirigida a un destinatario. Lunfardo: no.",
                 icon: FileText,
                 actions: [
                     { label: "Destinatario", value: "Decir a quién va la carta", icon: UserPlus },
@@ -1539,8 +1539,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
         [Level.Advanced]: [
             {
                 label: "Ensayo Personal",
-                value: "Monólogo con tesis y argumentos",
-                registerInstruction: "Registro formal argumentativo. Primera persona moderada. Léxico preciso, sin coloquialismos.",
+                value: "Monólogo con tesis sobre trabajo remoto y vida urbana",
+                registerInstruction: "Registro: formal argumentativo. Primera persona moderada. Lunfardo: no.",
                 icon: FileText,
                 actions: [
                     { label: "Tesis", value: "Presentar una tesis personal", icon: Lightbulb },
@@ -1552,8 +1552,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Confesión y Catarsis",
-                value: "Monólogo íntimo de confesión",
-                registerInstruction: "Registro íntimo y serio. Primera persona. Lenguaje cuidado, sin vulgaridades.",
+                value: "Monólogo íntimo sobre dejar una carrera universitaria",
+                registerInstruction: "Registro: informal íntimo y serio. Primera persona. Lunfardo: no.",
                 icon: Heart,
                 actions: [
                     { label: "Confesión", value: "Confesar un hecho", icon: Lock },
@@ -1565,8 +1565,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Crónica de Investigación",
-                value: "Monólogo investigativo",
-                registerInstruction: "Registro periodístico formal. Primera persona con tono objetivo. Sin coloquialismos.",
+                value: "Monólogo investigativo sobre comedores escolares y presupuestos",
+                registerInstruction: "Registro: formal periodístico. Primera persona con tono objetivo. Lunfardo: no.",
                 icon: Search,
                 actions: [
                     { label: "Inicio", value: "Explicar cómo empezó", icon: Flag },
@@ -1578,8 +1578,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Relato Literario",
-                value: "Monólogo narrativo literario",
-                registerInstruction: "Registro literario cuidado. Primera persona o narrador, tono estilizado. Sin jerga vulgar.",
+                value: "Monólogo literario ambientado en una estación de tren nocturna",
+                registerInstruction: "Registro: literario cuidado. Primera persona o narrador. Lunfardo: no.",
                 icon: BookOpen,
                 actions: [
                     { label: "Inicio Atmosférico", value: "Crear ambiente inicial", icon: Moon },
@@ -1591,8 +1591,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Discurso Motivacional",
-                value: "Monólogo motivacional",
-                registerInstruction: "Registro inspirador semi-formal. Primera persona. Lenguaje positivo, sin coloquialismos vulgares.",
+                value: "Discurso para graduación con llamado a la acción",
+                registerInstruction: "Registro: semi-formal inspirador. Primera persona. Lunfardo: no.",
                 icon: Megaphone,
                 actions: [
                     { label: "Historia Personal", value: "Contar historia personal", icon: Heart },
@@ -1604,8 +1604,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Análisis Social",
-                value: "Monólogo de análisis social",
-                registerInstruction: "Registro formal analítico. Primera persona moderada. Datos y argumentos claros, sin coloquialismos.",
+                value: "Monólogo analítico sobre alquileres y acceso a vivienda",
+                registerInstruction: "Registro: formal analítico. Primera persona moderada. Lunfardo: no.",
                 icon: Globe,
                 actions: [
                     { label: "Problema Social", value: "Describir un problema social", icon: AlertTriangle },
@@ -1617,8 +1617,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Memoria Histórica",
-                value: "Monólogo sobre memoria histórica",
-                registerInstruction: "Registro formal y respetuoso. Primera persona o narrador, tono solemne. Sin coloquialismos.",
+                value: "Monólogo sobre una migración familiar tras una crisis económica",
+                registerInstruction: "Registro: formal y respetuoso. Primera persona o narrador. Lunfardo: no.",
                 icon: BookOpen,
                 actions: [
                     { label: "Contexto", value: "Dar contexto histórico", icon: Calendar },
@@ -1630,8 +1630,8 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
             },
             {
                 label: "Monólogo Humorístico",
-                value: "Monólogo con humor",
-                registerInstruction: "Registro humorístico controlado. Primera persona, tono ligero. Permitidas expresiones coloquiales suaves, prohibidas groserías.",
+                value: "Monólogo con humor sobre trámites burocráticos y ventanillas",
+                registerInstruction: "Registro: informal humorístico. Primera persona. Lunfardo: permitido leve si no ofende.",
                 icon: Smile,
                 actions: [
                     { label: "Tema Cotidiano", value: "Elegir un tema cotidiano", icon: Home },
