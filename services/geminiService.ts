@@ -252,14 +252,20 @@ export const generateLessonPlan = async (
 
   const lengthInstruction = (level === Level.Intro) ? "Longitud: Natural y fluida, ignorando límites estrictos de turnos si corta la naturalidad." : `Longitud: ${length}.`;
 
-  const speakerConstraint = `CRITICAL: El diálogo debe tener EXACTAMENTE ${numSpeakers} ${numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES'} hablando. NUNCA más de 2 personajes. El sistema TTS solo soporta máximo 2 voces.`;
+  // Auto-retry loop for multi-speaker validation
+  const MAX_SPEAKER_RETRIES = 3;
+  for (let attempt = 1; attempt <= MAX_SPEAKER_RETRIES; attempt++) {
+    // Strengthen constraint on retry attempts
+    const speakerEmphasis = attempt > 1
+      ? `⚠️ REINTENTO ${attempt}/${MAX_SPEAKER_RETRIES}: DETECCIÓN PREVIA DE MÁS DE 2 PERSONAJES. ESTO ES ABSOLUTAMENTE CRÍTICO - USA SOLO ${numSpeakers} ${numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES'}. NO AGREGUES PERSONAJES SECUNDARIOS, MESEROS, RECEPCIONISTAS, ETC.`
+      : `CRITICAL: El diálogo debe tener EXACTAMENTE ${numSpeakers} ${numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES'} hablando. NUNCA más de 2 personajes. El sistema TTS solo soporta máximo 2 voces.`;
 
-  const prompt = `
+    const prompt = `
   JSON Lesson (Spanish). Modo: ${mode}. Nivel: ${level}. Tema: ${finalTopic}. Accent: ${accent}.
 
   CONTEXT: ${profileInstruction}
   RULES: ${constraint}
-  SPEAKERS: ${speakerConstraint}
+  SPEAKERS: ${speakerEmphasis}
   EXERCISES: ${exerciseLogic}
   LENGTH: STICK TO ${length}.
   AMBIENT: Generate "ambientKeywords" (3 keywords).
@@ -267,38 +273,59 @@ export const generateLessonPlan = async (
   Structure: ${jsonStructure}
   `;
 
-  try {
-    const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: GENERATION_MODEL,
-      contents: prompt,
-      config: {
-        systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
-        responseMimeType: "application/json",
-        temperature: 0.0,
-      },
-    }));
+    try {
+      const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
+        model: GENERATION_MODEL,
+        contents: prompt,
+        config: {
+          systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
+          responseMimeType: "application/json",
+          temperature: 0.0,
+        },
+      }));
 
-    if (!response.text) throw new Error("API devolvió vacío");
-    const jsonStr = cleanJsonString(response.text);
-    const plan = JSON.parse(jsonStr) as LessonPlan;
+      if (!response.text) throw new Error("API devolvió vacío");
+      const jsonStr = cleanJsonString(response.text);
+      const plan = JSON.parse(jsonStr) as LessonPlan;
 
-    if (!plan.dialogue) plan.dialogue = [];
-    if (!plan.exercises) plan.exercises = { comprehension: [], vocabulary: [] };
+      if (!plan.dialogue) plan.dialogue = [];
+      if (!plan.exercises) plan.exercises = { comprehension: [], vocabulary: [] };
 
-    // Validate speaker count
-    const uniqueSpeakers = new Set(plan.dialogue.map(d => d.speaker?.trim()).filter(Boolean));
-    if (uniqueSpeakers.size > 2) {
-      throw new Error(`Error de validación: El diálogo tiene ${uniqueSpeakers.size} personajes hablando, pero el sistema TTS solo soporta máximo 2 voces. Personajes detectados: ${Array.from(uniqueSpeakers).join(', ')}`);
+      // Validate speaker count
+      const uniqueSpeakers = new Set(plan.dialogue.map(d => d.speaker?.trim()).filter(Boolean));
+      if (uniqueSpeakers.size > 2) {
+        console.warn(`[Attempt ${attempt}/${MAX_SPEAKER_RETRIES}] Detected ${uniqueSpeakers.size} speakers: ${Array.from(uniqueSpeakers).join(', ')}. Retrying...`);
+
+        // If this was the last attempt, throw error
+        if (attempt === MAX_SPEAKER_RETRIES) {
+          throw new Error(`El sistema no pudo generar un diálogo con máximo 2 personajes después de ${MAX_SPEAKER_RETRIES} intentos.`);
+        }
+
+        // Otherwise, continue to next iteration (retry)
+        continue;
+      }
+
+      // Success! Validate exercises and return
+      if (plan.exercises.comprehension) plan.exercises.comprehension = plan.exercises.comprehension.filter(isValidExercise);
+      if (plan.exercises.vocabulary) plan.exercises.vocabulary = plan.exercises.vocabulary.filter(isValidExercise);
+
+      if (attempt > 1) {
+        console.log(`[Success] Generated valid dialogue on attempt ${attempt}/${MAX_SPEAKER_RETRIES}`);
+      }
+
+      return plan;
+    } catch (error: any) {
+      // If it's a non-speaker-related error or last attempt, throw immediately
+      if (!error.message?.includes('personajes') || attempt === MAX_SPEAKER_RETRIES) {
+        console.error("Error generando plan:", error);
+        throw new Error(`Error GenAI: ${error.message}`);
+      }
+      // Otherwise, this catch is just for unexpected errors during generation, continue retry loop
     }
-
-    if (plan.exercises.comprehension) plan.exercises.comprehension = plan.exercises.comprehension.filter(isValidExercise);
-    if (plan.exercises.vocabulary) plan.exercises.vocabulary = plan.exercises.vocabulary.filter(isValidExercise);
-
-    return plan;
-  } catch (error: any) {
-    console.error("Error generando plan:", error);
-    throw new Error(`Error GenAI: ${error.message}`);
   }
+
+  // Should never reach here due to throw in loop, but TypeScript needs this
+  throw new Error("Error inesperado en generación de lección");
 };
 
 export const generateAudio = async (
