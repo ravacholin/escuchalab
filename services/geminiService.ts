@@ -81,51 +81,59 @@ const isValidExercise = (ex: any): boolean => {
 const DIALECT_PROFILES: Record<Accent, string> = {
   [Accent.Madrid]: `
     DIALECTO: ESPAÑA - MADRID (CENTRO PENINSULAR).
-    [GRAMÁTICA] DISTINCIÓN TÚ/USTED marcada. PLURAL: Vosotros. LEÍSMO DE PERSONA obligatorio ("Le vi"). IMPERATIVO COLOQUIAL ("Venir" por "Venid").
-    [PRAGMÁTICA] Intensificadores: "Mazo", "Súper". Muletillas: "En plan", "O sea", "Es que". Honestidad brusca.
-    [LÉXICO] "Molar", "Flipar", "Tío/Tronco", "Curro", "Garito", "Coche", "Ordenador", "Piso".
+    [FONÉTICA/PROSODIA] Distinción /s/ vs /θ/ (cena/sena). /s/ apicoalveolar marcada. /x/ velar fuerte. Entonación con caída final; preguntas con leve subida y énfasis en la sílaba tónica.
+    [GRAMÁTICA] Distinción tú/usted marcada. Plural: vosotros. Leísmo de persona posible ("Le vi"). Uso de "vosotros" en imperativos (venid, sentaos).
+    [PRAGMÁTICA] Directo, eficiente y sobrio; cortesía breve. Pausas cortas y ritmo conversacional rápido pero claro.
+    [LÉXICO] Base estándar; 1–2 localismos puntuales ("molar", "curro", "coche"). NO depender de argot.
   `,
   [Accent.Andalusia]: `
     DIALECTO: ESPAÑA - ANDALUCÍA (OCCIDENTAL).
-    [GRAMÁTICA] Plural 'Ustedes' con verbo en 2ª o 3ª. ELISIÓN de 'd' ("Comío") y apócope ("Pa'", "Na'").
-    [PRAGMÁTICA] Cortesía afectuosa ("Mi vida", "Hijo"). Exageración.
-    [LÉXICO] "Illo", "Pisha", "Miarma", "Coraje", "No ni ná".
+    [FONÉTICA/PROSODIA] Aspiración o pérdida de /s/ final y relajación de /d/ intervocálica ("cansao"). Seseo frecuente (a veces ceceo local). Entonación melódica y alargamiento vocálico.
+    [GRAMÁTICA] Ustedes como plural frecuente (verbo en 3ª). Apócopes coloquiales ("pa'", "na'") en registro informal.
+    [PRAGMÁTICA] Cercanía afectuosa y cálida; ritmo ágil con sonoridad abierta.
+    [LÉXICO] Español común con 1–2 marcas leves ("illo", "miarma"). NO depender de argot.
   `,
   [Accent.MexicoCity]: `
     DIALECTO: MÉXICO - CDMX (CHILANGO).
-    [GRAMÁTICA] USTEDES único plural. Pretérito Simple preferente. DIMINUTIVOS frecuentes ("Ahorita", "Cafecito").
-    [PRAGMÁTICA] Cortesía alta ("¿Qué crees?", "Fíjate que..."). "Mande".
-    [LÉXICO] "Güey", "No manches", "Chido/Padre", "Chamba", "¿Qué onda?", "Lana", "Carro", "Celular", "Computadora".
+    [FONÉTICA/PROSODIA] Entonación suave con descenso gradual en enunciados. /s/ clara y conservada; /x/ más suave. Ritmo pausado, con vocales bien articuladas.
+    [GRAMÁTICA] Ustedes único plural. Diminutivos frecuentes ("cafecito"). Uso de "¿verdad?" como coletilla neutra.
+    [PRAGMÁTICA] Cortesía alta y mitigación ("disculpe", "¿me permite?"). "Mande" como respuesta. Evitar rudeza directa.
+    [LÉXICO] Español estándar con pocas marcas opcionales ("carro", "computadora", "platicar"). NO depender de argot ni muletillas locales.
   `,
   [Accent.Bogota]: `
     DIALECTO: COLOMBIA - BOGOTÁ (ROLO).
-    [GRAMÁTICA] USTEDEO entre amigos y familia.
-    [PRAGMÁTICA] "Regalar" para pedir ("Regáleme una leche"). Suavidad y cortesía ("Qué pena con usted").
-    [LÉXICO] "Parce", "Vaina", "Chévere", "Tinto", "Pola", "Harto", "Dar papaya".
+    [FONÉTICA/PROSODIA] Entonación clara y relativamente plana; ritmo silábico regular. /s/ marcada y consonantes nítidas. /x/ suave.
+    [GRAMÁTICA] Ustedeo frecuente entre cercanos. Diminutivos moderados.
+    [PRAGMÁTICA] Cortesía alta y fórmulas atenuadoras ("qué pena", "con mucho gusto"). Peticiones con "regáleme".
+    [LÉXICO] Español general con 1–2 marcas suaves ("tinto", "chévere"). NO depender de argot.
   `,
   [Accent.Caribbean]: `
     DIALECTO: CARIBE (PUERTO RICO / CUBA).
-    [GRAMÁTICA] NO INVERSIÓN en preguntas ("¿Qué tú quieres?"). Pronombres redundantes ("Yo creo que yo...").
-    [FONÉTICA] Aspiración de 's'.
-    [LÉXICO] "Boricua", "Pana", "Corillo", "Guagua", "Chavos", "Bochinche", "Janguear", "Brutal".
+    [FONÉTICA/PROSODIA] Aspiración o pérdida de /s/ final, elisión de /d/ intervocálica. Velarización de /n/ final ("[ŋ]"). Entonación musical y ritmo rápido.
+    [GRAMÁTICA] Preguntas sin inversión ocasional ("¿Qué tú quieres?") y redundancia pronominal posible.
+    [PRAGMÁTICA] Expresivo, con exclamaciones breves y énfasis; energía alta sin groserías.
+    [LÉXICO] Español común con 1–2 marcas suaves ("guagua", "pana"). NO depender de argot.
   `,
   [Accent.BuenosAires]: `
     DIALECTO: ARGENTINA (RIOPLATENSE).
-    [GRAMÁTICA] VOSEO ("Vos tenés", "Vení").
-    [PRAGMÁTICA] Directos. Intensificador "Re" ("Relindo").
-    [LÉXICO] "Che", "Boludo", "Laburo", "Bondi", "Guita", "Mina/Pibe", "Posta", "Viste", "Auto", "Celular".
+    [FONÉTICA/PROSODIA] Yeísmo rehilado ("sh/zh" en ll/y). Entonación ascendente con fraseo alargado y ritmo conversacional dinámico.
+    [GRAMÁTICA] Voseo ("vos tenés", "vení"). Uso de "che" como apelativo puntual.
+    [PRAGMÁTICA] Directo y enfático, con marcadores discursivos moderados.
+    [LÉXICO] Español estándar con pocas marcas ("che", "bondi" opcional). NO depender de argot.
   `,
   [Accent.Santiago]: `
     DIALECTO: CHILE - SANTIAGO.
-    [GRAMÁTICA] VOSEO MIXTO ("Tú estái", "Vos querís"). "Cachái".
-    [PRAGMÁTICA] Velocidad rápida. "PO" al final ("Sí po"). "Al tiro".
-    [LÉXICO] "Weón", "Bacán", "Fome", "Pololo/a", "Luca", "Carrete".
+    [FONÉTICA/PROSODIA] /s/ final aspirada, consonantes finales relajadas y reducción de sílabas. Ritmo muy rápido con entonación descendente y finales cortos.
+    [GRAMÁTICA] Voseo mixto en informal ("tú estái", "vos querís"), tuteo estándar en formal. Uso frecuente de "¿cachái?" en informal.
+    [PRAGMÁTICA] Cadencia rápida y elisión en habla casual; en registro formal, claridad y neutralidad.
+    [LÉXICO] Español general; 1–2 marcas suaves opcionales ("al tiro", "po"). Evitar "weón" y argot fuerte salvo contexto explícito.
   `,
   [Accent.Lima]: `
     DIALECTO: PERÚ - LIMA.
-    [GRAMÁTICA] Tuteo estándar. "Nomás" pospuesto ("Pasa nomás"). Diminutivos ("Ahorita").
-    [PRAGMÁTICA] "Pe" (Pues), "Ya" (Asentimiento).
-    [LÉXICO] "Pata/Causa", "Chamba", "Jato", "Chévere", "Piña", "Al toque", "Carro".
+    [FONÉTICA/PROSODIA] Entonación controlada y menos melodiosa; ritmo pausado con consonantes claras y /s/ conservada. /x/ suave.
+    [GRAMÁTICA] Tuteo estándar. "Nomás" pospuesto ("pasa nomás"). Diminutivos moderados.
+    [PRAGMÁTICA] Cortesía ligera y respuestas breves ("ya", "claro"); tono amable y calmado.
+    [LÉXICO] Español general con 1–2 marcas suaves ("al toque", "chamba"). NO depender de argot.
   `
 };
 
