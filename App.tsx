@@ -91,7 +91,10 @@ const App: React.FC = () => {
     };
 
     // 1. Get List of Contexts (Locus) for current Level
-    const currentContextList = useMemo(() => SCENARIO_DATABASE[state.config.level] || SCENARIO_DATABASE[Level.Intro], [state.config.level]);
+    const currentContextList = useMemo(() => {
+        const formatDb = SCENARIO_DATABASE[state.config.textType] || SCENARIO_DATABASE[TextType.Dialogue];
+        return formatDb[state.config.level] || formatDb[Level.Intro];
+    }, [state.config.level, state.config.textType]);
 
     // 2. Select Locus (Scenario)
     const [selectedLocus, setSelectedLocus] = useState<ScenarioContext>(currentContextList[0]);
@@ -114,11 +117,12 @@ const App: React.FC = () => {
 
     // --- EFFECT: LEVEL CHANGE ---
     useEffect(() => {
-        const db = SCENARIO_DATABASE[state.config.level] || SCENARIO_DATABASE[Level.Intro];
+        const formatDb = SCENARIO_DATABASE[state.config.textType] || SCENARIO_DATABASE[TextType.Dialogue];
+        const db = formatDb[state.config.level] || formatDb[Level.Intro];
         const firstLocus = db[0];
         setSelectedLocus(firstLocus);
         setSelectedModus(firstLocus.actions[0]);
-    }, [state.config.level]);
+    }, [state.config.level, state.config.textType]);
 
     // --- EFFECT: LOCUS CHANGE ---
     useEffect(() => {
@@ -128,7 +132,8 @@ const App: React.FC = () => {
 
     // --- RANDOMIZER LOGIC ---
     const handleRandomizeMatrix = useCallback(() => {
-        const contexts = SCENARIO_DATABASE[state.config.level] || SCENARIO_DATABASE[Level.Intro];
+        const formatDb = SCENARIO_DATABASE[state.config.textType] || SCENARIO_DATABASE[TextType.Dialogue];
+        const contexts = formatDb[state.config.level] || formatDb[Level.Intro];
         const randomCtx = contexts[Math.floor(Math.random() * contexts.length)];
 
         const actions = randomCtx.actions;
@@ -138,7 +143,7 @@ const App: React.FC = () => {
         setSelectedModus(randomAct);
 
         if (isCustomMode) setIsCustomMode(false);
-    }, [state.config.level, isCustomMode]);
+    }, [state.config.level, state.config.textType, isCustomMode]);
 
     const handleGenerate = async () => {
         setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null }));
@@ -330,6 +335,12 @@ const App: React.FC = () => {
                                     highlight={true}
                                     onChange={(e: any) => setState({ ...state, config: { ...state.config, level: e.target.value } })}
                                 />
+                                <SelectInput
+                                    label="Formato"
+                                    value={state.config.textType}
+                                    options={TEXT_TYPES}
+                                    onChange={(e: any) => setState({ ...state, config: { ...state.config, textType: e.target.value } })}
+                                />
                             </div>
 
                             {/* MODE: STANDARD */}
@@ -400,20 +411,12 @@ const App: React.FC = () => {
                                     />
                                 )}
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                                    <SelectInput
-                                        label="Formato"
-                                        value={state.config.textType}
-                                        options={TEXT_TYPES}
-                                        onChange={(e: any) => setState({ ...state, config: { ...state.config, textType: e.target.value } })}
-                                    />
-                                    <SelectInput
-                                        label="Duración"
-                                        value={state.config.length}
-                                        options={LENGTHS}
-                                        onChange={(e: any) => setState({ ...state, config: { ...state.config, length: e.target.value } })}
-                                    />
-                                </div>
+                                <SelectInput
+                                    label="Duración"
+                                    value={state.config.length}
+                                    options={LENGTHS}
+                                    onChange={(e: any) => setState({ ...state, config: { ...state.config, length: e.target.value } })}
+                                />
                             </div>
                         </div>
 
