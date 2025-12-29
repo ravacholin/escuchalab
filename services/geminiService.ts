@@ -81,283 +81,480 @@ const isValidExercise = (ex: any): boolean => {
 // Estos perfiles se inyectan como INSTRUCCIÓN al TTS para forzar pronunciación correcta
 // IMPORTANTE: Cada perfil debe ser EXHAUSTIVO para garantizar pronunciación correcta
 const TTS_PHONETIC_PROFILES: Record<Accent, string> = {
-  [Accent.Madrid]: `[VOICE ACTING DIRECTIVE: CASTILIAN SPANISH - MADRID, CENTRAL SPAIN]
-You are a native speaker from Madrid, Spain. Follow these pronunciation rules EXACTLY:
+  [Accent.Madrid]: `[TTS VOICE DIRECTIVE: CASTILIAN SPANISH - MADRID, CENTRAL SPAIN]
+MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
 
-CONSONANTS:
-- DISTINCIÓN (CRITICAL): "z" and "c" (before e/i) = English "th" as in "think"
-  - "zapato" → "thapato", "cielo" → "thielo", "hacer" → "ather"
-  - "vez" → "veth", "Barcelona" → "Barthelona", "plaza" → "platha"
-- "s" = clear, sharp /s/ sound, NEVER aspirated
-- "d" between vowels = soft "th" as in "the" ("cansado" → "cansatho")
-- "j" and "g" (before e/i) = strong, guttural, scratchy sound from throat
-- "ll" and "y" = "y" as in English "yes" (NOT "sh")
-- Final consonants pronounced clearly and crisply
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #1: DISTINCIÓN (THETA SOUND θ)
+═══════════════════════════════════════════════════════════════════════════════
+The letters "z" (always) and "c" (before e/i) MUST be pronounced as [θ] - 
+the VOICELESS DENTAL FRICATIVE, identical to English "th" in "think/thick/thunder".
 
-VOWELS:
-- Pure, clear vowel sounds
-- No diphthongization of single vowels
-- Equal stress on each syllable within rhythm
+This is NON-NEGOTIABLE. Place tongue between teeth and blow air.
 
-INTONATION & RHYTHM:
-- Rising-falling melodic pattern (like a gentle wave)
-- Assertive, confident tone
-- Moderate speed, very clear articulation
-- Slight pause before stressed words for emphasis
-- Questions rise sharply at the end
+MANDATORY EXAMPLES - READ THESE EXACTLY AS WRITTEN:
+• "zapato" = [θa.ˈpa.to] → "THA-pa-to" (shoe)
+• "cielo" = [ˈθje.lo] → "THYE-lo" (sky)
+• "hacer" = [a.ˈθer] → "a-THER" (to do)
+• "vez" = [beθ] → "beth" (time/instance)
+• "plaza" = [ˈpla.θa] → "PLA-tha" (plaza)
+• "gracias" = [ˈɡra.θjas] → "GRA-thyass" (thanks)
+• "Barcelona" = [bar.θe.ˈlo.na] → "bar-the-LO-na"
+• "cereza" = [θe.ˈre.θa] → "the-RE-tha" (cherry)
+• "azul" = [a.ˈθul] → "a-THOOL" (blue)
+• "cena" = [ˈθe.na] → "THE-na" (dinner)
 
-ATTITUDE:
-- Direct, matter-of-fact delivery
-- Confident without being aggressive`,
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #2: THE "S" SOUND [s]
+═══════════════════════════════════════════════════════════════════════════════
+The letter "s" is ALWAYS [s] - a SHARP APICO-ALVEOLAR SIBILANT.
+In Madrid, /s/ is produced with the APEX (tip) of the tongue raised.
+NEVER aspirate, NEVER drop, NEVER confuse with θ.
 
-  [Accent.Andalusia]: `[VOICE ACTING DIRECTIVE: ANDALUSIAN SPANISH - WESTERN ANDALUSIA, SOUTHERN SPAIN]
-You are a native speaker from Seville/Cádiz, Andalusia. Follow these pronunciation rules EXACTLY:
+• "casa" = [ˈka.sa] → "KA-sa" (house) - DIFFERENT from "caza" [ˈka.θa]
+• "peso" = [ˈpe.so] → "PE-so" (weight)
+• "estos" = [ˈes.tos] → "ES-tos" (these)
 
-CONSONANTS:
-- SESEO (CRITICAL): "z" and "c" (before e/i) = "s" sound, NEVER "th"
-  - "zapato" → "sapato", "cielo" → "sielo", "hacer" → "aser"
-- ASPIRATION OF S (CRITICAL): Final "s" and "s" before consonants = soft "h" or silent
-  - "más" → "máh" or "má", "estos" → "ehtoh" or "etoh"
-  - "está" → "ehtá", "espera" → "ehpera"
-- DROP FINAL CONSONANTS: Weaken or omit "d", "r", "l" at word endings
-  - "Madrid" → "Madrí", "comer" → "comé"
-- SOFTEN/DROP INTERVOCALIC "d": "cansado" → "cansao", "comido" → "comío"
-- "ll" and "y" = "y" as in English "yes"
-- "j" = softer than Castilian, less guttural
+═══════════════════════════════════════════════════════════════════════════════
+OTHER CONSONANTS
+═══════════════════════════════════════════════════════════════════════════════
+• "j" and "g" (before e/i) = STRONG VELAR FRICATIVE [x], like Scottish "loch"
+  - "jefe" = [ˈxe.fe], "gente" = [ˈxen.te] - SCRATCH from back of throat
+• "ll" and "y" = PALATAL APPROXIMANT [ʝ], like English "y" in "yes"
+  - "calle" = [ˈka.ʝe] → "KA-ye" (NOT "ka-she")
+• Intervocalic "d" = DENTAL FRICATIVE [ð], like English "th" in "the"
+  - "cansado" = [kan.ˈsa.ðo] → "kan-SA-tho"
+• Final consonants: FULLY ARTICULATED, clear and crisp
 
-VOWELS:
-- Slightly more open than standard Spanish
-- Vowels may lengthen to compensate for dropped consonants
+═══════════════════════════════════════════════════════════════════════════════
+PROSODY & INTONATION
+═══════════════════════════════════════════════════════════════════════════════
+• TEMPO: Moderate, 4.5-5 syllables/second
+• RHYTHM: Syllable-timed, each syllable roughly equal duration
+• PITCH: Wide range, assertive rising-falling patterns
+• STATEMENTS: Start mid, rise slightly, fall at end
+• QUESTIONS: Sharp rise at final syllable
+• ATTITUDE: Direct, confident, authoritative`,
 
-INTONATION & RHYTHM:
-- Fast, flowing, connected speech
-- Musical, sing-song quality
-- Words blend together smoothly
-- Rising intonation even in statements (sounds friendly)
-- Speed: Quick tempo, relaxed feel
+  [Accent.Andalusia]: `[TTS VOICE DIRECTIVE: ANDALUSIAN SPANISH - SEVILLE/CÁDIZ, WESTERN ANDALUSIA]
+MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
 
-ATTITUDE:
-- Warm, expressive, animated
-- Friendly and approachable tone
-- Use of affectionate terms naturally`,
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #1: SESEO (NO THETA)
+═══════════════════════════════════════════════════════════════════════════════
+There is NO [θ] sound. Letters "z", "c" (before e/i), AND "s" all become [s].
+This is SESEO - the merger of /θ/ and /s/ into [s].
 
-  [Accent.MexicoCity]: `[VOICE ACTING DIRECTIVE: MEXICAN SPANISH - MEXICO CITY (CHILANGO)]
-You are a native speaker from Mexico City. Follow these pronunciation rules EXACTLY:
+MANDATORY EXAMPLES:
+• "zapato" = [sa.ˈpa.to] → "sa-PA-to" (NOT "tha-pato")
+• "cielo" = [ˈsje.lo] → "SYE-lo" (NOT "thye-lo")
+• "gracias" = [ˈɡra.sjah] → "GRA-syah"
+• "plaza" = [ˈpla.sa] → "PLA-sa"
 
-CONSONANTS:
-- CLEAR S (CRITICAL): All "s" sounds are crisp, clear, fully pronounced
-  - NEVER aspirate or drop "s" - pronounce every single one
-  - "estos" → "es-tos" (two clear S sounds), "más" → "más" (clear final S)
-- "x" in Mexican words = "h" sound (CRITICAL)
-  - "México" → "Méhico", "Oaxaca" → "Oahaca", "Xochimilco" → "Sochimilco"
-- "ll" and "y" = "y" as in English "yes" (NOT "sh", NOT "j")
-- "j" and "g" (before e/i) = softer "h" sound, not as guttural as Spain
-- All final consonants clearly pronounced
-- "d" between vowels remains as soft "d", not dropped
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #2: S-ASPIRATION & ELISION
+═══════════════════════════════════════════════════════════════════════════════
+Syllable-final /s/ becomes [h] (ASPIRATION) or is DELETED entirely.
+This affects /s/ before consonants and at word boundaries.
 
-VOWELS:
-- Slightly reduced unstressed vowels
-- Clear, standard vowel sounds
-- Slight nasal quality on some vowels
+MANDATORY EXAMPLES:
+• "estos" = [ˈeh.toh] or [ˈe.to] → "EH-toh" or "E-to"
+• "más" = [mah] or [ma] → "mah" or "ma"
+• "está" = [eh.ˈta] → "eh-TA"
+• "espera" = [eh.ˈpe.ɾa] → "eh-PE-ra"
+• "las casas" = [lah.ˈka.sah] → "lah KA-sah"
+• "buscar" = [buh.ˈka] → "buh-KA"
 
-INTONATION & RHYTHM:
-- Soft, melodic, lilting intonation
-- Questions often rise then fall at the end
-- Moderate pace, very clear
-- Polite, measured delivery
-- Statements often end with slight rise (sounds friendly/inviting)
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #3: CONSONANT WEAKENING
+═══════════════════════════════════════════════════════════════════════════════
+• INTERVOCALIC /d/ → DELETED: "cansado" = [kan.ˈsa.o] → "kan-SA-o"
+  - "pescado" → "peh-KA-o", "comido" → "ko-MI-o"
+• FINAL /d/ → DELETED: "Madrid" = [ma.ˈðɾi] → "ma-DRI" (no final d)
+• FINAL /r/ → WEAKENED: "comer" = [ko.ˈme] → "ko-ME"
+• "j" = SOFT [h], not guttural: "jefe" = [ˈhe.fe]
 
-ATTITUDE:
-- Polite, courteous, warm
-- Use diminutives naturally (cafecito, ahorita, tantito)
-- Indirect, gentle manner of speaking`,
+═══════════════════════════════════════════════════════════════════════════════
+PROSODY & INTONATION
+═══════════════════════════════════════════════════════════════════════════════
+• TEMPO: FAST, 6-7 syllables/second, flowing
+• RHYTHM: Stress-timed, words blend together
+• PITCH: Musical, sing-song quality
+• VOWELS: May lengthen to compensate for lost consonants
+• ATTITUDE: Warm, friendly, expressive, animated`,
 
-  [Accent.Bogota]: `[VOICE ACTING DIRECTIVE: COLOMBIAN SPANISH - BOGOTÁ (ROLO/CACHACO)]
-You are a native speaker from Bogotá, Colombia. Follow these pronunciation rules EXACTLY:
+  [Accent.MexicoCity]: `[TTS VOICE DIRECTIVE: MEXICAN SPANISH - MEXICO CITY (CDMX/CHILANGO)]
+MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
 
-CONSONANTS:
-- CLEAREST S IN SPANISH (CRITICAL): Pristine, crisp pronunciation of ALL "s" sounds
-  - This is considered the most "neutral" Latin American Spanish
-  - Every "s" is fully articulated: "estos" → "es-tos", "más" → "más"
-- ALL consonants clearly and precisely pronounced
-- "ll" and "y" = "y" as in English "yes" (soft, clear)
-- "j" and "g" (before e/i) = gentle "h" sound, not harsh
-- "d" between vowels = soft but present, not dropped
-- Final consonants all articulated
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #1: FULL S-RETENTION [s]
+═══════════════════════════════════════════════════════════════════════════════
+ALL /s/ sounds are FULLY PRONOUNCED as clear, crisp [s]. 
+This is a DEFINING feature of Mexican Spanish. NEVER aspirate. NEVER drop.
 
-VOWELS:
-- Pure, clear, standard vowel sounds
-- No reduction of unstressed vowels
-- Evenly pronounced
+MANDATORY EXAMPLES:
+• "estos" = [ˈes.tos] → "ES-tos" (both S sounds clear!)
+• "más" = [mas] → "maS" (final S audible)
+• "espera" = [es.ˈpe.ɾa] → "ES-pe-ra"
+• "buscar" = [bus.ˈkaɾ] → "bus-KAR"
+• "este" = [ˈes.te] → "ES-te"
 
-INTONATION & RHYTHM:
-- DISTINCTIVE SING-SONG MELODY (CRITICAL)
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #2: SESEO
+═══════════════════════════════════════════════════════════════════════════════
+No [θ]. Letters "z" and "c" (before e/i) = [s], same as "s".
+• "zapato" = [sa.ˈpa.to] → "sa-PA-to"
+• "cielo" = [ˈsje.lo] → "SYE-lo"
+• "gracias" = [ˈɡɾa.sjas] → "GRA-syas"
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #3: X IN MEXICAN WORDS
+═══════════════════════════════════════════════════════════════════════════════
+The letter "x" in indigenous words = [h] or [ʃ]
+• "México" = [ˈme.hi.ko] → "ME-hi-ko"
+• "Oaxaca" = [wa.ˈha.ka] → "wa-HA-ka"
+• "Xochimilco" = [so.tʃi.ˈmil.ko] or [ʃo.tʃi.ˈmil.ko]
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #4: ASSIBILATION OF /r/
+═══════════════════════════════════════════════════════════════════════════════
+The trill /r/ and tap /ɾ/ may have SIBILANT quality (buzzing/hissing)
+• "carro" may sound like [ˈka.ʂo] with retroflex quality
+• Final /r/ can be assibilated: "hablar" = [a.ˈblaʂ]
+
+═══════════════════════════════════════════════════════════════════════════════
+OTHER FEATURES
+═══════════════════════════════════════════════════════════════════════════════
+• "ll"/"y" = [ʝ] like English "y" in "yes"
+• "j"/"g(e,i)" = SOFT [x] or [h], not harsh: "gente" = [ˈhen.te]
+• UNSTRESSED VOWEL REDUCTION: Vowels next to /s/ may be reduced or devoiced
+  - "trastes" can sound like [ˈtɾas.ts]
+
+═══════════════════════════════════════════════════════════════════════════════
+PROSODY & INTONATION
+═══════════════════════════════════════════════════════════════════════════════
+• TEMPO: Moderate, 4.5-5 syllables/second
+• RHYTHM: Melodic, lilting, polite
+• PITCH: Soft rises and falls, friendly
+• DIMINUTIVES: Natural use of -ito (cafecito, ahorita)
+• ATTITUDE: Polite, courteous, indirect, warm`,
+
+  [Accent.Bogota]: `[TTS VOICE DIRECTIVE: COLOMBIAN SPANISH - BOGOTÁ (ROLO/CACHACO)]
+MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #1: PRISTINE S-PRONUNCIATION [s]
+═══════════════════════════════════════════════════════════════════════════════
+Bogotá Spanish has THE CLEAREST /s/ in the Spanish-speaking world.
+Every /s/ is FULLY ARTICULATED with ZERO aspiration or weakening.
+This is THE most conservative pronunciation of /s/ in Latin America.
+
+MANDATORY EXAMPLES:
+• "estos" = [ˈes.tos] → "ES-tos" (crystal clear)
+• "más" = [mas] → "maS" (pristine final S)
+• "buscar" = [bus.ˈkaɾ] → "bus-KAR"
+• "esperar" = [es.pe.ˈɾaɾ] → "es-pe-RAR"
+• "las casas" = [las.ˈka.sas] → "las KA-sas"
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #2: SESEO
+═══════════════════════════════════════════════════════════════════════════════
+No [θ]. Standard seseo applies.
+• "zapato" = [sa.ˈpa.to], "cielo" = [ˈsje.lo]
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL RULE #3: ALL CONSONANTS PRESERVED
+═══════════════════════════════════════════════════════════════════════════════
+Unlike other dialects, NOTHING is dropped or weakened.
+• Final consonants: fully articulated
+• Intervocalic /d/: preserved as [ð]: "cansado" = [kan.ˈsa.ðo]
+• "ll"/"y" = clear [ʝ]: "calle" = [ˈka.ʝe]
+• "j"/"g(e,i)" = gentle [x] or [h], never harsh
+
+═══════════════════════════════════════════════════════════════════════════════
+PROSODY & INTONATION - THE "ROLO" MELODY
+═══════════════════════════════════════════════════════════════════════════════
+• TEMPO: SLOW TO MODERATE, 3.5-4.5 syllables/second
+• RHYTHM: DISTINCTIVE SING-SONG (cantadito)
   - Rises and falls like gentle hills
-  - Almost musical quality
-- Slow to moderate pace
-- Very deliberate, careful articulation
-- Soft, gentle overall delivery
-- Questions have smooth rising intonation
+  - Each phrase has melodic arc
+• PITCH: Wide range, musical quality
+• ARTICULATION: Extremely clear, deliberate, careful
+• VOWELS: Pure, clear, no reduction
 
-ATTITUDE:
-- Extremely polite and formal
-- Soft-spoken, never aggressive
-- Use of "usted" frequently, even informally
-- Phrases like "con mucho gusto", "a la orden"`,
+═══════════════════════════════════════════════════════════════════════════════
+ATTITUDE & REGISTER
+═══════════════════════════════════════════════════════════════════════════════
+• EXTREMELY polite and formal
+• Soft-spoken, never aggressive
+• Frequent use of "usted" even informally
+• Characteristic phrases: "con mucho gusto", "a la orden", "qué pena"`,
 
-  [Accent.Caribbean]: `[VOICE ACTING DIRECTIVE: CARIBBEAN SPANISH - PUERTO RICO/CUBA]
-You are a native speaker from Puerto Rico or Cuba. Follow these pronunciation rules EXACTLY:
+  [Accent.Caribbean]: `[TTS VOICE DIRECTIVE: CARIBBEAN SPANISH - PUERTO RICO/CUBA]
+MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
 
-CONSONANTS:
-- ASPIRATION OF S (CRITICAL): "s" before consonants or at word end = "h" or silent
-  - "está" → "ehtá", "estos" → "ehtoh", "más" → "máh"
-  - "espera" → "ehpera", "buscar" → "buhcar"
-- R/L CONFUSION (CRITICAL - PUERTO RICO): "r" at end of syllables can become "l"
-  - "puerta" → "puelta", "verde" → "velde", "comer" → "comel"
-- VELARIZATION OF R (CUBA): Final "r" can sound guttural/French-like
-- "ll" and "y" = "y" as in English "yes"
-- "rr" (trill) sometimes softer than standard
-- Final consonants often weakened or dropped
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #1: S-ASPIRATION TO [h]
+═══════════════════════════════════════════════════════════════════════════════
+Syllable-final /s/ becomes [h] (VOICELESS GLOTTAL FRICATIVE) or is DELETED.
+This is the MOST PROMINENT feature of Caribbean Spanish.
 
-VOWELS:
-- Open, broad vowel sounds
-- Vowels may lengthen
-- Slightly "rounder" than other variants
+MANDATORY EXAMPLES:
+• "estos" = [ˈeh.toh] → "EH-toh"
+• "más" = [mah] → "mah"
+• "está" = [eh.ˈta] → "eh-TA"
+• "buscar" = [buh.ˈkaɾ] → "buh-KAR"
+• "las islas" = [lah.ˈih.lah] → "lah IH-lah"
+• "espera" = [eh.ˈpe.ɾa] → "eh-PE-ra"
 
-INTONATION & RHYTHM:
-- HIGHLY RHYTHMIC AND MUSICAL (CRITICAL)
-  - African influence creates almost percussion-like rhythm
-  - Dance-like cadence
-- Fast, energetic delivery
-- Strong rises in questions
-- Animated, expressive pitch changes
-- Words flow together rapidly
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #2: LAMBDACISM (R → L) - PUERTO RICO
+═══════════════════════════════════════════════════════════════════════════════
+In Puerto Rico, syllable-final /r/ becomes [l]. This is called LAMBDACISM.
+This is extremely common and socially unmarked.
 
-ATTITUDE:
-- Lively, animated, expressive
-- Warm and friendly
-- Enthusiastic delivery
-- Use of exclamations naturally`,
+MANDATORY EXAMPLES (PUERTO RICO):
+• "puerta" = [ˈpwel.ta] → "PWEL-ta" (NOT "pwer-ta")
+• "verde" = [ˈbel.de] → "BEL-de" (NOT "ver-de")
+• "comer" = [ko.ˈmel] → "ko-MEL"
+• "amor" = [a.ˈmol] → "a-MOL"
+• "carne" = [ˈkal.ne] → "KAL-ne"
+• "Puerto Rico" = [ˈpwel.to.ˈɾi.ko] → "PWEL-to RI-ko"
 
-  [Accent.BuenosAires]: `[VOICE ACTING DIRECTIVE: ARGENTINE SPANISH - BUENOS AIRES (RIOPLATENSE/PORTEÑO)]
-You are a native speaker from Buenos Aires, Argentina. Follow these pronunciation rules EXACTLY:
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #3: CONSONANT WEAKENING
+═══════════════════════════════════════════════════════════════════════════════
+• Intervocalic /d/ → DELETED: "cansado" = [kan.ˈsa.o] → "kan-SA-o"
+• Final /d/ → DELETED: "verdad" = [beɾ.ˈða] → "ver-DA" (no final d)
+• Word-final /n/ → VELARIZED [ŋ] or nasalizes vowel
 
-CONSONANTS:
-- SHEÍSMO/ZHEÍSMO (MOST CRITICAL RULE - NON-NEGOTIABLE):
-  "ll" and "y" MUST be pronounced as "SH" sound (like English "show" or "ship")
-  - "yo" → "SHO" (not "yo")
-  - "calle" → "CA-SHE" (not "caye")
-  - "ella" → "E-SHA" (not "eya")
-  - "llamar" → "SHA-MAR" (not "yamar")
-  - "llegar" → "SHE-GAR" (not "yegar")
-  - "pollo" → "PO-SHO" (not "poyo")
-  - "mayo" → "MA-SHO" (not "mayo")
-  - "ayer" → "A-SHER" (not "ayer")
-  This is the DEFINING feature of Buenos Aires Spanish - NEVER USE "y" SOUND
-- ASPIRATION OF S: Final "s" and "s" before consonants often aspirated
-  - "estos" → "ehtoh", "más" → "máh"
-- "s" between vowels remains clear
-- "rr" (trill) is standard
-- "j" and "g" (before e/i) = moderate, not too guttural
+═══════════════════════════════════════════════════════════════════════════════
+OTHER CONSONANTS
+═══════════════════════════════════════════════════════════════════════════════
+• SESEO: "z"/"c(e,i)" = [s]
+• "ll"/"y" = [ʝ] like English "y"
+• In Cuba, final /r/ may be VELARIZED (French-like [ʁ])
 
-VOWELS:
-- Slightly elongated final vowels
-- Open "e" sounds
-- Clear vowel articulation
+═══════════════════════════════════════════════════════════════════════════════
+PROSODY & INTONATION
+═══════════════════════════════════════════════════════════════════════════════
+• TEMPO: FAST, 6+ syllables/second
+• RHYTHM: HIGHLY MUSICAL with African-influenced percussion-like cadence
+• Words flow together rapidly
+• Animated, expressive pitch changes
+• Strong rises in questions
+• ATTITUDE: Lively, warm, enthusiastic, expressive`,
 
-INTONATION & RHYTHM:
-- ITALIAN-INFLUENCED MELODY (CRITICAL)
-  - Rises and falls dramatically, like singing
-  - Very expressive pitch range
-  - "Tano" (Italian immigrant) influence
-- Theatrical, expressive delivery
-- Moderate to slow pace for emphasis
-- Strong stress on emphasized words
-- Questions have exaggerated rising intonation
+  [Accent.BuenosAires]: `[TTS VOICE DIRECTIVE: ARGENTINE SPANISH - BUENOS AIRES (RIOPLATENSE/PORTEÑO)]
+MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
 
-ATTITUDE:
-- Direct, confident, expressive
-- Passionate delivery
-- Use of "vos" naturally (vos tenés, vos querés)
-- Characteristic phrases: "che", "dale", "viste"`,
+═══════════════════════════════════════════════════════════════════════════════
+██████████████████████████████████████████████████████████████████████████████
+CRITICAL CONSONANT RULE #1: SHEÍSMO - THE [ʃ] SOUND
+THIS IS THE SINGLE MOST IMPORTANT RULE. FAILURE = COMPLETE REJECTION.
+██████████████████████████████████████████████████████████████████████████████
+═══════════════════════════════════════════════════════════════════════════════
 
-  [Accent.Santiago]: `[VOICE ACTING DIRECTIVE: CHILEAN SPANISH - SANTIAGO]
-You are a native speaker from Santiago, Chile. Follow these pronunciation rules EXACTLY:
+The letters "ll" and "y" (when not vowel) MUST be pronounced as [ʃ] -
+the VOICELESS POSTALVEOLAR FRICATIVE, exactly like English "SH" in "ship/show".
 
-CONSONANTS:
-- EXTREME S ASPIRATION (CRITICAL): "s" almost always becomes "h" or disappears
-  - "estos" → "ehtoh" or "etoh", "más" → "máh" or "má"
-  - "es que" → "eh que", "buscar" → "buhcar" or "bucar"
-- SYLLABLE SWALLOWING (CRITICAL): Unstressed syllables often reduced/eaten
-  - Words sound "clipped" and shortened
-  - "para" → "pa", "nada" → "na", "pues" → "po"
-- "ch" = softer than standard, almost like "sh" in some speakers
-- "ll" and "y" = "y" as in English "yes"
-- Final consonants heavily reduced
-- Very fast consonant articulation
+THIS IS NON-NEGOTIABLE. This is the #1 defining feature of Buenos Aires Spanish.
+Younger speakers use [ʃ] (voiceless). Older speakers may use [ʒ] (voiced, like "measure").
 
-VOWELS:
-- Reduced, swallowed unstressed vowels
-- Quick vowel sounds
-- Less clear than other variants
+════════════════════════════════════════════════════════════════════════════
+EVERY "LL" AND "Y" = "SH" SOUND. MEMORIZE THESE:
+════════════════════════════════════════════════════════════════════════════
+• "yo" = [ʃo] → "SHO" ❌ WRONG: "yo" 
+• "ya" = [ʃa] → "SHA" ❌ WRONG: "ya"
+• "calle" = [ˈka.ʃe] → "KA-SHE" ❌ WRONG: "ka-ye"
+• "ella" = [ˈe.ʃa] → "E-SHA" ❌ WRONG: "e-ya"
+• "llamar" = [ʃa.ˈmaɾ] → "SHA-mar" ❌ WRONG: "ya-mar"
+• "llegar" = [ʃe.ˈɣaɾ] → "SHE-gar" ❌ WRONG: "ye-gar"
+• "lluvia" = [ˈʃu.βja] → "SHU-vya" ❌ WRONG: "yu-vya"
+• "pollo" = [ˈpo.ʃo] → "PO-SHO" ❌ WRONG: "po-yo"
+• "mayo" = [ˈma.ʃo] → "MA-SHO" ❌ WRONG: "ma-yo"
+• "ayer" = [a.ˈʃeɾ] → "a-SHER" ❌ WRONG: "a-yer"
+• "playa" = [ˈpla.ʃa] → "PLA-SHA" ❌ WRONG: "pla-ya"
+• "silla" = [ˈsi.ʃa] → "SI-SHA" ❌ WRONG: "si-ya"
+• "voy" = [boʃ] → "BOSH" ❌ WRONG: "boy"
+• "muy" = [muʃ] → "MOOSH" ❌ WRONG: "muy"
+• "hoy" = [oʃ] → "OSH" ❌ WRONG: "oy"
+• "hay" = [aʃ] → "ASH" ❌ WRONG: "ay"
 
-INTONATION & RHYTHM:
-- EXTREMELY FAST PACED (CRITICAL)
-  - Fastest Spanish variant
+IF YOU PRONOUNCE "Y" AS IN ENGLISH "YES", YOU HAVE FAILED COMPLETELY.
+THE SOUND IS "SH" LIKE "SHIP", "SHOW", "SHOUT".
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #2: S-ASPIRATION
+═══════════════════════════════════════════════════════════════════════════════
+Syllable-final /s/ is often ASPIRATED to [h] or weakened:
+• "estos" = [ˈeh.toh] → "EH-toh"
+• "más" = [mah] → "mah"
+• "vos" = [boh] → "boh"
+BUT /s/ between vowels remains clear: "casa" = [ˈka.sa]
+
+═══════════════════════════════════════════════════════════════════════════════
+OTHER CONSONANTS
+═══════════════════════════════════════════════════════════════════════════════
+• SESEO: "z"/"c(e,i)" = [s]
+• "j"/"g(e,i)" = moderate velar [x]
+• "rr" = standard alveolar trill [r]
+
+═══════════════════════════════════════════════════════════════════════════════
+PROSODY & INTONATION - ITALIAN INFLUENCE
+═══════════════════════════════════════════════════════════════════════════════
+• TEMPO: Moderate, expressive
+• INTONATION: DRAMATIC RISES AND FALLS like Italian
+  - Almost singing quality
+  - Wide pitch range, theatrical
+  - Questions rise EXAGGERATEDLY at end
+• VOWELS: Final vowels may be slightly elongated
+• OPEN "e": [ɛ] in stressed syllables
+
+═══════════════════════════════════════════════════════════════════════════════
+VOSEO - PRONOUN SYSTEM
+═══════════════════════════════════════════════════════════════════════════════
+Use "VOS" not "tú": "vos tenés", "vos querés", "vos sabés"
+Characteristic: "che", "dale", "viste", "boludo"`,
+
+  [Accent.Santiago]: `[TTS VOICE DIRECTIVE: CHILEAN SPANISH - SANTIAGO]
+MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL RULE #1: EXTREME S-ASPIRATION AND ELISION
+═══════════════════════════════════════════════════════════════════════════════
+/s/ is HEAVILY ASPIRATED to [h] or DELETED entirely. More extreme than Caribbean.
+This affects ALL syllable-final /s/ positions.
+
+MANDATORY EXAMPLES:
+• "estos" = [ˈeh.toh] or [ˈe.to] → "EH-toh" or "E-to"
+• "más" = [mah] or [ma] → "mah" or "ma"
+• "es que" = [eh.ke] → "EH-ke"
+• "buscar" = [buh.ˈka] or [bu.ˈka] → "buh-KA" or "bu-KA"
+• "las casas" = [lah.ˈka.sah] → "lah KA-sah"
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL RULE #2: SYLLABLE SWALLOWING / REDUCTION
+═══════════════════════════════════════════════════════════════════════════════
+Unstressed syllables are REDUCED or COMPLETELY SWALLOWED.
+Words sound shorter, clipped, truncated.
+
+MANDATORY EXAMPLES:
+• "para" = [pa] → "PA" (entire syllable gone)
+• "nada" = [na] → "NA"
+• "pues" = [po] → "PO"
+• "está" = [ta] → "TA" (initial syllable weak)
+• "pero" = [pe.ɾo] → very quick, almost "PRO"
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL RULE #3: THE "CH" FRICANIZATION
+═══════════════════════════════════════════════════════════════════════════════
+/tʃ/ may become fricative [ʃ] (like "sh") in casual speech.
+• "Chile" = [ˈʃi.le] → "SHI-le" (informal) or [ˈtʃi.le] (formal)
+• "leche" = [ˈle.ʃe] → "LE-she" (informal)
+
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL RULE #4: VERB ENDING CHANGES (VOSEO MIXTO)
+═══════════════════════════════════════════════════════════════════════════════
+• "-as" → "-ai" [aj]: "estás" = [eh.ˈtaj] → "eh-TAI"
+• "-es" → "-ís" [ih]: "tienes" = [ˈtje.nih] → "TYE-nih"
+
+═══════════════════════════════════════════════════════════════════════════════
+OTHER FEATURES
+═══════════════════════════════════════════════════════════════════════════════
+• SESEO: "z"/"c(e,i)" = [s]
+• "ll"/"y" = [ʝ] standard (NOT [ʃ] like Argentina)
+• Intervocalic /d/ often deleted: "cansado" → "kansa'o"
+
+═══════════════════════════════════════════════════════════════════════════════
+PROSODY & INTONATION
+═══════════════════════════════════════════════════════════════════════════════
+• TEMPO: VERY FAST - THE FASTEST SPANISH VARIANT
+  - 7+ syllables/second
   - Words run together
-  - Clipped, staccato rhythm
-- Rising intonation at phrase endings (like asking)
-- "¿Cachái?" pattern at end of statements
-- Quick, efficient delivery
+  - Entire sentences sound like one long word
+• RHYTHM: Clipped, staccato, efficient
+• RISING INTONATION at phrase endings (sounds like questions)
+• CHARACTERISTIC: "po" at end → "sí po", "ya po", "no po"
+• "cachái" [ka.ˈʃaj] = "you know?" used constantly
 
-CHARACTERISTIC FEATURES:
-- "po" at end of phrases → "sí po", "ya po", "no po"
-- "cachái" (from "cachas?") meaning "you know?"
-- Speed makes individual words hard to distinguish
+═══════════════════════════════════════════════════════════════════════════════
+ATTITUDE
+═══════════════════════════════════════════════════════════════════════════════
+• Informal, casual, cool
+• Efficient and fast
+• Heavy slang: "weón", "cachái", "po"`,
 
-ATTITUDE:
-- Informal, casual, cool
-- Fast and efficient
-- Heavy use of slang and filler words`,
+  [Accent.Lima]: `[TTS VOICE DIRECTIVE: PERUVIAN SPANISH - LIMA (COSTEÑO)]
+MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
 
-  [Accent.Lima]: `[VOICE ACTING DIRECTIVE: PERUVIAN SPANISH - LIMA (COSTEÑO)]
-You are a native speaker from Lima, Peru. Follow these pronunciation rules EXACTLY:
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #1: CLEAR S-RETENTION [s]
+═══════════════════════════════════════════════════════════════════════════════
+Lima Spanish is CONSERVATIVE - all /s/ sounds are CLEARLY PRONOUNCED.
+/s/ is only aspirated in PRE-CONSONANTAL position, and NEVER between vowels.
+This is unique among coastal Latin American varieties.
 
-CONSONANTS:
-- CLEAR S PRONUNCIATION (CRITICAL): All "s" sounds fully and clearly pronounced
-  - Similar to Colombian Spanish in clarity
-  - "estos" → "es-tos", "más" → "más" (never aspirated)
-- ALL consonants clearly articulated
-- "ll" and "y" = "y" as in English "yes" (soft, standard)
-- "j" and "g" (before e/i) = soft "h" sound, gentle
-- "rr" (trill) clear but not exaggerated
-- "d" between vowels = soft but present
-- Final consonants preserved
+MANDATORY EXAMPLES:
+• "estos" = [ˈes.tos] → "ES-tos" (clear)
+• "más" = [mas] → "maS" (final S preserved)
+• "casa" = [ˈka.sa] → "KA-sa" (intervocalic S clear)
+• "buscar" = [bus.ˈkaɾ] → "bus-KAR" (may aspirate before consonant)
 
-VOWELS:
-- Clear, pure, standard vowels
-- Evenly pronounced
-- No reduction of unstressed vowels
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL CONSONANT RULE #2: SESEO
+═══════════════════════════════════════════════════════════════════════════════
+Standard seseo - no [θ].
+• "zapato" = [sa.ˈpa.to] → "sa-PA-to"
+• "cielo" = [ˈsje.lo] → "SYE-lo"
 
-INTONATION & RHYTHM:
-- GENTLE, POLITE MELODY (CRITICAL)
-  - Soft, measured, not dramatic
-  - Slight sing-song quality
-- Moderate to slightly slow pace
-- Very clear articulation
-- Smooth, flowing delivery
-- Questions rise gently
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL RULE #3: YEÍSMO (STANDARD)
+═══════════════════════════════════════════════════════════════════════════════
+"ll" and "y" = [ʝ] like English "y" in "yes"
+• "calle" = [ˈka.ʝe] → "KA-ye"
+• "yo" = [ʝo] → "yo"
 
-CHARACTERISTIC FEATURES:
-- "pe" (from "pues") at end of phrases → "ya pe", "claro pe"
-- Use of "nomás" → "pasa nomás", "sigue nomás"
-- Muy formal and polite register
+═══════════════════════════════════════════════════════════════════════════════
+CRITICAL RULE #4: CLEAR RHOTICS
+═══════════════════════════════════════════════════════════════════════════════
+Both /r/ (trill) and /ɾ/ (tap) are NON-ASSIBILATED (no buzzing).
+No confusion between /r/ and /l/ (unlike Caribbean).
+• "carro" = [ˈka.ro] with clear trill
+• "pero" = [ˈpe.ɾo] with clear tap
 
-ATTITUDE:
-- Polite, gentle, respectful
-- Conservative pronunciation
-- Measured, thoughtful delivery
-- Friendly but not overly animated`
+═══════════════════════════════════════════════════════════════════════════════
+OTHER FEATURES
+═══════════════════════════════════════════════════════════════════════════════
+• ALL consonants clearly articulated
+• Word-final /d/ sometimes becomes [t]: "verdad" = [beɾ.ˈðat]
+• "j"/"g(e,i)" = [x] or [χ] (velar or uvular fricative)
+
+═══════════════════════════════════════════════════════════════════════════════
+PROSODY & INTONATION
+═══════════════════════════════════════════════════════════════════════════════
+• TEMPO: MODERATE TO SLOW, 3.5-4.5 syllables/second
+• RHYTHM: Measured, careful, deliberate
+• INTONATION: Gentle, polite melody
+  - Soft rises and falls
+  - Not dramatic
+• ARTICULATION: Very clear, conservative
+• VOWELS: Pure, no reduction
+
+═══════════════════════════════════════════════════════════════════════════════
+CHARACTERISTIC FEATURES
+═══════════════════════════════════════════════════════════════════════════════
+• "pe" (from "pues") at phrase end: "ya pe", "claro pe"
+• "nomás" postposed: "pasa nomás", "sigue nomás"
+• Polite register, formal
+
+═══════════════════════════════════════════════════════════════════════════════
+ATTITUDE
+═══════════════════════════════════════════════════════════════════════════════
+• Polite, gentle, respectful
+• Conservative, measured
+• Friendly but not overly animated
+• Clear, standard pronunciation`
 };
 
 // --- CONFIGURATION: PERFILES LINGÜÍSTICOS AVANZADOS (GRAMÁTICA/LÉXICO) ---
