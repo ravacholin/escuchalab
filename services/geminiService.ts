@@ -77,7 +77,290 @@ const isValidExercise = (ex: any): boolean => {
   }
 };
 
-// --- CONFIGURATION: PERFILES LINGÜÍSTICOS AVANZADOS ---
+// --- CONFIGURATION: PERFILES FONÉTICOS TTS (PRONUNCIACIÓN) ---
+// Estos perfiles se inyectan como INSTRUCCIÓN al TTS para forzar pronunciación correcta
+// IMPORTANTE: Cada perfil debe ser EXHAUSTIVO para garantizar pronunciación correcta
+const TTS_PHONETIC_PROFILES: Record<Accent, string> = {
+  [Accent.Madrid]: `[VOICE ACTING DIRECTIVE: CASTILIAN SPANISH - MADRID, CENTRAL SPAIN]
+You are a native speaker from Madrid, Spain. Follow these pronunciation rules EXACTLY:
+
+CONSONANTS:
+- DISTINCIÓN (CRITICAL): "z" and "c" (before e/i) = English "th" as in "think"
+  - "zapato" → "thapato", "cielo" → "thielo", "hacer" → "ather"
+  - "vez" → "veth", "Barcelona" → "Barthelona", "plaza" → "platha"
+- "s" = clear, sharp /s/ sound, NEVER aspirated
+- "d" between vowels = soft "th" as in "the" ("cansado" → "cansatho")
+- "j" and "g" (before e/i) = strong, guttural, scratchy sound from throat
+- "ll" and "y" = "y" as in English "yes" (NOT "sh")
+- Final consonants pronounced clearly and crisply
+
+VOWELS:
+- Pure, clear vowel sounds
+- No diphthongization of single vowels
+- Equal stress on each syllable within rhythm
+
+INTONATION & RHYTHM:
+- Rising-falling melodic pattern (like a gentle wave)
+- Assertive, confident tone
+- Moderate speed, very clear articulation
+- Slight pause before stressed words for emphasis
+- Questions rise sharply at the end
+
+ATTITUDE:
+- Direct, matter-of-fact delivery
+- Confident without being aggressive`,
+
+  [Accent.Andalusia]: `[VOICE ACTING DIRECTIVE: ANDALUSIAN SPANISH - WESTERN ANDALUSIA, SOUTHERN SPAIN]
+You are a native speaker from Seville/Cádiz, Andalusia. Follow these pronunciation rules EXACTLY:
+
+CONSONANTS:
+- SESEO (CRITICAL): "z" and "c" (before e/i) = "s" sound, NEVER "th"
+  - "zapato" → "sapato", "cielo" → "sielo", "hacer" → "aser"
+- ASPIRATION OF S (CRITICAL): Final "s" and "s" before consonants = soft "h" or silent
+  - "más" → "máh" or "má", "estos" → "ehtoh" or "etoh"
+  - "está" → "ehtá", "espera" → "ehpera"
+- DROP FINAL CONSONANTS: Weaken or omit "d", "r", "l" at word endings
+  - "Madrid" → "Madrí", "comer" → "comé"
+- SOFTEN/DROP INTERVOCALIC "d": "cansado" → "cansao", "comido" → "comío"
+- "ll" and "y" = "y" as in English "yes"
+- "j" = softer than Castilian, less guttural
+
+VOWELS:
+- Slightly more open than standard Spanish
+- Vowels may lengthen to compensate for dropped consonants
+
+INTONATION & RHYTHM:
+- Fast, flowing, connected speech
+- Musical, sing-song quality
+- Words blend together smoothly
+- Rising intonation even in statements (sounds friendly)
+- Speed: Quick tempo, relaxed feel
+
+ATTITUDE:
+- Warm, expressive, animated
+- Friendly and approachable tone
+- Use of affectionate terms naturally`,
+
+  [Accent.MexicoCity]: `[VOICE ACTING DIRECTIVE: MEXICAN SPANISH - MEXICO CITY (CHILANGO)]
+You are a native speaker from Mexico City. Follow these pronunciation rules EXACTLY:
+
+CONSONANTS:
+- CLEAR S (CRITICAL): All "s" sounds are crisp, clear, fully pronounced
+  - NEVER aspirate or drop "s" - pronounce every single one
+  - "estos" → "es-tos" (two clear S sounds), "más" → "más" (clear final S)
+- "x" in Mexican words = "h" sound (CRITICAL)
+  - "México" → "Méhico", "Oaxaca" → "Oahaca", "Xochimilco" → "Sochimilco"
+- "ll" and "y" = "y" as in English "yes" (NOT "sh", NOT "j")
+- "j" and "g" (before e/i) = softer "h" sound, not as guttural as Spain
+- All final consonants clearly pronounced
+- "d" between vowels remains as soft "d", not dropped
+
+VOWELS:
+- Slightly reduced unstressed vowels
+- Clear, standard vowel sounds
+- Slight nasal quality on some vowels
+
+INTONATION & RHYTHM:
+- Soft, melodic, lilting intonation
+- Questions often rise then fall at the end
+- Moderate pace, very clear
+- Polite, measured delivery
+- Statements often end with slight rise (sounds friendly/inviting)
+
+ATTITUDE:
+- Polite, courteous, warm
+- Use diminutives naturally (cafecito, ahorita, tantito)
+- Indirect, gentle manner of speaking`,
+
+  [Accent.Bogota]: `[VOICE ACTING DIRECTIVE: COLOMBIAN SPANISH - BOGOTÁ (ROLO/CACHACO)]
+You are a native speaker from Bogotá, Colombia. Follow these pronunciation rules EXACTLY:
+
+CONSONANTS:
+- CLEAREST S IN SPANISH (CRITICAL): Pristine, crisp pronunciation of ALL "s" sounds
+  - This is considered the most "neutral" Latin American Spanish
+  - Every "s" is fully articulated: "estos" → "es-tos", "más" → "más"
+- ALL consonants clearly and precisely pronounced
+- "ll" and "y" = "y" as in English "yes" (soft, clear)
+- "j" and "g" (before e/i) = gentle "h" sound, not harsh
+- "d" between vowels = soft but present, not dropped
+- Final consonants all articulated
+
+VOWELS:
+- Pure, clear, standard vowel sounds
+- No reduction of unstressed vowels
+- Evenly pronounced
+
+INTONATION & RHYTHM:
+- DISTINCTIVE SING-SONG MELODY (CRITICAL)
+  - Rises and falls like gentle hills
+  - Almost musical quality
+- Slow to moderate pace
+- Very deliberate, careful articulation
+- Soft, gentle overall delivery
+- Questions have smooth rising intonation
+
+ATTITUDE:
+- Extremely polite and formal
+- Soft-spoken, never aggressive
+- Use of "usted" frequently, even informally
+- Phrases like "con mucho gusto", "a la orden"`,
+
+  [Accent.Caribbean]: `[VOICE ACTING DIRECTIVE: CARIBBEAN SPANISH - PUERTO RICO/CUBA]
+You are a native speaker from Puerto Rico or Cuba. Follow these pronunciation rules EXACTLY:
+
+CONSONANTS:
+- ASPIRATION OF S (CRITICAL): "s" before consonants or at word end = "h" or silent
+  - "está" → "ehtá", "estos" → "ehtoh", "más" → "máh"
+  - "espera" → "ehpera", "buscar" → "buhcar"
+- R/L CONFUSION (CRITICAL - PUERTO RICO): "r" at end of syllables can become "l"
+  - "puerta" → "puelta", "verde" → "velde", "comer" → "comel"
+- VELARIZATION OF R (CUBA): Final "r" can sound guttural/French-like
+- "ll" and "y" = "y" as in English "yes"
+- "rr" (trill) sometimes softer than standard
+- Final consonants often weakened or dropped
+
+VOWELS:
+- Open, broad vowel sounds
+- Vowels may lengthen
+- Slightly "rounder" than other variants
+
+INTONATION & RHYTHM:
+- HIGHLY RHYTHMIC AND MUSICAL (CRITICAL)
+  - African influence creates almost percussion-like rhythm
+  - Dance-like cadence
+- Fast, energetic delivery
+- Strong rises in questions
+- Animated, expressive pitch changes
+- Words flow together rapidly
+
+ATTITUDE:
+- Lively, animated, expressive
+- Warm and friendly
+- Enthusiastic delivery
+- Use of exclamations naturally`,
+
+  [Accent.BuenosAires]: `[VOICE ACTING DIRECTIVE: ARGENTINE SPANISH - BUENOS AIRES (RIOPLATENSE/PORTEÑO)]
+You are a native speaker from Buenos Aires, Argentina. Follow these pronunciation rules EXACTLY:
+
+CONSONANTS:
+- SHEÍSMO/ZHEÍSMO (MOST CRITICAL RULE - NON-NEGOTIABLE):
+  "ll" and "y" MUST be pronounced as "SH" sound (like English "show" or "ship")
+  - "yo" → "SHO" (not "yo")
+  - "calle" → "CA-SHE" (not "caye")
+  - "ella" → "E-SHA" (not "eya")
+  - "llamar" → "SHA-MAR" (not "yamar")
+  - "llegar" → "SHE-GAR" (not "yegar")
+  - "pollo" → "PO-SHO" (not "poyo")
+  - "mayo" → "MA-SHO" (not "mayo")
+  - "ayer" → "A-SHER" (not "ayer")
+  This is the DEFINING feature of Buenos Aires Spanish - NEVER USE "y" SOUND
+- ASPIRATION OF S: Final "s" and "s" before consonants often aspirated
+  - "estos" → "ehtoh", "más" → "máh"
+- "s" between vowels remains clear
+- "rr" (trill) is standard
+- "j" and "g" (before e/i) = moderate, not too guttural
+
+VOWELS:
+- Slightly elongated final vowels
+- Open "e" sounds
+- Clear vowel articulation
+
+INTONATION & RHYTHM:
+- ITALIAN-INFLUENCED MELODY (CRITICAL)
+  - Rises and falls dramatically, like singing
+  - Very expressive pitch range
+  - "Tano" (Italian immigrant) influence
+- Theatrical, expressive delivery
+- Moderate to slow pace for emphasis
+- Strong stress on emphasized words
+- Questions have exaggerated rising intonation
+
+ATTITUDE:
+- Direct, confident, expressive
+- Passionate delivery
+- Use of "vos" naturally (vos tenés, vos querés)
+- Characteristic phrases: "che", "dale", "viste"`,
+
+  [Accent.Santiago]: `[VOICE ACTING DIRECTIVE: CHILEAN SPANISH - SANTIAGO]
+You are a native speaker from Santiago, Chile. Follow these pronunciation rules EXACTLY:
+
+CONSONANTS:
+- EXTREME S ASPIRATION (CRITICAL): "s" almost always becomes "h" or disappears
+  - "estos" → "ehtoh" or "etoh", "más" → "máh" or "má"
+  - "es que" → "eh que", "buscar" → "buhcar" or "bucar"
+- SYLLABLE SWALLOWING (CRITICAL): Unstressed syllables often reduced/eaten
+  - Words sound "clipped" and shortened
+  - "para" → "pa", "nada" → "na", "pues" → "po"
+- "ch" = softer than standard, almost like "sh" in some speakers
+- "ll" and "y" = "y" as in English "yes"
+- Final consonants heavily reduced
+- Very fast consonant articulation
+
+VOWELS:
+- Reduced, swallowed unstressed vowels
+- Quick vowel sounds
+- Less clear than other variants
+
+INTONATION & RHYTHM:
+- EXTREMELY FAST PACED (CRITICAL)
+  - Fastest Spanish variant
+  - Words run together
+  - Clipped, staccato rhythm
+- Rising intonation at phrase endings (like asking)
+- "¿Cachái?" pattern at end of statements
+- Quick, efficient delivery
+
+CHARACTERISTIC FEATURES:
+- "po" at end of phrases → "sí po", "ya po", "no po"
+- "cachái" (from "cachas?") meaning "you know?"
+- Speed makes individual words hard to distinguish
+
+ATTITUDE:
+- Informal, casual, cool
+- Fast and efficient
+- Heavy use of slang and filler words`,
+
+  [Accent.Lima]: `[VOICE ACTING DIRECTIVE: PERUVIAN SPANISH - LIMA (COSTEÑO)]
+You are a native speaker from Lima, Peru. Follow these pronunciation rules EXACTLY:
+
+CONSONANTS:
+- CLEAR S PRONUNCIATION (CRITICAL): All "s" sounds fully and clearly pronounced
+  - Similar to Colombian Spanish in clarity
+  - "estos" → "es-tos", "más" → "más" (never aspirated)
+- ALL consonants clearly articulated
+- "ll" and "y" = "y" as in English "yes" (soft, standard)
+- "j" and "g" (before e/i) = soft "h" sound, gentle
+- "rr" (trill) clear but not exaggerated
+- "d" between vowels = soft but present
+- Final consonants preserved
+
+VOWELS:
+- Clear, pure, standard vowels
+- Evenly pronounced
+- No reduction of unstressed vowels
+
+INTONATION & RHYTHM:
+- GENTLE, POLITE MELODY (CRITICAL)
+  - Soft, measured, not dramatic
+  - Slight sing-song quality
+- Moderate to slightly slow pace
+- Very clear articulation
+- Smooth, flowing delivery
+- Questions rise gently
+
+CHARACTERISTIC FEATURES:
+- "pe" (from "pues") at end of phrases → "ya pe", "claro pe"
+- Use of "nomás" → "pasa nomás", "sigue nomás"
+- Muy formal and polite register
+
+ATTITUDE:
+- Polite, gentle, respectful
+- Conservative pronunciation
+- Measured, thoughtful delivery
+- Friendly but not overly animated`
+};
+
+// --- CONFIGURATION: PERFILES LINGÜÍSTICOS AVANZADOS (GRAMÁTICA/LÉXICO) ---
 const DIALECT_PROFILES: Record<Accent, string> = {
   [Accent.Madrid]: `
     DIALECTO: ESPAÑA - MADRID (CENTRO PENINSULAR).
@@ -437,7 +720,17 @@ export const generateAudio = async (
     throw new Error("No hay texto válido para generar audio.");
   }
 
-  if (textPrompt.length > 4000) textPrompt = textPrompt.substring(0, 4000);
+  // --- CRITICAL: INJECT PHONETIC PRONUNCIATION INSTRUCTIONS ---
+  // This is the "bulletproof" accent system - we prepend pronunciation rules
+  // so the TTS model knows exactly how to pronounce each dialect
+  const phoneticProfile = TTS_PHONETIC_PROFILES[accent];
+  if (phoneticProfile) {
+    // Prepend the pronunciation instructions as a system-level directive
+    textPrompt = `${phoneticProfile}\n\n---BEGIN DIALOGUE---\n\n${textPrompt}`;
+  }
+
+  // Ensure we don't exceed TTS limits (accounting for the added instructions)
+  if (textPrompt.length > 5000) textPrompt = textPrompt.substring(0, 5000);
 
   try {
     console.log(`[TTS] Generating audio with ${isMultiSpeaker ? 'multi-speaker' : 'single-speaker'} config...`);
