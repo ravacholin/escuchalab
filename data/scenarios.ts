@@ -602,490 +602,494 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
     [TextType.PodcastInterview]: {
         [Level.Intro]: [
             {
-                label: "Podcast de Presentación",
-                value: "Estudio podcast entrevista básica presentación personal",
-                registerInstruction: "Registro conversacional semi-formal. Tratamiento tú entre entrevistador e invitado. Frases claras, sin jerga ni muletillas excesivas.",
-                icon: Mic,
+                label: "Mi Primera Cita Desastrosa",
+                value: "Podcast informal donde el invitado cuenta su primera cita romántica que salió mal: el restaurante equivocado, la comida derramada, los silencios incómodos",
+                registerInstruction: "Registro informal y cercano. Tratamiento tú. Tono humorístico y ligero. Permitido vocabulario de emociones básicas (nervios, vergüenza, risa). Sin vulgaridades.",
+                icon: Heart,
                 actions: [
-                    { label: "Saludo Inicial", value: "Saludar al público y presentar al invitado con frases cortas", icon: MessageCircle },
-                    { label: "Nombre y País", value: "Decir nombre, ciudad y país de origen claramente", icon: Flag },
-                    { label: "Hobby Favorito", value: "Hablar de un pasatiempo con vocabulario simple", icon: Smile },
-                    { label: "Ocupación", value: "Explicar si estudia o trabaja y qué hace", icon: Briefcase },
-                    { label: "Cierre y Despedida", value: "Cerrar el episodio con una despedida sencilla", icon: ThumbsUp }
+                    { label: "Dónde Fue la Cita", value: "Describir el lugar elegido: un café pequeño, un restaurante ruidoso, un parque", icon: MapPin },
+                    { label: "El Momento Incómodo", value: "Contar el momento más vergonzoso: derramó agua, se quedó en silencio, llegó tarde", icon: AlertCircle },
+                    { label: "Qué Comieron", value: "Describir la comida y si algo salió mal con el pedido", icon: Utensils },
+                    { label: "Cómo Terminó", value: "Contar si hubo segunda cita o nunca más se vieron", icon: ThumbsDown },
+                    { label: "Consejo para Otros", value: "Dar un consejo simple para primeras citas", icon: Lightbulb }
                 ]
             },
             {
-                label: "Podcast de Comida",
-                value: "Podcast culinario gustos básicos en cocina",
-                registerInstruction: "Registro cercano y descriptivo. Tratamiento tú. Vocabulario simple de sabores; sin lunfardo ni groserías.",
+                label: "La Receta de Mi Abuela",
+                value: "Podcast emotivo donde el invitado describe el plato especial que hacía su abuela: los olores, el ritual de cocinar juntos, las reuniones familiares",
+                registerInstruction: "Registro cercano y emotivo. Tratamiento tú. Vocabulario sensorial simple (olor, sabor, calor). Tono nostálgico pero positivo. Sin jerga.",
                 icon: Coffee,
                 actions: [
-                    { label: "Comida Favorita", value: "Decir cuál es la comida favorita y por qué", icon: Heart },
-                    { label: "No Me Gusta", value: "Explicar qué comida no le gusta y evitarla", icon: ThumbsDown },
-                    { label: "Desayuno", value: "Contar qué desayuna normalmente", icon: Sun },
-                    { label: "Recomendación", value: "Recomendar un plato típico fácil", icon: Menu },
-                    { label: "Sabor Simple", value: "Describir si algo está dulce, salado o picante", icon: Smile }
+                    { label: "El Plato Especial", value: "Decir el nombre del plato y por qué era especial", icon: Star },
+                    { label: "Los Olores de la Cocina", value: "Describir los olores que recuerda: ajo, cebolla, especias", icon: Sparkles },
+                    { label: "El Ritual Familiar", value: "Contar quién ayudaba a cocinar y qué hacía cada uno", icon: Heart },
+                    { label: "El Momento de Comer", value: "Describir la mesa, quién se sentaba dónde", icon: UserPlus },
+                    { label: "Intentar Hacerlo Hoy", value: "Contar si intentó hacer la receta y cómo salió", icon: Smile }
                 ]
             },
             {
-                label: "Podcast de Rutina",
-                value: "Entrevista sobre rutina diaria mañana tarde noche",
-                registerInstruction: "Registro conversacional sencillo. Tratamiento tú. Narración ordenada, sin jerga fuerte.",
-                icon: Clock,
+                label: "Mi Primer Día en el País",
+                value: "Podcast donde el invitado cuenta su primer día en un país nuevo: el aeropuerto confuso, las primeras palabras en otro idioma, la comida extraña",
+                registerInstruction: "Registro informal narrativo. Tratamiento tú. Vocabulario de viaje básico. Emociones simples (miedo, sorpresa, alegría). Sin lunfardo.",
+                icon: Plane,
                 actions: [
-                    { label: "Mañana", value: "Describir qué hace al levantarse", icon: Sun },
-                    { label: "Trabajo/Estudio", value: "Explicar una actividad principal del día", icon: BookOpen },
-                    { label: "Transporte", value: "Contar cómo va de casa al trabajo o escuela", icon: Bus },
-                    { label: "Hora de Dormir", value: "Decir a qué hora se acuesta", icon: Moon },
-                    { label: "Fin de Semana", value: "Mencionar un plan simple para el fin de semana", icon: Calendar }
+                    { label: "Llegada al Aeropuerto", value: "Describir el aeropuerto: grande, confuso, con carteles en otro idioma", icon: Plane },
+                    { label: "Primera Comida", value: "Contar qué comió el primer día y si le gustó", icon: Utensils },
+                    { label: "Primera Conversación", value: "Describir su primera conversación con un local: gestos, palabras básicas", icon: MessageCircle },
+                    { label: "Dónde Durmió", value: "Contar dónde pasó la primera noche: hotel, hostal, casa de familia", icon: Bed },
+                    { label: "Lo Más Sorprendente", value: "Decir qué le sorprendió más del nuevo país", icon: Sparkles }
                 ]
             },
             {
-                label: "Podcast de Lugares",
-                value: "Podcast de ciudad lugares favoritos y paseo",
-                registerInstruction: "Registro cercano informativo. Tratamiento tú. Descripciones claras de lugares; sin coloquialismos excesivos.",
-                icon: MapPin,
+                label: "Mi Mascota Me Salvó el Día",
+                value: "Podcast donde el invitado cuenta una anécdota donde su mascota hizo algo inesperado: el perro que ladró al ladrón, el gato que despertó a la familia",
+                registerInstruction: "Registro informal y tierno. Tratamiento tú. Vocabulario de animales y emociones. Tono positivo. Sin jerga.",
+                icon: Dog,
                 actions: [
-                    { label: "Lugar Favorito", value: "Presentar un lugar que le gusta en su ciudad", icon: MapPin },
-                    { label: "Cómo Llegar", value: "Dar indicaciones básicas para llegar", icon: Map },
-                    { label: "Por Qué Me Gusta", value: "Explicar una razón simple", icon: Heart },
-                    { label: "Comparar Dos Lugares", value: "Decir cuál es mejor y por qué", icon: Scale },
-                    { label: "Recomendación", value: "Invitar a visitarlo", icon: ThumbsUp }
+                    { label: "Presentar a la Mascota", value: "Decir nombre, tipo de animal y cómo llegó a casa", icon: Dog },
+                    { label: "El Día Normal", value: "Describir cómo empezó el día: rutina normal", icon: Sun },
+                    { label: "Lo Inesperado", value: "Contar qué hizo la mascota que sorprendió a todos", icon: Zap },
+                    { label: "La Reacción de la Familia", value: "Describir cómo reaccionaron todos", icon: Heart },
+                    { label: "Ahora Es un Héroe", value: "Contar si la mascota recibió algún premio o mimos extra", icon: Star }
                 ]
             },
             {
-                label: "Podcast de Compras",
-                value: "Podcast sobre compras básicas en tienda",
-                registerInstruction: "Registro conversacional neutral. Tratamiento tú. Comentarios concretos sobre compras; evitar lunfardo.",
-                icon: ShoppingBag,
+                label: "La Fiesta de Cumpleaños Sorpresa",
+                value: "Podcast donde el invitado cuenta una fiesta sorpresa: los preparativos secretos, casi descubren todo, la cara del festejado",
+                registerInstruction: "Registro informal y alegre. Tratamiento tú. Vocabulario de celebraciones. Tono entusiasta. Sin vulgaridades.",
+                icon: Gift,
                 actions: [
-                    { label: "Última Compra", value: "Contar qué compró y cuándo", icon: Receipt },
-                    { label: "Precio", value: "Decir cuánto costó y si es caro", icon: DollarSign },
-                    { label: "Talla o Color", value: "Describir talla o color del producto", icon: Palette },
-                    { label: "Consejo de Tienda", value: "Recomendar una tienda conocida", icon: ShoppingBag },
-                    { label: "Experiencia", value: "Decir si la atención fue buena o mala", icon: Smile }
+                    { label: "El Plan Secreto", value: "Contar cómo organizaron la sorpresa sin que se enterara", icon: Lock },
+                    { label: "Casi Lo Descubren", value: "Describir el momento de tensión donde casi se arruina la sorpresa", icon: AlertTriangle },
+                    { label: "La Llegada", value: "Contar el momento exacto cuando el festejado entró", icon: DoorOpen },
+                    { label: "La Cara de Sorpresa", value: "Describir la reacción: lloró, gritó, se quedó mudo", icon: Sparkles },
+                    { label: "El Mejor Momento", value: "Decir cuál fue el mejor momento de la noche", icon: Star }
                 ]
             }
         ],
         [Level.Beginner]: [
             {
-                label: "Podcast de Viajes Cortos",
-                value: "Entrevista sobre escapadas de fin de semana",
-                registerInstruction: "Registro narrativo cercano. Tratamiento tú. Relato ordenado con detalles simples; sin jerga vulgar.",
+                label: "Mi Peor Viaje de Vacaciones",
+                value: "Podcast donde el invitado cuenta un viaje desastroso: el equipaje perdido, el hostal con chinches, la intoxicación alimentaria, los mosquitos",
+                registerInstruction: "Registro informal narrativo. Tratamiento tú. Orden cronológico con detalles concretos. Tono humorístico sobre las desgracias. Sin vulgaridades.",
                 icon: Plane,
                 actions: [
-                    { label: "Relatar el Viaje", value: "Contar un viaje breve con lugares visitados", icon: MapPin },
-                    { label: "Transporte y Horario", value: "Explicar cómo viajó y a qué hora salió", icon: Train },
-                    { label: "Recomendar Hotel", value: "Decir dónde se alojó y si fue cómodo", icon: Bed },
-                    { label: "Problema Pequeño", value: "Contar un pequeño inconveniente y solución", icon: AlertCircle },
-                    { label: "Consejo al Oyente", value: "Dar un consejo práctico para turistas", icon: ThumbsUp }
+                    { label: "El Destino Elegido", value: "Contar por qué eligieron ese lugar y las expectativas", icon: MapPin },
+                    { label: "El Primer Problema", value: "Describir el primer desastre: vuelo cancelado, equipaje perdido", icon: AlertTriangle },
+                    { label: "El Alojamiento", value: "Contar cómo era el hotel o hostal: ruido, bichos, sin agua caliente", icon: Bed },
+                    { label: "La Comida Peligrosa", value: "Describir si comieron algo que les cayó mal", icon: Frown },
+                    { label: "El Momento de Rendirse", value: "Contar cuándo decidieron que el viaje era un desastre", icon: X },
+                    { label: "Algo Bueno al Final", value: "Rescatar algo positivo del viaje o la lección aprendida", icon: ThumbsUp }
                 ]
             },
             {
-                label: "Podcast de Salud",
-                value: "Podcast de bienestar y hábitos saludables",
-                registerInstruction: "Registro semi-formal y cuidadoso. Tratamiento tú. Consejos claros, sin coloquialismos ni bromas.",
-                icon: Stethoscope,
-                actions: [
-                    { label: "Rutina de Ejercicio", value: "Describir una rutina simple de ejercicio", icon: Dumbbell },
-                    { label: "Hábitos", value: "Contar un hábito saludable diario", icon: Heart },
-                    { label: "Visita Médica", value: "Explicar una visita médica reciente", icon: Stethoscope },
-                    { label: "Descanso", value: "Dar un consejo para dormir mejor", icon: Moon },
-                    { label: "Dieta", value: "Comentar un cambio sencillo en la alimentación", icon: Apple }
-                ]
-            },
-            {
-                label: "Podcast de Trabajo",
-                value: "Entrevista sobre trabajo cotidiano en oficina",
-                registerInstruction: "Registro profesional ligero. Tratamiento tú. Vocabulario laboral básico, sin jerga vulgar.",
+                label: "El Jefe que Todos Odiábamos",
+                value: "Podcast donde el invitado cuenta historias de un jefe terrible: las reuniones absurdas, los emails a medianoche, el micromanagement extremo",
+                registerInstruction: "Registro informal con tono de queja humorística. Tratamiento tú. Permitido sarcasmo suave. Sin insultos directos ni datos reales.",
                 icon: Briefcase,
                 actions: [
-                    { label: "Mi Puesto", value: "Describir el puesto y tareas principales", icon: Briefcase },
-                    { label: "Tarea Difícil", value: "Contar una tarea que costó hacer", icon: AlertTriangle },
-                    { label: "Reunión", value: "Describir una reunión breve y su resultado", icon: UserPlus },
-                    { label: "Ambiente Laboral", value: "Explicar cómo es el ambiente con compañeros", icon: Smile },
-                    { label: "Consejo Productividad", value: "Dar un consejo simple para organizarse", icon: Clock }
+                    { label: "Primera Impresión", value: "Contar cómo conoció al jefe y la primera señal de alarma", icon: Eye },
+                    { label: "La Reunión Absurda", value: "Describir una reunión que podía ser un email", icon: Clock },
+                    { label: "El Email de Medianoche", value: "Contar sobre mensajes fuera de hora y expectativas imposibles", icon: AlertCircle },
+                    { label: "El Compañero Favorito", value: "Hablar del favorito del jefe y cómo afectaba al equipo", icon: Star },
+                    { label: "El Día que Renunció", value: "Contar cómo terminó esa situación", icon: DoorOpen },
+                    { label: "Lo que Aprendí", value: "Explicar qué aprendió sobre trabajo y líderes", icon: Lightbulb }
                 ]
             },
             {
-                label: "Podcast de Tecnología",
-                value: "Podcast sobre tecnología cotidiana y apps",
-                registerInstruction: "Registro conversacional con términos técnicos básicos. Tratamiento tú. Evitar jerga vulgar.",
-                icon: Laptop,
-                actions: [
-                    { label: "App Favorita", value: "Explicar qué app usa más y para qué", icon: Phone },
-                    { label: "Problema con el Móvil", value: "Contar un fallo reciente y cómo lo resolvió", icon: AlertCircle },
-                    { label: "Seguridad Básica", value: "Dar un consejo para proteger contraseñas", icon: Lock },
-                    { label: "Comparar Dispositivos", value: "Comparar dos móviles de forma simple", icon: Scale },
-                    { label: "Recomendar Compra", value: "Recomendar un dispositivo económico", icon: DollarSign }
-                ]
-            },
-            {
-                label: "Podcast de Ocio",
-                value: "Podcast de ocio cultura y planes",
-                registerInstruction: "Registro cercano y ameno. Tratamiento tú. Comentarios claros; permitir coloquialismos suaves.",
-                icon: Music,
-                actions: [
-                    { label: "Recomendar Película", value: "Contar una película reciente y por qué gusta", icon: Film },
-                    { label: "Concierto", value: "Describir un concierto y el ambiente", icon: Music },
-                    { label: "Libro", value: "Hablar de un libro fácil de leer", icon: BookOpen },
-                    { label: "Plan del Fin de Semana", value: "Sugerir un plan simple para el finde", icon: Calendar },
-                    { label: "Invitar a Evento", value: "Invitar al público a un evento local", icon: Ticket }
-                ]
-            },
-            {
-                label: "Podcast de Relaciones",
-                value: "Podcast sobre amistades y vida social",
-                registerInstruction: "Registro cercano y respetuoso. Tratamiento tú. Tono empático; evitar insultos o lunfardo fuerte.",
-                icon: Heart,
-                actions: [
-                    { label: "Cómo nos Conocimos", value: "Contar cómo conoció a un amigo", icon: UserPlus },
-                    { label: "Planear Salida", value: "Organizar una salida con amigos", icon: MapPin },
-                    { label: "Malentendido", value: "Narrar un malentendido y cómo se arregló", icon: AlertTriangle },
-                    { label: "Consejo Amoroso", value: "Dar un consejo simple sobre relaciones", icon: Heart },
-                    { label: "Describir Personalidad", value: "Describir a alguien con adjetivos básicos", icon: Smile }
-                ]
-            },
-            {
-                label: "Podcast de Mascotas",
-                value: "Podcast sobre cuidados básicos de mascotas en casa",
-                registerInstruction: "Registro cercano y cuidadoso. Tratamiento tú. Descripciones claras, sin lunfardo ni exageraciones.",
+                label: "Mi Gato Destruyó Todo",
+                value: "Podcast donde el invitado cuenta las travesuras de su mascota: el sofá arañado, los cables mordidos, el árbol de Navidad derribado",
+                registerInstruction: "Registro informal y tierno. Tratamiento tú. Tono de exasperación cariñosa. Detalles específicos de los desastres. Sin jerga.",
                 icon: Dog,
                 actions: [
-                    { label: "Rutina Diaria", value: "Contar la rutina de cuidado de la mascota", icon: Clock },
-                    { label: "Alimentación", value: "Describir qué come y por qué", icon: Apple },
-                    { label: "Visita al Veterinario", value: "Narrar una visita reciente", icon: Stethoscope },
-                    { label: "Comportamiento", value: "Explicar un comportamiento típico", icon: MessageCircle },
-                    { label: "Consejo Básico", value: "Dar un consejo simple de cuidado", icon: Hand }
+                    { label: "Presentar al Culpable", value: "Describir a la mascota: raza, personalidad, cara de inocente", icon: Dog },
+                    { label: "El Primer Desastre", value: "Contar la primera cosa que destruyó", icon: AlertTriangle },
+                    { label: "La Cosa Más Cara", value: "Describir el objeto más valioso que arruinó", icon: DollarSign },
+                    { label: "El Momento Viral", value: "Contar si grabaron un video gracioso para redes", icon: Camera },
+                    { label: "Intentos de Solución", value: "Explicar qué intentaron para evitar más desastres", icon: Wrench },
+                    { label: "Por Qué Lo Perdonan", value: "Contar por qué sigue siendo el consentido", icon: Heart }
                 ]
             },
             {
-                label: "Podcast de Transporte Diario",
-                value: "Podcast sobre desplazamientos cotidianos y horarios",
-                registerInstruction: "Registro conversacional práctico. Tratamiento tú. Vocabulario simple de movilidad; sin lunfardo.",
-                icon: Bus,
+                label: "Me Perdí en una Ciudad Extranjera",
+                value: "Podcast donde el invitado cuenta cómo se perdió sin GPS, sin idioma y sin mapa: las calles iguales, los gestos desesperados, la ayuda inesperada",
+                registerInstruction: "Registro informal narrativo. Tratamiento tú. Emociones claras (miedo, alivio, vergüenza). Detalles sensoriales del lugar. Sin lunfardo.",
+                icon: Map,
                 actions: [
-                    { label: "Ruta Habitual", value: "Contar la ruta que toma cada día", icon: Map },
-                    { label: "Abono o Billete", value: "Explicar cómo compra el billete", icon: Ticket },
-                    { label: "Retraso", value: "Narrar un retraso y su impacto", icon: AlertTriangle },
-                    { label: "Hora Pico", value: "Describir la hora más complicada", icon: Clock },
-                    { label: "Consejo de Viaje", value: "Dar un consejo práctico", icon: ThumbsUp }
+                    { label: "Dónde Estaba", value: "Describir la ciudad y por qué estaba solo/a", icon: MapPin },
+                    { label: "Cómo Se Perdió", value: "Contar el momento exacto: el teléfono sin batería, la calle sin nombre", icon: AlertCircle },
+                    { label: "Intentos Fallidos", value: "Describir los intentos de pedir ayuda: gestos, dibujos, señalar", icon: Hand },
+                    { label: "La Persona que Ayudó", value: "Contar quién le ayudó y cómo se comunicaron", icon: UserPlus },
+                    { label: "Cuánto Tiempo Perdido", value: "Decir cuántas horas estuvo perdido", icon: Clock },
+                    { label: "Lo que Ahora Siempre Lleva", value: "Contar qué aprendió para no repetirlo", icon: Lightbulb }
                 ]
             },
             {
-                label: "Podcast de Compras Online",
-                value: "Podcast sobre compras por internet y experiencias",
-                registerInstruction: "Registro neutral y claro. Tratamiento tú. Sin lunfardo; vocabulario básico de comercio.",
-                icon: CreditCard,
+                label: "El Vecino Ruidoso",
+                value: "Podcast donde el invitado cuenta la guerra con un vecino: la música a las 3am, las notas pasivo-agresivas, la llamada a la policía, la reconciliación inesperada",
+                registerInstruction: "Registro informal con humor. Tratamiento tú. Escalada de conflicto con resolución. Permitido sarcasmo suave. Sin insultos.",
+                icon: Home,
                 actions: [
-                    { label: "Búsqueda de Ofertas", value: "Contar cómo encuentra ofertas", icon: Search },
-                    { label: "Envío", value: "Describir tiempos y seguimiento de envío", icon: Truck },
-                    { label: "Devolución", value: "Explicar cómo hizo una devolución", icon: Receipt },
-                    { label: "Método de Pago", value: "Mencionar el método de pago usado", icon: Wallet },
-                    { label: "Experiencia", value: "Decir si quedó satisfecho", icon: Smile }
+                    { label: "Los Primeros Ruidos", value: "Describir cuándo empezó el problema y qué tipo de ruido", icon: Music },
+                    { label: "El Primer Reclamo", value: "Contar cómo intentó hablar con el vecino", icon: MessageCircle },
+                    { label: "La Escalada", value: "Describir cómo fue empeorando: notas, llamadas, represalias", icon: TrendingUp },
+                    { label: "El Punto Crítico", value: "Contar el momento más tenso: policía, gritos, portazo", icon: AlertTriangle },
+                    { label: "La Resolución", value: "Explicar cómo se resolvió: acuerdo, mudanza, amistad inesperada", icon: HeartHandshake },
+                    { label: "Consejo para Otros", value: "Dar un consejo para conflictos vecinales", icon: ThumbsUp }
                 ]
             },
             {
-                label: "Podcast de Cocina Casera",
-                value: "Podcast con recetas sencillas de casa",
-                registerInstruction: "Registro cercano e instructivo. Tratamiento tú. Sin lunfardo; pasos claros.",
+                label: "Mi Primera Entrevista de Trabajo",
+                value: "Podcast donde el invitado cuenta su primera entrevista laboral: la corbata mal anudada, la pregunta trampa, el sudor nervioso, la espera eterna",
+                registerInstruction: "Registro informal y empático. Tratamiento tú. Detalles de nerviosismo y errores. Tono de aprendizaje. Sin jerga laboral compleja.",
+                icon: BriefcaseBusiness,
+                actions: [
+                    { label: "La Preparación", value: "Contar cómo se preparó: ropa, investigación, ensayo", icon: ListChecks },
+                    { label: "El Camino", value: "Describir el viaje: llegó tarde, se perdió, sudando", icon: Bus },
+                    { label: "La Sala de Espera", value: "Contar los nervios mientras esperaba", icon: Clock },
+                    { label: "La Pregunta Difícil", value: "Describir una pregunta que lo dejó en blanco", icon: HelpCircle },
+                    { label: "El Error", value: "Contar el error más vergonzoso de la entrevista", icon: AlertCircle },
+                    { label: "El Resultado", value: "Decir si consiguió el trabajo o no y qué aprendió", icon: CheckCircle }
+                ]
+            },
+            {
+                label: "Aprendí a Cocinar por YouTube",
+                value: "Podcast donde el invitado cuenta sus desastres culinarios aprendiendo con videos: la cocina llena de humo, el plato incomible, la alarma de incendios",
+                registerInstruction: "Registro informal y humorístico. Tratamiento tú. Detalles de los desastres. Tono autocrítico pero positivo. Sin jerga.",
                 icon: Utensils,
                 actions: [
-                    { label: "Receta Simple", value: "Explicar una receta fácil", icon: Menu },
-                    { label: "Ingredientes", value: "Enumerar ingredientes básicos", icon: ListChecks },
-                    { label: "Error Común", value: "Contar un error que evitó", icon: AlertTriangle },
-                    { label: "Truco", value: "Compartir un truco de cocina", icon: Lightbulb },
-                    { label: "Resultado", value: "Describir el resultado final", icon: Star }
+                    { label: "Por Qué Empezó", value: "Contar qué le motivó a aprender a cocinar", icon: Lightbulb },
+                    { label: "El Primer Video", value: "Describir qué receta intentó primero", icon: Film },
+                    { label: "El Primer Desastre", value: "Contar qué salió terriblemente mal", icon: AlertTriangle },
+                    { label: "La Alarma de Incendios", value: "Describir si tuvo que evacuar o si los vecinos llamaron", icon: Siren },
+                    { label: "El Plato que Funcionó", value: "Contar su primera receta exitosa", icon: Star },
+                    { label: "Ahora Qué Cocina", value: "Decir qué nivel tiene ahora", icon: CheckCircle }
+                ]
+            },
+            {
+                label: "La Mudanza Caótica",
+                value: "Podcast donde el invitado cuenta una mudanza desastrosa: la camioneta que no llegó, las cajas perdidas, el sofá atascado en la escalera",
+                registerInstruction: "Registro informal narrativo. Tratamiento tú. Detalles físicos del caos. Humor sobre el estrés. Sin vulgaridades.",
+                icon: Truck,
+                actions: [
+                    { label: "Por Qué Se Mudaba", value: "Contar el motivo de la mudanza", icon: Home },
+                    { label: "El Día D", value: "Describir cómo empezó el día de mudanza", icon: Calendar },
+                    { label: "El Primer Problema", value: "Contar el primer obstáculo: camioneta, ayudantes, lluvia", icon: AlertTriangle },
+                    { label: "El Objeto Atascado", value: "Describir el mueble que no pasaba por la puerta", icon: X },
+                    { label: "Lo que Se Perdió", value: "Contar qué caja nunca apareció", icon: Search },
+                    { label: "La Primera Noche", value: "Describir la primera noche en el piso vacío", icon: Moon }
+                ]
+            },
+            {
+                label: "El Crush del Trabajo",
+                value: "Podcast donde el invitado cuenta una historia de enamoramiento en la oficina: las miradas, los cafés coincidentes, la declaración fallida",
+                registerInstruction: "Registro informal y romántico/humorístico. Tratamiento tú. Detalles emocionales. Tono ligero. Sin contenido explícito.",
+                icon: Heart,
+                actions: [
+                    { label: "Cuándo Lo Notó", value: "Contar el momento en que se dio cuenta del crush", icon: Eye },
+                    { label: "Las Señales", value: "Describir las señales que interpretaba: miradas, sonrisas", icon: Sparkles },
+                    { label: "El Plan", value: "Contar qué estrategia usó para acercarse", icon: Lightbulb },
+                    { label: "El Momento de la Verdad", value: "Describir si se declaró o no y cómo", icon: Heart },
+                    { label: "El Resultado", value: "Contar cómo terminó: relación, rechazo, amistad", icon: CheckCircle },
+                    { label: "Consejo sobre Amor en Trabajo", value: "Dar un consejo basado en su experiencia", icon: ThumbsUp }
+                ]
+            },
+            {
+                label: "El Viaje en Bus Eterno",
+                value: "Podcast donde el invitado cuenta un viaje en bus interminable: el asiento roto, el bebé llorando, la parada de 5 horas, el compañero de asiento extraño",
+                registerInstruction: "Registro informal y quejoso-humorístico. Tratamiento tú. Detalles sensoriales del trayecto. Sin insultos.",
+                icon: Bus,
+                actions: [
+                    { label: "El Destino", value: "Contar adónde iba y cuántas horas debía durar", icon: MapPin },
+                    { label: "El Asiento", value: "Describir el estado del asiento: roto, sucio, sin espacio", icon: Frown },
+                    { label: "El Compañero", value: "Contar quién se sentó al lado y qué hacía", icon: UserPlus },
+                    { label: "La Peor Parada", value: "Describir una parada eterna en la nada", icon: Clock },
+                    { label: "Lo que No Llevó", value: "Contar qué olvidó que hubiera salvado el viaje", icon: AlertCircle },
+                    { label: "La Llegada", value: "Describir el alivio al llegar finalmente", icon: CheckCircle }
                 ]
             }
         ],
         [Level.Intermediate]: [
             {
-                label: "Podcast de Emprendimiento",
-                value: "Entrevista sobre emprendimiento y negocios",
-                registerInstruction: "Registro semi-formal profesional. Tratamiento tú. Léxico de negocios claro, sin vulgaridades.",
+                label: "El Día que Perdí Todo el Dinero",
+                value: "Podcast donde un emprendedor cuenta cómo su negocio fracasó: la inversión perdida, la vergüenza familiar, las deudas, y cómo se recuperó",
+                registerInstruction: "Registro semi-formal reflexivo. Tratamiento tú. Tono de superación, no victimista. Detalles de emociones y aprendizajes. Sin jerga financiera compleja.",
                 icon: TrendingUp,
                 actions: [
-                    { label: "Motivación", value: "Explicar por qué decidió emprender", icon: Lightbulb },
-                    { label: "Producto o Servicio", value: "Describir la propuesta de valor", icon: Briefcase },
-                    { label: "Financiación", value: "Contar cómo consiguió financiación", icon: DollarSign },
-                    { label: "Reto Legal", value: "Relatar un problema legal o burocrático", icon: FileText },
-                    { label: "Lección Aprendida", value: "Compartir un aprendizaje clave", icon: Star }
+                    { label: "La Gran Idea", value: "Contar cuál era el negocio y por qué parecía buena idea", icon: Lightbulb },
+                    { label: "La Inversión", value: "Describir de dónde sacó el dinero: ahorros, préstamo, familia", icon: DollarSign },
+                    { label: "Las Primeras Señales", value: "Contar cuándo empezó a ir mal y qué ignoró", icon: AlertTriangle },
+                    { label: "El Día del Colapso", value: "Describir el día en que todo se derrumbó", icon: X },
+                    { label: "La Conversación Difícil", value: "Contar cómo le dijo a su familia/pareja", icon: Frown },
+                    { label: "La Reconstrucción", value: "Explicar cómo empezó de nuevo y qué aprendió", icon: Star }
                 ]
             },
             {
-                label: "Podcast de Educación",
-                value: "Entrevista sobre educación y aprendizaje",
-                registerInstruction: "Registro semi-formal educativo. Tratamiento tú. Tono respetuoso, sin jerga vulgar.",
-                icon: School,
+                label: "El Día que Me Despidieron",
+                value: "Podcast donde el invitado cuenta el día que perdió su trabajo: la llamada inesperada, vaciar el escritorio, la despedida de compañeros, reinventarse",
+                registerInstruction: "Registro semi-formal emotivo. Tratamiento tú. Detalles del momento y emociones. Arco de crisis a oportunidad. Sin victimismo.",
+                icon: Briefcase,
                 actions: [
-                    { label: "Comparar Sistemas", value: "Comparar dos sistemas educativos", icon: Scale },
-                    { label: "Experiencia Universitaria", value: "Contar una experiencia relevante", icon: GraduationCap },
-                    { label: "Métodos de Enseñanza", value: "Debatir sobre métodos tradicionales y modernos", icon: Brain },
-                    { label: "Propuesta de Mejora", value: "Proponer una mejora concreta", icon: Lightbulb },
-                    { label: "Profesor Inspirador", value: "Narrar la historia de un profesor", icon: Heart }
+                    { label: "El Trabajo Perfecto", value: "Describir por qué amaba ese trabajo", icon: Heart },
+                    { label: "Las Señales Ignoradas", value: "Contar si había señales y no las vio", icon: Eye },
+                    { label: "La Llamada", value: "Describir el momento exacto: el jefe, la sala, las palabras", icon: Phone },
+                    { label: "Vaciar el Escritorio", value: "Contar la humillación de recoger las cosas", icon: ShoppingBag },
+                    { label: "La Despedida", value: "Describir cómo fue irse: silencio, abrazos, evitar miradas", icon: DoorOpen },
+                    { label: "Qué Vino Después", value: "Contar cómo reinventó su carrera", icon: Rocket }
                 ]
             },
             {
-                label: "Podcast Ambiental",
-                value: "Podcast de medio ambiente y sostenibilidad",
-                registerInstruction: "Registro informativo cercano. Tratamiento tú. Lenguaje claro y responsable; evitar coloquialismos fuertes.",
-                icon: Leaf,
+                label: "Me Enamoré Durante la Cuarentena",
+                value: "Podcast donde el invitado cuenta una historia de amor en pandemia: conocerse online, videollamadas de horas, el primer encuentro físico después de meses",
+                registerInstruction: "Registro informal y romántico. Tratamiento tú. Detalles de la conexión virtual y el nerviosismo del encuentro. Sin contenido explícito.",
+                icon: Heart,
                 actions: [
-                    { label: "Problema Local", value: "Describir un problema ambiental local", icon: AlertTriangle },
-                    { label: "Acción Comunitaria", value: "Explicar una iniciativa ciudadana", icon: UserPlus },
-                    { label: "Dato Impactante", value: "Compartir una cifra relevante", icon: PieChart },
-                    { label: "Soluciones", value: "Debatir soluciones posibles", icon: Lightbulb },
-                    { label: "Consejo Personal", value: "Dar un consejo sostenible", icon: Recycle }
+                    { label: "Cómo Se Conocieron", value: "Contar dónde se conocieron: app, redes, amigos en común", icon: Phone },
+                    { label: "La Primera Videollamada", value: "Describir los nervios, qué hablaron, cuánto duró", icon: Laptop },
+                    { label: "Las Señales Virtuales", value: "Contar cómo supieron que era algo especial", icon: Heart },
+                    { label: "El Plan del Encuentro", value: "Describir cómo decidieron verse y los miedos", icon: Calendar },
+                    { label: "El Primer Momento Real", value: "Contar el encuentro físico: nervios, reconocerse, el primer abrazo", icon: Sparkles },
+                    { label: "Cómo Están Ahora", value: "Decir si siguen juntos y qué aprendieron", icon: HeartHandshake }
                 ]
             },
             {
-                label: "Podcast de Cultura",
-                value: "Podcast sobre cultura y sociedad",
-                registerInstruction: "Registro conversacional reflexivo. Tratamiento tú. Tono respetuoso, sin jerga vulgar.",
-                icon: Palette,
+                label: "Descubrí que Mi Profesor Era un Fraude",
+                value: "Podcast donde el invitado cuenta cómo descubrió que un profesor admirado era un fraude: plagio, mentiras en el CV, el escándalo",
+                registerInstruction: "Registro semi-formal periodístico. Tratamiento tú. Tono de denuncia pero respetuoso. Hechos y emociones de decepción.",
+                icon: GraduationCap,
                 actions: [
-                    { label: "Cambio Cultural", value: "Describir un cambio cultural reciente", icon: Globe },
-                    { label: "Tradición Familiar", value: "Contar una tradición familiar", icon: Heart },
-                    { label: "Choque Cultural", value: "Narrar un choque cultural vivido", icon: AlertCircle },
-                    { label: "Debate Generacional", value: "Comparar puntos de vista entre generaciones", icon: Scale },
-                    { label: "Ejemplo de Inclusión", value: "Contar un ejemplo de inclusión", icon: ThumbsUp }
+                    { label: "El Mentor Admirado", value: "Describir por qué admiraba a esta persona", icon: Star },
+                    { label: "La Primera Sospecha", value: "Contar qué descubrió que no encajaba", icon: Search },
+                    { label: "La Investigación", value: "Describir cómo investigó: Google, preguntar, documentos", icon: FileText },
+                    { label: "La Revelación", value: "Contar el momento de confirmar que era mentira", icon: AlertTriangle },
+                    { label: "La Decisión de Actuar", value: "Describir si denunció o calló, y por qué", icon: Scale },
+                    { label: "Las Consecuencias", value: "Contar qué pasó después: despido, escándalo, silencio", icon: Gavel }
                 ]
             },
             {
-                label: "Podcast de Ciencia Popular",
-                value: "Podcast divulgativo con lenguaje claro",
-                registerInstruction: "Registro divulgativo semi-formal. Tratamiento tú. Explicaciones claras y sin tecnicismos excesivos. Sin lunfardo.",
-                icon: FlaskConical,
+                label: "Mi Padre Tenía Otra Familia",
+                value: "Podcast donde el invitado cuenta cómo descubrió que su padre llevaba doble vida: la llamada extraña, la investigación, el confrontamiento",
+                registerInstruction: "Registro semi-formal íntimo. Tratamiento tú. Tono emotivo pero controlado. Respeto por todos los involucrados. Sin morbo.",
+                icon: AlertTriangle,
                 actions: [
-                    { label: "Hallazgo", value: "Explicar un hallazgo científico reciente", icon: Sparkles },
-                    { label: "Mitos", value: "Desmentir un mito común", icon: X },
-                    { label: "Preguntas de Oyentes", value: "Responder preguntas frecuentes", icon: MessageCircle },
-                    { label: "Riesgos", value: "Analizar riesgos y beneficios", icon: AlertTriangle },
-                    { label: "Recomendar Fuentes", value: "Sugerir fuentes confiables", icon: BookOpen }
+                    { label: "La Familia Original", value: "Describir cómo era la vida familiar antes de saber", icon: Home },
+                    { label: "La Primera Pista", value: "Contar qué despertó las sospechas", icon: Eye },
+                    { label: "La Investigación Secreta", value: "Describir cómo buscó la verdad", icon: Search },
+                    { label: "El Momento de la Verdad", value: "Contar cómo descubrió la otra familia", icon: Zap },
+                    { label: "La Confrontación", value: "Describir la conversación con el padre", icon: MessageCircle },
+                    { label: "Cómo Está la Familia Ahora", value: "Contar las consecuencias y si hubo reconciliación", icon: Heart }
                 ]
             },
             {
-                label: "Podcast de Finanzas",
-                value: "Podcast de finanzas personales",
-                registerInstruction: "Registro semi-formal y preciso. Tratamiento tú. Números y términos claros; sin coloquialismos.",
-                icon: Landmark,
+                label: "Heredé una Deuda de un Familiar",
+                value: "Podcast donde el invitado cuenta cómo tras la muerte de un familiar descubrió deudas ocultas: el notario, los acreedores, el proceso legal",
+                registerInstruction: "Registro semi-formal informativo. Tratamiento tú. Tono de advertencia educativa. Detalles del proceso sin tecnicismos legales.",
+                icon: FileWarning,
                 actions: [
-                    { label: "Presupuesto", value: "Explicar cómo organiza el presupuesto", icon: PieChart },
-                    { label: "Ahorro", value: "Contar una estrategia de ahorro", icon: PiggyBank },
-                    { label: "Error Financiero", value: "Narrar un error y lo aprendido", icon: AlertTriangle },
-                    { label: "Inversión Básica", value: "Explicar una inversión sencilla", icon: TrendingUp },
-                    { label: "Meta Económica", value: "Definir una meta financiera clara", icon: Star }
+                    { label: "La Muerte del Familiar", value: "Contar el contexto de la pérdida", icon: Heart },
+                    { label: "La Visita al Notario", value: "Describir el día de la lectura del testamento", icon: FileText },
+                    { label: "El Descubrimiento", value: "Contar el momento de saber de las deudas", icon: AlertTriangle },
+                    { label: "Los Acreedores", value: "Describir las llamadas y cartas que empezaron a llegar", icon: Phone },
+                    { label: "Las Opciones Legales", value: "Explicar qué opciones tenía: aceptar, renunciar", icon: Scale },
+                    { label: "Cómo Lo Resolvió", value: "Contar la decisión final y el aprendizaje", icon: CheckCircle }
                 ]
             },
             {
-                label: "Podcast de Deportes",
-                value: "Podcast de deportes y rendimiento",
-                registerInstruction: "Registro cercano con vocabulario deportivo. Tratamiento tú. Permitido entusiasmo, sin insultos.",
-                icon: Dumbbell,
+                label: "Me Diagnosticaron una Enfermedad Crónica",
+                value: "Podcast donde el invitado cuenta el día del diagnóstico: los síntomas ignorados, las pruebas, la noticia, la adaptación a la nueva vida",
+                registerInstruction: "Registro semi-formal empático. Tratamiento tú. Tono de esperanza y adaptación. Sin dramatismo excesivo. Respetar la privacidad médica.",
+                icon: Stethoscope,
                 actions: [
-                    { label: "Preparación", value: "Explicar cómo se prepara para competir", icon: Clock },
-                    { label: "Recuperación", value: "Hablar de recuperación tras lesión", icon: Stethoscope },
-                    { label: "Disciplina", value: "Describir disciplina mental y hábitos", icon: Brain },
-                    { label: "Análisis de Partido", value: "Analizar un partido con detalle", icon: Tv },
-                    { label: "Rutina de Entrenamiento", value: "Narrar una rutina semanal", icon: Dumbbell }
+                    { label: "Los Primeros Síntomas", value: "Contar cuándo empezó a sentirse mal", icon: AlertCircle },
+                    { label: "Ignorar las Señales", value: "Describir por qué tardó en ir al médico", icon: Clock },
+                    { label: "Las Pruebas", value: "Contar el proceso de diagnóstico", icon: FlaskConical },
+                    { label: "El Día del Diagnóstico", value: "Describir el momento de recibir la noticia", icon: FileText },
+                    { label: "Contárselo a la Familia", value: "Contar cómo reaccionaron los seres queridos", icon: Heart },
+                    { label: "La Nueva Normalidad", value: "Describir cómo adaptó su vida y qué aprendió", icon: Star }
                 ]
             },
             {
-                label: "Podcast de Turismo Cultural",
-                value: "Podcast sobre visitas culturales y patrimonio local",
-                registerInstruction: "Registro semi-formal descriptivo. Tratamiento tú. Tono respetuoso, sin lunfardo.",
-                icon: Landmark,
+                label: "Rompí con Mi Mejor Amigo de 15 Años",
+                value: "Podcast donde el invitado cuenta el fin de una amistad larga: la traición, el silencio, los intentos de reconciliación, la aceptación",
+                registerInstruction: "Registro semi-formal reflexivo. Tratamiento tú. Tono de duelo y madurez. Evitar culpar excesivamente al otro.",
+                icon: HeartHandshake,
                 actions: [
-                    { label: "Lugar Patrimonial", value: "Describir un lugar cultural importante", icon: MapPin },
-                    { label: "Contexto Histórico", value: "Dar contexto histórico básico", icon: BookOpen },
-                    { label: "Costo y Horarios", value: "Informar costos y horarios de visita", icon: Clock },
-                    { label: "Recomendación", value: "Recomendar una visita", icon: ThumbsUp },
-                    { label: "Problema Logístico", value: "Contar un problema de acceso y solución", icon: AlertTriangle }
+                    { label: "La Historia de la Amistad", value: "Contar cómo se conocieron y los mejores momentos", icon: Star },
+                    { label: "Los Primeros Roces", value: "Describir cuándo empezaron los problemas", icon: AlertCircle },
+                    { label: "El Evento Decisivo", value: "Contar qué pasó que rompió todo", icon: Zap },
+                    { label: "El Silencio", value: "Describir los días sin hablarse", icon: X },
+                    { label: "Los Intentos de Arreglo", value: "Contar si intentaron reconciliarse", icon: MessageCircle },
+                    { label: "La Aceptación", value: "Explicar cómo aceptó que la amistad terminó", icon: Brain }
                 ]
             },
             {
-                label: "Podcast de Gestión del Tiempo",
-                value: "Podcast sobre organización personal y productividad",
-                registerInstruction: "Registro semi-formal práctico. Tratamiento tú. Sin lunfardo; consejos concretos.",
-                icon: ListChecks,
+                label: "Escapé de una Relación Tóxica",
+                value: "Podcast donde el invitado cuenta cómo salió de una relación dañina: las señales ignoradas, el punto de quiebre, la reconstrucción personal",
+                registerInstruction: "Registro semi-formal de superación. Tratamiento tú. Tono empoderador, no victimista. Sin detalles que identifiquen al otro.",
+                icon: Lock,
                 actions: [
-                    { label: "Método", value: "Explicar un método de organización", icon: Lightbulb },
-                    { label: "Herramienta", value: "Mencionar una herramienta útil", icon: Laptop },
-                    { label: "Obstáculo", value: "Contar un obstáculo común", icon: AlertCircle },
-                    { label: "Ajuste", value: "Explicar cómo ajustó su rutina", icon: ArrowRight },
-                    { label: "Consejo Final", value: "Dar un consejo breve", icon: ThumbsUp }
+                    { label: "El Inicio Perfecto", value: "Contar cómo empezó la relación de forma ideal", icon: Heart },
+                    { label: "Las Primeras Señales", value: "Describir los primeros comportamientos preocupantes", icon: AlertTriangle },
+                    { label: "La Escalada", value: "Contar cómo fue empeorando", icon: TrendingUp },
+                    { label: "El Punto de Quiebre", value: "Describir el momento que decidió irse", icon: Zap },
+                    { label: "La Salida", value: "Contar cómo logró dejar la relación", icon: DoorOpen },
+                    { label: "La Recuperación", value: "Describir el proceso de sanar y qué aprendió", icon: Star }
                 ]
             },
             {
-                label: "Podcast de Salud Laboral",
-                value: "Podcast sobre bienestar en el trabajo",
-                registerInstruction: "Registro semi-formal profesional. Tratamiento tú. Tono cuidadoso, sin lunfardo.",
-                icon: BriefcaseBusiness,
+                label: "Viví en Otro País Solo a los 18",
+                value: "Podcast donde el invitado cuenta su experiencia de irse solo a estudiar/trabajar al extranjero: el miedo, la soledad, el crecimiento",
+                registerInstruction: "Registro semi-formal narrativo. Tratamiento tú. Arco de vulnerabilidad a independencia. Detalles sensoriales del lugar.",
+                icon: Plane,
                 actions: [
-                    { label: "Estrés Laboral", value: "Describir señales de estrés", icon: BatteryLow },
-                    { label: "Equilibrio", value: "Contar cómo busca equilibrio", icon: Scale },
-                    { label: "Política de Empresa", value: "Mencionar una política de bienestar", icon: FileText },
-                    { label: "Ejemplo Personal", value: "Narrar un caso personal", icon: MessageCircle },
-                    { label: "Recomendación", value: "Dar una recomendación práctica", icon: ThumbsUp }
+                    { label: "La Decisión de Irse", value: "Contar por qué decidió irse y cómo reaccionó la familia", icon: Lightbulb },
+                    { label: "La Despedida", value: "Describir el día de irse: aeropuerto, lágrimas", icon: Heart },
+                    { label: "Los Primeros Días", value: "Contar la desorientación inicial: idioma, comida, costumbres", icon: AlertCircle },
+                    { label: "El Momento Más Solitario", value: "Describir el momento de mayor soledad", icon: Frown },
+                    { label: "El Punto de Inflexión", value: "Contar cuándo empezó a sentirse bien", icon: Star },
+                    { label: "Lo que Aprendió", value: "Explicar cómo le cambió la experiencia", icon: Brain }
                 ]
             }
         ],
         [Level.Advanced]: [
             {
-                label: "Podcast de Investigación",
-                value: "Entrevista de investigación periodística",
-                registerInstruction: "Registro periodístico formal moderado. Tratamiento tú, pero tono serio y objetivo. Sin jerga vulgar.",
-                icon: Newspaper,
+                label: "Escapé de una Secta Religiosa",
+                value: "Podcast donde el invitado cuenta cómo vivió dentro de una secta: el adoctrinamiento gradual, las señales de alarma, la planificación de la fuga, la vida después",
+                registerInstruction: "Registro formal de testimonio. Tratamiento tú. Tono respetuoso y serio. Evitar sensacionalismo. Detalles del proceso psicológico.",
+                icon: Lock,
                 actions: [
-                    { label: "Revelación", value: "Presentar una revelación relevante", icon: Megaphone },
-                    { label: "Metodología", value: "Explicar métodos de investigación", icon: Search },
-                    { label: "Fuentes", value: "Citar fuentes confidenciales sin exponerlas", icon: ShieldAlert },
-                    { label: "Dilema Ético", value: "Discutir un dilema ético", icon: Scale },
-                    { label: "Impacto", value: "Analizar impacto social", icon: Globe }
+                    { label: "La Llegada a la Secta", value: "Contar cómo llegó y qué le atrajo inicialmente", icon: DoorOpen },
+                    { label: "El Adoctrinamiento", value: "Describir cómo fue cambiando su forma de pensar", icon: Brain },
+                    { label: "Las Señales Ignoradas", value: "Contar qué empezó a notar que estaba mal", icon: Eye },
+                    { label: "El Punto de Quiebre", value: "Describir el momento que decidió irse", icon: Zap },
+                    { label: "La Planificación de la Fuga", value: "Contar cómo planeó salir en secreto", icon: Map },
+                    { label: "La Vida Después", value: "Describir la reconstrucción de su identidad", icon: Star }
                 ]
             },
             {
-                label: "Podcast de Geopolítica",
-                value: "Podcast de análisis geopolítico",
-                registerInstruction: "Registro formal analítico. Tratamiento tú. Tono sobrio, sin coloquialismos ni ironías.",
-                icon: Globe,
-                actions: [
-                    { label: "Conflicto", value: "Analizar un conflicto actual", icon: AlertTriangle },
-                    { label: "Acuerdos", value: "Interpretar acuerdos internacionales", icon: FileText },
-                    { label: "Sanciones", value: "Explicar el efecto de sanciones", icon: Ban },
-                    { label: "Escenarios", value: "Proyectar escenarios futuros", icon: Eye },
-                    { label: "Consecuencias", value: "Evaluar consecuencias regionales", icon: Map }
-                ]
-            },
-            {
-                label: "Podcast de Filosofía",
-                value: "Podcast de filosofía y ética",
-                registerInstruction: "Registro formal reflexivo. Tratamiento tú. Léxico abstracto y preciso; sin jerga vulgar.",
-                icon: Brain,
-                actions: [
-                    { label: "Dilema Moral", value: "Plantear un dilema moral complejo", icon: Scale },
-                    { label: "Concepto", value: "Definir un concepto abstracto", icon: FileText },
-                    { label: "Comparar Corrientes", value: "Comparar corrientes filosóficas", icon: BookOpen },
-                    { label: "Responder Crítica", value: "Responder a una crítica fuerte", icon: Zap },
-                    { label: "Conclusión", value: "Cerrar con una conclusión matizada", icon: ThumbsUp }
-                ]
-            },
-            {
-                label: "Podcast de Economía",
-                value: "Podcast de economía y mercados",
-                registerInstruction: "Registro semi-formal técnico. Tratamiento tú. Vocabulario económico claro, sin coloquialismos.",
-                icon: PieChart,
-                actions: [
-                    { label: "Inflación", value: "Explicar causas de la inflación", icon: TrendingUp },
-                    { label: "Tendencias", value: "Analizar tendencias del mercado", icon: LineChart },
-                    { label: "Política Fiscal", value: "Debatir sobre política fiscal", icon: Landmark },
-                    { label: "Consejo Empresarial", value: "Dar consejos a emprendedores", icon: Briefcase },
-                    { label: "Lectura de Datos", value: "Interpretar datos económicos", icon: FileText }
-                ]
-            },
-            {
-                label: "Podcast de Arte",
-                value: "Podcast de crítica artística",
-                registerInstruction: "Registro culto y analítico. Tratamiento tú. Lenguaje especializado, sin jerga vulgar.",
-                icon: Palette,
-                actions: [
-                    { label: "Analizar Obra", value: "Analizar una obra con lenguaje experto", icon: Eye },
-                    { label: "Comparar Artistas", value: "Comparar estilos y corrientes", icon: Scale },
-                    { label: "Mercado del Arte", value: "Hablar del mercado y coleccionismo", icon: DollarSign },
-                    { label: "Censura", value: "Discutir casos de censura artística", icon: Ban },
-                    { label: "Defender Postura", value: "Defender una postura crítica", icon: MessageCircle }
-                ]
-            },
-            {
-                label: "Podcast de Ciencia",
-                value: "Podcast de ciencia y tecnología avanzada",
-                registerInstruction: "Registro formal técnico. Tratamiento tú. Precisión terminológica, sin coloquialismos.",
-                icon: Rocket,
-                actions: [
-                    { label: "Avance Científico", value: "Explicar un avance reciente", icon: Sparkles },
-                    { label: "Riesgos Éticos", value: "Analizar riesgos éticos", icon: AlertTriangle },
-                    { label: "Visión de Futuro", value: "Proyectar el impacto futuro", icon: Eye },
-                    { label: "Aplicación Práctica", value: "Describir aplicaciones reales", icon: Wrench },
-                    { label: "Objeciones", value: "Responder objeciones críticas", icon: Zap }
-                ]
-            },
-            {
-                label: "Podcast de Crimen",
-                value: "Podcast de crónica criminal",
-                registerInstruction: "Registro narrativo serio. Tratamiento tú. Tono respetuoso con víctimas; sin morbo ni jerga vulgar.",
+                label: "Fui Testigo de un Crimen Grave",
+                value: "Podcast donde el invitado cuenta cómo presenció un delito: el shock, la decisión de testificar, las amenazas, el juicio",
+                registerInstruction: "Registro formal y sobrio. Tratamiento tú. Tono de reflexión ciudadana. Sin detalles que comprometan identidades. Respeto por víctimas.",
                 icon: ShieldAlert,
                 actions: [
-                    { label: "Narrar Caso", value: "Narrar un caso con detalle", icon: FileText },
-                    { label: "Investigación", value: "Explicar pasos de investigación policial", icon: Search },
-                    { label: "Víctimas", value: "Hablar del impacto en las víctimas", icon: Heart },
-                    { label: "Debate Justicia", value: "Debatir la respuesta judicial", icon: Gavel },
-                    { label: "Cierre Reflexivo", value: "Cerrar con reflexión crítica", icon: Brain }
+                    { label: "El Día Normal", value: "Describir cómo era el día antes de presenciarlo", icon: Sun },
+                    { label: "El Momento del Crimen", value: "Contar qué vio y su reacción inmediata", icon: AlertTriangle },
+                    { label: "La Decisión de Hablar", value: "Describir el dilema de testificar o callar", icon: Scale },
+                    { label: "Las Consecuencias Personales", value: "Contar si hubo amenazas o miedo", icon: Lock },
+                    { label: "El Proceso Judicial", value: "Describir la experiencia de testificar en juicio", icon: Gavel },
+                    { label: "La Reflexión Ética", value: "Explicar qué aprendió sobre justicia y ciudadanía", icon: Brain }
                 ]
             },
             {
-                label: "Podcast de Psicología",
-                value: "Podcast de psicología profunda",
-                registerInstruction: "Registro profesional y empático. Tratamiento tú. Lenguaje cuidadoso, sin coloquialismos.",
-                icon: Brain,
+                label: "Mi Hijo Tiene una Adicción",
+                value: "Podcast donde un padre/madre cuenta cómo descubrió la adicción de su hijo: las señales, la confrontación, el tratamiento, la esperanza",
+                registerInstruction: "Registro formal y emotivo. Tratamiento tú. Tono de testimonio esperanzador. Sin estigmatizar. Enfoque en la familia y recuperación.",
+                icon: Heart,
                 actions: [
-                    { label: "Explicar Trauma", value: "Explicar un trauma y su tratamiento", icon: Heart },
-                    { label: "Análisis de Conducta", value: "Analizar un patrón de conducta", icon: Eye },
-                    { label: "Relato Terapéutico", value: "Narrar un caso con empatía", icon: MessageCircle },
-                    { label: "Consejo Profesional", value: "Dar un consejo profesional", icon: Stethoscope },
-                    { label: "Mitos", value: "Desmentir mitos comunes", icon: X }
+                    { label: "Las Primeras Señales", value: "Contar cuándo empezó a sospechar algo", icon: Eye },
+                    { label: "La Confrontación", value: "Describir el momento de hablar con el hijo", icon: MessageCircle },
+                    { label: "La Negación", value: "Contar la fase de negación del hijo y/o familia", icon: X },
+                    { label: "La Búsqueda de Ayuda", value: "Describir cómo encontraron tratamiento", icon: Search },
+                    { label: "El Proceso de Recuperación", value: "Contar los altibajos del tratamiento", icon: TrendingUp },
+                    { label: "Dónde Están Ahora", value: "Describir la situación actual y la esperanza", icon: Star }
                 ]
             },
             {
-                label: "Podcast de Derecho y Sociedad",
-                value: "Podcast de análisis legal con impacto social",
-                registerInstruction: "Registro formal analítico. Tratamiento tú. Léxico jurídico claro, sin lunfardo.",
-                icon: Gavel,
+                label: "Sobreviví un Desastre Natural",
+                value: "Podcast donde el invitado cuenta su experiencia en un terremoto, inundación o huracán: el momento del impacto, la supervivencia, la pérdida, la reconstrucción",
+                registerInstruction: "Registro formal narrativo. Tratamiento tú. Detalles sensoriales del evento. Tono de supervivencia y comunidad. Sin morbo.",
+                icon: AlertTriangle,
                 actions: [
-                    { label: "Caso Paradigmático", value: "Describir un caso relevante", icon: FileText },
-                    { label: "Marco Legal", value: "Explicar el marco legal aplicable", icon: Scale },
-                    { label: "Crítica", value: "Ofrecer una crítica argumentada", icon: ThumbsDown },
-                    { label: "Precedente", value: "Mencionar un precedente", icon: BookOpen },
-                    { label: "Conclusión", value: "Cerrar con una conclusión", icon: CheckCircle }
+                    { label: "Antes del Desastre", value: "Describir el día normal antes del evento", icon: Sun },
+                    { label: "El Momento del Impacto", value: "Contar qué sintió y vio en el momento del desastre", icon: Zap },
+                    { label: "La Supervivencia", value: "Describir cómo sobrevivió y a quién ayudó", icon: ShieldAlert },
+                    { label: "Las Pérdidas", value: "Contar qué perdió: casa, pertenencias, seres queridos", icon: Frown },
+                    { label: "La Ayuda Recibida", value: "Describir quién ayudó y cómo llegó la asistencia", icon: HeartHandshake },
+                    { label: "La Reconstrucción", value: "Contar cómo rehizo su vida después", icon: Star }
                 ]
             },
             {
-                label: "Podcast de Ética e IA",
-                value: "Podcast sobre inteligencia artificial y dilemas éticos",
-                registerInstruction: "Registro formal reflexivo. Tratamiento tú. Precisión conceptual, sin coloquialismos.",
-                icon: Brain,
+                label: "Denuncié a Mi Propia Empresa",
+                value: "Podcast donde el invitado cuenta cómo destapó un fraude interno: el descubrimiento, el dilema moral, la denuncia, las represalias, las consecuencias",
+                registerInstruction: "Registro formal y analítico. Tratamiento tú. Tono de ética profesional. Sin nombres reales. Enfoque en el proceso de decisión.",
+                icon: Search,
                 actions: [
-                    { label: "Dilema Ético", value: "Plantear un dilema ético concreto", icon: AlertTriangle },
-                    { label: "Regulación", value: "Hablar de marcos regulatorios", icon: FileText },
-                    { label: "Caso Real", value: "Contar un caso real relevante", icon: Search },
-                    { label: "Postura", value: "Defender una postura argumentada", icon: Scale },
-                    { label: "Cierre", value: "Cerrar con una reflexión", icon: Eye }
+                    { label: "El Trabajo Normal", value: "Describir su rol en la empresa antes del descubrimiento", icon: Briefcase },
+                    { label: "El Descubrimiento", value: "Contar qué encontró que estaba mal", icon: Eye },
+                    { label: "El Dilema Interno", value: "Describir la lucha entre lealtad y ética", icon: Scale },
+                    { label: "La Decisión de Denunciar", value: "Contar cómo y a quién denunció", icon: Megaphone },
+                    { label: "Las Represalias", value: "Describir las consecuencias: despido, aislamiento, presiones", icon: AlertCircle },
+                    { label: "El Resultado Final", value: "Contar qué pasó con la empresa y con su carrera", icon: Gavel }
                 ]
             },
             {
-                label: "Podcast de Historia Contemporánea",
-                value: "Podcast de análisis histórico del siglo XX y XXI",
-                registerInstruction: "Registro formal narrativo. Tratamiento tú. Tono sobrio, sin lunfardo.",
+                label: "Cuidé a Mi Padre con Alzheimer",
+                value: "Podcast donde el invitado cuenta la experiencia de cuidar a un padre con demencia: el diagnóstico, los cambios, las despedidas en vida, la muerte",
+                registerInstruction: "Registro formal y empático. Tratamiento tú. Tono de amor y duelo. Sin dramatismo excesivo. Enfoque en la dignidad del enfermo.",
+                icon: Heart,
+                actions: [
+                    { label: "Los Primeros Olvidos", value: "Contar cuándo empezaron a notar los cambios", icon: Brain },
+                    { label: "El Diagnóstico", value: "Describir el día que supieron qué era", icon: FileText },
+                    { label: "La Vida Como Cuidador", value: "Contar la rutina diaria de cuidar", icon: Clock },
+                    { label: "Los Momentos de Conexión", value: "Describir un momento de lucidez o ternura", icon: Sparkles },
+                    { label: "Las Despedidas en Vida", value: "Contar cuando dejó de reconocerlo/a", icon: Frown },
+                    { label: "Después de la Muerte", value: "Describir el duelo y lo aprendido sobre la vida", icon: Star }
+                ]
+            },
+            {
+                label: "Fui Víctima de una Estafa Millonaria",
+                value: "Podcast donde el invitado cuenta cómo cayó en un fraude financiero: la promesa, la inversión, el descubrimiento, la ruina, la reconstrucción",
+                registerInstruction: "Registro formal de advertencia. Tratamiento tú. Tono educativo sin victimismo. Detallar las señales de alarma. Sin datos que identifiquen estafadores.",
+                icon: DollarSign,
+                actions: [
+                    { label: "La Oportunidad Perfecta", value: "Contar cómo le presentaron la inversión", icon: Lightbulb },
+                    { label: "Por Qué Confió", value: "Describir qué le convenció de invertir", icon: HeartHandshake },
+                    { label: "Las Primeras Dudas", value: "Contar cuándo empezó a sospechar", icon: Eye },
+                    { label: "El Descubrimiento del Fraude", value: "Describir el momento de saber que era estafa", icon: AlertTriangle },
+                    { label: "Las Pérdidas", value: "Contar cuánto perdió y cómo afectó su vida", icon: X },
+                    { label: "La Reconstrucción", value: "Describir cómo se recuperó financiera y emocionalmente", icon: Star }
+                ]
+            },
+            {
+                label: "Adopté Siendo Soltera/o a los 40",
+                value: "Podcast donde el invitado cuenta el proceso de adopción monoparental: la decisión, el papeleo, la espera, el encuentro, la nueva familia",
+                registerInstruction: "Registro semi-formal y alegre. Tratamiento tú. Tono de esperanza y realismo. Sin idealizar la maternidad/paternidad. Respetar orígenes del niño/a.",
+                icon: Heart,
+                actions: [
+                    { label: "La Decisión de Adoptar", value: "Contar por qué decidió ser padre/madre soltero/a", icon: Lightbulb },
+                    { label: "El Proceso Burocrático", value: "Describir el papeleo, los cursos, las entrevistas", icon: FileText },
+                    { label: "La Espera Eterna", value: "Contar los meses o años de espera", icon: Clock },
+                    { label: "La Llamada", value: "Describir el día que le dijeron que había un niño/a", icon: Phone },
+                    { label: "El Primer Encuentro", value: "Contar el momento de conocer a su hijo/a", icon: Sparkles },
+                    { label: "La Nueva Familia", value: "Describir la vida ahora y lo aprendido", icon: Home }
+                ]
+            },
+            {
+                label: "Escribí un Libro y Lo Rechazaron 50 Veces",
+                value: "Podcast donde el invitado cuenta el proceso de publicar su libro: la escritura, los rechazos, la desesperanza, el sí final, el éxito inesperado",
+                registerInstruction: "Registro semi-formal inspirador. Tratamiento tú. Tono de perseverancia. Detalles del mundo editorial. Sin arrogancia.",
                 icon: BookOpen,
                 actions: [
-                    { label: "Contexto", value: "Dar contexto histórico", icon: Calendar },
-                    { label: "Fuente Primaria", value: "Citar una fuente primaria", icon: FileText },
-                    { label: "Debate Historiográfico", value: "Mencionar un debate entre historiadores", icon: MessageCircle },
-                    { label: "Impacto", value: "Explicar el impacto social", icon: Globe },
-                    { label: "Conclusión", value: "Cerrar con conclusión", icon: CheckCircle }
+                    { label: "La Idea del Libro", value: "Contar de dónde salió la idea y cuánto tardó en escribir", icon: Lightbulb },
+                    { label: "Los Primeros Rechazos", value: "Describir cómo fueron los primeros 'no' y cómo los sintió", icon: ThumbsDown },
+                    { label: "El Punto de Rendirse", value: "Contar el momento de mayor desesperanza", icon: Frown },
+                    { label: "Lo Que Lo Mantuvo Adelante", value: "Describir qué o quién le dio fuerzas", icon: Heart },
+                    { label: "El Sí", value: "Contar el día que alguien dijo que sí", icon: Star },
+                    { label: "Después del Éxito", value: "Describir qué pasó cuando el libro salió y si tuvo éxito", icon: Rocket }
                 ]
             },
             {
-                label: "Podcast de Estrategia Empresarial",
-                value: "Podcast sobre dirección y estrategia de empresas",
-                registerInstruction: "Registro semi-formal técnico. Tratamiento tú. Vocabulario de negocios preciso, sin lunfardo.",
-                icon: Briefcase,
+                label: "Cambié de Identidad de Género",
+                value: "Podcast donde el invitado cuenta su transición: el descubrimiento interior, contarlo a la familia, el proceso médico/social, la nueva vida",
+                registerInstruction: "Registro formal y respetuoso. Tratamiento tú. Tono de autenticidad y empoderamiento. Sin morbo ni detalles médicos innecesarios. Usar lenguaje inclusivo.",
+                icon: Star,
                 actions: [
-                    { label: "Diagnóstico", value: "Describir un diagnóstico de la empresa", icon: Search },
-                    { label: "Competencia", value: "Analizar a la competencia", icon: Scale },
-                    { label: "Riesgo", value: "Identificar riesgos clave", icon: AlertTriangle },
-                    { label: "Decisión", value: "Explicar una decisión estratégica", icon: ArrowRight },
-                    { label: "Indicadores", value: "Mencionar indicadores de éxito", icon: PieChart }
+                    { label: "El Descubrimiento Interior", value: "Contar cuándo supo que algo no encajaba", icon: Brain },
+                    { label: "Contárselo a la Familia", value: "Describir la conversación con los seres queridos", icon: Home },
+                    { label: "Las Reacciones", value: "Contar cómo reaccionó cada persona importante", icon: Heart },
+                    { label: "El Proceso de Transición", value: "Describir los pasos que dio: terapia, cambios, trámites", icon: ArrowRight },
+                    { label: "Los Desafíos Sociales", value: "Contar dificultades en trabajo, amigos, espacios públicos", icon: AlertTriangle },
+                    { label: "La Vida Auténtica", value: "Describir cómo es vivir siendo quien realmente es", icon: Sparkles }
                 ]
             }
         ]
@@ -1558,68 +1562,68 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
     [TextType.Monologue]: {
         [Level.Intro]: [
             {
-                label: "Mi Día de Hoy",
-                value: "Monólogo sobre un día de trámites con lluvia y viaje en metro",
-                registerInstruction: "Registro: informal cercano. Primera persona. Lunfardo: no. Frases claras y simples.",
+                label: "El Día que Todo Salió Mal",
+                value: "Monólogo sobre un día caótico: perdí el bus, llegué empapado al trabajo, se me cayó el café, y al final pasó algo bueno",
+                registerInstruction: "Registro: informal cercano. Primera persona. Lunfardo: no. Frases claras y simples. Tono humorístico.",
                 icon: Sun,
                 actions: [
-                    { label: "Mañana", value: "Describir la mañana", icon: Sun },
-                    { label: "Tarde", value: "Contar qué hizo por la tarde", icon: Clock },
-                    { label: "Comida", value: "Mencionar qué comió", icon: Coffee },
-                    { label: "Algo Divertido", value: "Contar algo divertido", icon: Smile },
-                    { label: "Despedida", value: "Cerrar el monólogo", icon: ThumbsUp }
+                    { label: "El Despertador Falló", value: "Contar cómo empezó mal el día: la alarma que no sonó", icon: Clock },
+                    { label: "Corriendo al Bus", value: "Describir la carrera hacia el transporte y si lo perdió", icon: Bus },
+                    { label: "La Lluvia", value: "Contar cómo le agarró la lluvia sin paraguas", icon: Umbrella },
+                    { label: "El Accidente del Café", value: "Describir el momento vergonzoso del día", icon: Coffee },
+                    { label: "La Sorpresa Final", value: "Contar algo bueno inesperado que salvó el día", icon: Star }
                 ]
             },
             {
-                label: "Mi Familia",
-                value: "Monólogo sobre un almuerzo dominical en un departamento pequeño",
-                registerInstruction: "Registro: informal afectivo. Primera persona, tono cálido. Lunfardo: no.",
+                label: "El Asado Dominical",
+                value: "Monólogo sobre el ritual del asado familiar: quién cocina, las discusiones sobre la carne, el fútbol en la tele, los primos",
+                registerInstruction: "Registro: informal afectivo. Primera persona, tono cálido. Lunfardo: no. Detalles sensoriales.",
                 icon: Heart,
                 actions: [
-                    { label: "Presentar Familia", value: "Decir cuántos son en la familia", icon: UserPlus },
-                    { label: "Describir a Alguien", value: "Describir a una persona", icon: Smile },
-                    { label: "Actividad Juntos", value: "Contar una actividad familiar", icon: Home },
-                    { label: "Edades", value: "Mencionar edades", icon: Hash },
-                    { label: "Gustos", value: "Decir qué le gusta de su familia", icon: Heart }
+                    { label: "Los Preparativos", value: "Contar quién trae qué: la carne, la ensalada, el vino", icon: ShoppingBag },
+                    { label: "El Asador", value: "Describir a quien hace el asado y sus rituales", icon: Utensils },
+                    { label: "La Discusión sobre la Carne", value: "Contar la típica pelea entre quienes la quieren jugosa o cocida", icon: MessageCircle },
+                    { label: "La Mesa", value: "Describir dónde se sientan todos y quién habla más", icon: UserPlus },
+                    { label: "El Momento Favorito", value: "Contar qué momento disfruta más de la reunión", icon: Smile }
                 ]
             },
             {
-                label: "Mi Barrio",
-                value: "Monólogo sobre un barrio con feria barrial, murales y plaza",
-                registerInstruction: "Registro: informal descriptivo. Primera persona. Lunfardo: no. Lenguaje claro.",
+                label: "Mi Barrio Está Cambiando",
+                value: "Monólogo sobre cómo el barrio ha cambiado: la panadería que cerró, el café hipster nuevo, los vecinos nuevos",
+                registerInstruction: "Registro: informal descriptivo. Primera persona. Lunfardo: no. Tono nostálgico pero no triste.",
                 icon: Map,
                 actions: [
-                    { label: "Descripción", value: "Describir el barrio", icon: MapPin },
-                    { label: "Tiendas", value: "Mencionar tiendas importantes", icon: ShoppingBag },
-                    { label: "Cómo Llegar", value: "Explicar cómo llegar", icon: Map },
-                    { label: "Lugar Favorito", value: "Contar un lugar favorito", icon: Star },
-                    { label: "Problema Simple", value: "Contar un problema pequeño", icon: AlertCircle }
+                    { label: "Antes y Ahora", value: "Comparar cómo era el barrio antes y cómo es ahora", icon: ArrowRight },
+                    { label: "El Local que Cerró", value: "Contar sobre un negocio querido que ya no existe", icon: Frown },
+                    { label: "Lo Nuevo", value: "Describir algo nuevo que apareció: café, negocio, edificio", icon: Sparkles },
+                    { label: "Los Vecinos", value: "Hablar de si los vecinos son los mismos o hay nuevos", icon: UserPlus },
+                    { label: "Mi Opinión", value: "Decir si le gustan los cambios o no y por qué", icon: Brain }
                 ]
             },
             {
-                label: "Mi Mascota",
-                value: "Monólogo sobre un perro rescatado y paseos por la plaza",
-                registerInstruction: "Registro: informal y tierno. Primera persona. Lunfardo: no.",
+                label: "Cómo Adopté a Mi Perro",
+                value: "Monólogo sobre el día que adoptó un perro del refugio: la decisión, el primer encuentro, la primera noche en casa",
+                registerInstruction: "Registro: informal y tierno. Primera persona. Lunfardo: no. Emociones claras.",
                 icon: Dog,
                 actions: [
-                    { label: "Presentar Mascota", value: "Decir nombre y tipo", icon: Dog },
-                    { label: "Rutina", value: "Contar su rutina", icon: Clock },
-                    { label: "Lo que le Gusta", value: "Decir lo que le gusta", icon: Heart },
-                    { label: "Problema Pequeño", value: "Contar un problema simple", icon: AlertTriangle },
-                    { label: "Consejo Cuidado", value: "Dar un consejo para cuidarla", icon: Hand }
+                    { label: "La Decisión", value: "Contar por qué decidió adoptar y no comprar", icon: Lightbulb },
+                    { label: "El Refugio", value: "Describir cómo era el refugio y los otros perros", icon: Home },
+                    { label: "El Primer Encuentro", value: "Contar el momento de ver a su perro por primera vez", icon: Heart },
+                    { label: "El Viaje a Casa", value: "Describir cómo fue traerlo a casa: nervioso, tranquilo", icon: Car },
+                    { label: "La Primera Noche", value: "Contar cómo fue la primera noche: dónde durmió, si lloró", icon: Moon }
                 ]
             },
             {
-                label: "Recuerdo Feliz",
-                value: "Monólogo sobre un cumpleaños sorpresa en casa de la abuela",
-                registerInstruction: "Registro: informal emotivo. Primera persona. Lunfardo: no.",
+                label: "El Cumpleaños Sorpresa que Salió Mal",
+                value: "Monólogo sobre un cumpleaños sorpresa que no fue como esperaban: el festejado llegó antes, el pastel se cayó",
+                registerInstruction: "Registro: informal emotivo y humorístico. Primera persona. Lunfardo: no.",
                 icon: Smile,
                 actions: [
-                    { label: "Lugar del Recuerdo", value: "Decir dónde fue", icon: MapPin },
-                    { label: "Quién Estaba", value: "Mencionar personas presentes", icon: UserPlus },
-                    { label: "Qué Pasó", value: "Contar lo que pasó", icon: MessageCircle },
-                    { label: "Cómo Me Sentí", value: "Expresar emociones simples", icon: Heart },
-                    { label: "Por Qué Especial", value: "Explicar por qué es especial", icon: Star }
+                    { label: "El Plan Original", value: "Contar cuál era el plan para la sorpresa", icon: ListChecks },
+                    { label: "Los Preparativos", value: "Describir cómo decoraron y qué cocinaron", icon: Gift },
+                    { label: "El Primer Desastre", value: "Contar el primer problema: el pastel, los globos, el disfraz", icon: AlertTriangle },
+                    { label: "La Llegada Inesperada", value: "Describir si el festejado llegó antes de tiempo", icon: DoorOpen },
+                    { label: "Cómo Terminó", value: "Contar si igual fue divertido a pesar del caos", icon: Smile }
                 ]
             }
         ],
