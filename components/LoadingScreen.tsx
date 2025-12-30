@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, cpu, Zap, FileText, Waves, CheckCircle2 } from 'lucide-react';
+import { Loader2, Cpu, Zap, FileText, Waves, CheckCircle2 } from 'lucide-react';
 
 interface LoadingScreenProps {
   status: 'generating_plan' | 'generating_audio';

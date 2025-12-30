@@ -1,6 +1,8 @@
 
 import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
 import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from "../types";
+import { augmentLessonPlanExercises } from "./exerciseEngines";
+import { normalizeExerciseAnswers } from "./exerciseNormalization";
 
 // Helper to get key from storage
 const getApiKey = (): string => {
@@ -68,10 +70,14 @@ const isValidExercise = (ex: any): boolean => {
     case 'cloze':
       return !!ex.textWithGaps &&
         typeof ex.gapOptions === 'object' &&
-        Object.keys(ex.gapOptions).length > 0;
+        Object.keys(ex.gapOptions).length > 0 &&
+        typeof ex.correctAnswer === 'object' &&
+        !!ex.correctAnswer;
     case 'true_false':
-      if (ex.rows) return Array.isArray(ex.rows) && ex.rows.length > 0;
-      return true;
+      if (ex.rows) {
+        return Array.isArray(ex.rows) && ex.rows.length > 0 && typeof ex.correctAnswer === 'object' && !!ex.correctAnswer;
+      }
+      return typeof ex.correctAnswer === 'string' && (String(ex.correctAnswer).toLowerCase() === 'true' || String(ex.correctAnswer).toLowerCase() === 'false');
     default:
       return false;
   }
@@ -619,27 +625,121 @@ const DIALECT_PROFILES: Record<Accent, string> = {
 
 const getExerciseInstructions = (level: Level, mode: AppMode): string => {
   if (mode === AppMode.AccentChallenge) {
-    return `MODO: ADIVINA EL ACENTO. Genera 1 ejercicio COMPRENSIÓN (multiple_choice) preguntando "¿De dónde son?" con opciones de países. Genera 1 ejercicio VOCABULARIO (classification) relacionando palabras dialectales con su país.`;
+    return `MODO: ADIVINA EL ACENTO (SIN PRODUCCIÓN).
+
+REGLAS:
+- PROHIBIDO: preguntas abiertas, escribir/redactar, hablar, completar libremente.
+- PERMITIDO: elegir opciones, V/F, ordenar, clasificar, cloze con desplegable.
+
+Genera:
+- 1 ejercicio de COMPRENSIÓN (multiple_choice): "¿De dónde es el hablante A?" (opciones = países/ciudades, 4 opciones).
+- 1 ejercicio de COMPRENSIÓN (multiple_choice): "¿De dónde es el hablante B?" (4 opciones).
+- 1 ejercicio de VOCABULARIO (classification): filas = 6 palabras/expresiones dialectales del audio; columnas = 2 países/regiones (A y B); correctAnswer usa IDs de columnas.
+`;
   }
   if (mode === AppMode.Vocabulary) {
-    return `MODO: VOCABULARIO INTENSIVO. Genera 1 COMPRENSIÓN (true_false). Genera 3 VOCABULARIO: Definiciones (multiple_choice), Sinonimia (classification), Precisión (cloze).`;
+    return `MODO: VOCABULARIO INTENSIVO (SIN PRODUCCIÓN).
+
+OBJETIVO: variedad de dinámicas (NO solo multiple_choice) y alta densidad léxica, SIEMPRE anclada al audio.
+REGLAS:
+- PROHIBIDO: escribir/redactar respuestas, producción oral.
+- PERMITIDO: seleccionar, clasificar, ordenar, V/F, cloze con desplegable.
+- IDs: TODAS las opciones/filas/columnas tienen "id". correctAnswer SIEMPRE referencia IDs (no textos).
+
+Genera exactamente:
+- COMPRENSIÓN (2 ejercicios):
+  1) true_false (con rows): 4 afirmaciones sobre detalles del audio (2 V, 2 F).
+  2) ordering: 4 eventos/acciones del audio.
+
+- VOCABULARIO (4 ejercicios):
+  1) multiple_choice: palabra/expresión del audio → significado (4 opciones).
+  2) classification: filas = 6 palabras/expresiones del audio; columnas = 2 categorías ("literal" vs "figurado" o "formal" vs "informal" según proceda).
+  3) cloze: frase del audio con 2 huecos (2 gaps), opciones plausibles.
+  4) classification: colocaciones (fila = verbo; columnas = 3 complementos posibles; 1 correcto por fila, basados en lo oído).
+`;
   }
 
   if (level === Level.Intro) {
-    return `NIVEL A0 (REALISTA - "KEYWORD SPOTTING").
-      IMPORTANTE: Aunque el audio es rápido y natural, los ejercicios deben basarse en extraer el dato específico que has incluido obligatoriamente.
-      
-      2 Ejercicios de COMPRENSIÓN (Multiple Choice):
-      - Pregunta EXACTA sobre el dato incluido (ej: "¿Qué número de habitación le han dado?", "¿Cuál es el apellido?", "¿A qué hora es la cita?").
-      - Opciones distractores deben ser muy parecidas (ej: 304, 314, 403) para forzar la discriminación auditiva.
-      
-      2 Ejercicios de VOCABULARIO:
-      - Relacionar palabras oídas con su significado o completar una frase del texto con la palabra exacta.`;
+    return `NIVEL A0 (REALISTA - ESCUCHA SELECTIVA / KEYWORD SPOTTING). SIN PRODUCCIÓN.
+
+PRINCIPIOS PEDAGÓGICOS:
+- El audio es rápido/natural: el alumno entrena DISCRIMINACIÓN (números, letras, horas) y reconocimiento de palabras clave.
+- Evita inferencias complejas: el foco es CAPTAR el dato literal.
+
+REGLAS:
+- PROHIBIDO: preguntas abiertas, pedir que escriban, dictados, resumen, opinión.
+- PERMITIDO: elegir, V/F, ordenar, clasificar, cloze con desplegable.
+- IDs: correctAnswer referencia IDs.
+
+Genera exactamente:
+- COMPRENSIÓN (4 ejercicios, VARIADOS):
+  1) multiple_choice: pregunta EXACTA sobre el dato obligatorio (distractores muy parecidos).
+  2) cloze: una frase del audio con 1 hueco para el número/hora/letra/palabra clave (gapOptions).
+  3) true_false (con rows): 4 ítems de "¿se menciona X?" (2 V, 2 F).
+  4) ordering: 4 enunciados cortos del audio en orden.
+
+- VOCABULARIO (3 ejercicios, VARIADOS):
+  1) multiple_choice: palabra muy frecuente del audio → significado sencillo.
+  2) classification: filas = 6 palabras/expresiones del audio; columnas = 2 categorías ("en el audio" vs "no en el audio") o ("saludo" vs "despedida" si aplica).
+  3) cloze: frase corta del audio con 1 hueco (opciones = 4).
+`;
   }
 
-  if (level.includes('Principiante')) return `NIVEL A1-A2. 2 ejercicios COMPRENSIÓN (Simple recall). 2 ejercicios VOCABULARIO (Match definition).`;
-  if (level.includes('Intermedio')) return `NIVEL B1-B2. 2 ejercicios COMPRENSIÓN (Inferencia). 2 ejercicios VOCABULARIO (Sinónimos).`;
-  return `NIVEL C1-C2. 2 ejercicios COMPRENSIÓN (Matices/Ironía). 2 ejercicios VOCABULARIO (Jerga/Registro).`;
+  if (level.includes('Principiante')) {
+    return `NIVEL A1-A2 (COMPRENSIÓN + LÉXICO EN CONTEXTO). SIN PRODUCCIÓN.
+
+Genera exactamente:
+- COMPRENSIÓN (4 ejercicios, NO homogéneos):
+  1) ordering: secuencia de 4 acciones del audio.
+  2) true_false (con rows): 4 afirmaciones (2 V, 2 F) sobre detalles literales.
+  3) classification: "¿Quién lo dice?" (filas = 4 frases del audio; columnas = hablante A/B).
+  4) multiple_choice: idea principal o intención (4 opciones).
+
+- VOCABULARIO (4 ejercicios, variados):
+  1) multiple_choice: palabra/expresión del audio → significado.
+  2) cloze: frase del audio con 2 huecos.
+  3) classification: filas = 6 palabras; columnas = 2 categorías ("formal" vs "informal" o "servicio" vs "cliente" según el caso).
+  4) multiple_choice: colocación correcta (elige la combinación natural, basada en el audio).
+`;
+  }
+
+  if (level.includes('Intermedio')) {
+    return `NIVEL B1-B2 (INFERENCIA LIGERA + PRECISIÓN LÉXICA). SIN PRODUCCIÓN.
+
+Genera exactamente:
+- COMPRENSIÓN (5 ejercicios, variados):
+  1) true_false (con rows): 4 afirmaciones (incluye 2 de inferencia sencilla).
+  2) classification: "Problema → Solución" (filas = 4 problemas; columnas = 4 soluciones; correctAnswer por fila).
+  3) ordering: 4 eventos o pasos.
+  4) multiple_choice: implicatura/intención.
+  5) classification: "Actitud" (filas = 4 frases; columnas = 3 actitudes: amable/neutral/molesto).
+
+- VOCABULARIO (5 ejercicios, variados):
+  1) classification: sinónimos aproximados (filas = 6 palabras del audio; columnas = 3 opciones).
+  2) multiple_choice: palabra del audio en contexto → significado.
+  3) cloze: precisión (2 gaps) con opciones cercanas.
+  4) classification: registro (formal/neutro/coloquial) con ejemplos del audio.
+  5) multiple_choice: falso amigo / matiz (elige la opción que NO encaja en el audio).
+`;
+  }
+
+  return `NIVEL C1 (MATICES, PRAGMÁTICA Y REGISTRO). SIN PRODUCCIÓN.
+
+Genera exactamente:
+- COMPRENSIÓN (5 ejercicios, variados):
+  1) multiple_choice: intención real (subtexto).
+  2) true_false (con rows): 4 afirmaciones (incluye ironía/implicatura).
+  3) classification: "¿Quién lo dice?" o "Postura" por hablante.
+  4) ordering: organización retórica (qué aparece antes/después).
+  5) classification: "Qué se acepta / qué se rechaza" (filas = 6 ítems mencionados; columnas = aceptar/rechazar).
+
+- VOCABULARIO (5 ejercicios, variados):
+  1) classification: registro/tono (formal/neutro/coloquial) con 6 ejemplos del audio.
+  2) cloze: colocaciones o locuciones del audio (2 gaps).
+  3) multiple_choice: matiz entre sinónimos (elige el que mejor encaja).
+  4) classification: connotación (positiva/neutral/negativa) para 6 palabras.
+  5) multiple_choice: palabra dialectal/jerga (si aplica) → significado.
+`;
 };
 
 const getRegisterInstruction = (textType: TextType): string => {
@@ -746,7 +846,11 @@ export const generateLessonPlan = async (
     "dialogue": [{ "speaker": "String", "text": "String", "emotion": "String" }],
     "exercises": {
       "comprehension": [
-        { "id": "ex_c1", "type": "multiple_choice", "question": "...", "options": [{ "id": "o1", "text": "..." }], "correctAnswer": "o1", "explanation": "..." }
+        { "id": "ex_c1", "type": "multiple_choice", "question": "...", "options": [{ "id": "o1", "text": "..." }], "correctAnswer": "o1", "explanation": "..." },
+        { "id": "ex_c2", "type": "true_false", "question": "...", "rows": [{ "id": "r1", "text": "..." }], "correctAnswer": { "r1": "true" }, "explanation": "..." },
+        { "id": "ex_c3", "type": "ordering", "question": "...", "options": [{ "id": "s1", "text": "..." }], "correctAnswer": ["s1"], "explanation": "..." },
+        { "id": "ex_c4", "type": "classification", "question": "...", "rows": [{ "id": "r1", "text": "..." }], "columns": [{ "id": "c1", "text": "..." }], "correctAnswer": { "r1": "c1" }, "explanation": "..." },
+        { "id": "ex_c5", "type": "cloze", "question": "...", "textWithGaps": "... {{gap1}} ...", "gapOptions": { "gap1": [{ "id": "g1o1", "text": "..." }] }, "correctAnswer": { "gap1": "g1o1" }, "explanation": "..." }
       ],
       "vocabulary": []
     }
@@ -810,14 +914,22 @@ export const generateLessonPlan = async (
       }
 
       // Success! Validate exercises and return
-      if (plan.exercises.comprehension) plan.exercises.comprehension = plan.exercises.comprehension.filter(isValidExercise);
-      if (plan.exercises.vocabulary) plan.exercises.vocabulary = plan.exercises.vocabulary.filter(isValidExercise);
+      if (plan.exercises.comprehension) {
+        plan.exercises.comprehension = plan.exercises.comprehension
+          .filter(isValidExercise)
+          .map(normalizeExerciseAnswers);
+      }
+      if (plan.exercises.vocabulary) {
+        plan.exercises.vocabulary = plan.exercises.vocabulary
+          .filter(isValidExercise)
+          .map(normalizeExerciseAnswers);
+      }
 
       if (attempt > 1) {
         console.log(`[Success] Generated valid dialogue on attempt ${attempt}/${MAX_SPEAKER_RETRIES}`);
       }
 
-      return plan;
+      return augmentLessonPlanExercises(plan, { level, mode });
     } catch (error: any) {
       // If it's a non-speaker-related error or last attempt, throw immediately
       if (!error.message?.includes('personajes') || attempt === MAX_SPEAKER_RETRIES) {
