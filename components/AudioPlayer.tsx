@@ -85,7 +85,7 @@ function createNoiseBuffer(ctx: AudioContext, seconds: number, color: 'white' | 
   const out = buffer.getChannelData(0);
 
   if (color === 'white') {
-    for (let i = 0; i < length; i++) out[i] = (rng() * 2 - 1) * 0.25;
+    for (let i = 0; i < length; i++) out[i] = (rng() * 2 - 1) * 0.18;
     return buffer;
   }
 
@@ -94,7 +94,7 @@ function createNoiseBuffer(ctx: AudioContext, seconds: number, color: 'white' | 
     for (let i = 0; i < length; i++) {
       const white = rng() * 2 - 1;
       last = (last + 0.02 * white) / 1.02;
-      out[i] = last * 0.8;
+      out[i] = last * 0.55;
     }
     return buffer;
   }
@@ -109,7 +109,7 @@ function createNoiseBuffer(ctx: AudioContext, seconds: number, color: 'white' | 
     b3 = 0.8665 * b3 + white * 0.3104856;
     b4 = 0.55 * b4 + white * 0.5329522;
     b5 = -0.7616 * b5 - white * 0.016898;
-    out[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.08;
+    out[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.05;
     b6 = white * 0.115926;
   }
   return buffer;
@@ -127,6 +127,43 @@ function createImpulseResponse(ctx: AudioContext, seconds: number, decay: number
     }
   }
   return buffer;
+}
+
+function playModalHit(ctx: AudioContext, params: {
+  partialsHz: number[];
+  durationSeconds: number;
+  gain: number;
+  pan: number;
+  master: AudioNode;
+  reverb?: AudioNode;
+}) {
+  const now = ctx.currentTime;
+  const { partialsHz, durationSeconds, gain, pan, master, reverb } = params;
+  const panner = ctx.createStereoPanner();
+  panner.pan.value = pan;
+
+  const outGain = ctx.createGain();
+  outGain.gain.setValueAtTime(0.0001, now);
+  outGain.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), now + 0.01);
+  outGain.gain.exponentialRampToValueAtTime(0.0001, now + durationSeconds);
+
+  panner.connect(outGain);
+  outGain.connect(master);
+  if (reverb) outGain.connect(reverb);
+
+  const oscillators: OscillatorNode[] = [];
+  for (const hz of partialsHz) {
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(hz, now);
+    o.frequency.exponentialRampToValueAtTime(hz * 0.97, now + durationSeconds);
+    o.connect(panner);
+    o.start(now);
+    o.stop(now + durationSeconds + 0.03);
+    oscillators.push(o);
+  }
+
+  return { panner, outGain, oscillators };
 }
 
 const AudioPlayer: React.FC<AudioPlayerProps> = ({
@@ -284,7 +321,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       baseLow.type = 'lowpass';
       baseLow.frequency.value = profile === 'CITY' ? 260 : 170;
       const baseLowGain = ctx.createGain();
-      baseLowGain.gain.value = 0.18 + effectiveIntensity * 0.20;
+      // Keep the "bed" subtle; detail should come from events.
+      baseLowGain.gain.value = 0.05 + effectiveIntensity * 0.10;
       baseLow.connect(baseLowGain);
       baseLowGain.connect(masterGain);
       baseLowGain.connect(convolver);
@@ -292,26 +330,14 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
       const baseAir = ctx.createBiquadFilter();
       baseAir.type = 'bandpass';
-      baseAir.frequency.value = profile === 'NATURE' ? 2200 : (profile === 'CAFE' ? 1600 : 1200);
-      baseAir.Q.value = profile === 'CITY' ? 0.5 : 0.7;
+      baseAir.frequency.value = profile === 'NATURE' ? 3200 : (profile === 'CAFE' ? 2400 : (profile === 'CITY' ? 2800 : 2200));
+      baseAir.Q.value = 0.4;
       const baseAirGain = ctx.createGain();
-      baseAirGain.gain.value = 0.05 + effectiveIntensity * 0.10;
+      baseAirGain.gain.value = 0.012 + effectiveIntensity * 0.04;
       baseAir.connect(baseAirGain);
       baseAirGain.connect(masterGain);
       baseAirGain.connect(convolver);
       nodes.push(baseAir, baseAirGain);
-
-      const windPanner = ctx.createStereoPanner();
-      const windPanLfo = ctx.createOscillator();
-      windPanLfo.type = 'sine';
-      windPanLfo.frequency.value = profile === 'CITY' ? 0.03 : 0.015;
-      const windPanLfoGain = ctx.createGain();
-      windPanLfoGain.gain.value = 0.35;
-      windPanLfo.connect(windPanLfoGain);
-      windPanLfoGain.connect(windPanner.pan);
-      windPanner.connect(baseAir);
-      windPanLfo.start();
-      nodes.push(windPanner, windPanLfo, windPanLfoGain);
 
       const brownSource = ctx.createBufferSource();
       brownSource.buffer = createNoiseBuffer(ctx, 6, 'brown', rng);
@@ -320,18 +346,30 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       brownSource.start();
       nodes.push(brownSource);
 
-      const pinkSource = ctx.createBufferSource();
-      pinkSource.buffer = createNoiseBuffer(ctx, 6, 'pink', rng);
-      pinkSource.loop = true;
-      pinkSource.connect(windPanner);
-      pinkSource.start();
-      nodes.push(pinkSource);
+      // Air/HVAC hiss (high band) to avoid "ocean" artifacts from wideband pink.
+      const airSource = ctx.createBufferSource();
+      airSource.buffer = createNoiseBuffer(ctx, 6, 'white', rng);
+      airSource.loop = true;
+      const airHp = ctx.createBiquadFilter();
+      airHp.type = 'highpass';
+      airHp.frequency.value = 1200;
+      const airLp = ctx.createBiquadFilter();
+      airLp.type = 'lowpass';
+      airLp.frequency.value = 8000;
+      const airGain = ctx.createGain();
+      airGain.gain.value = profile === 'ROOM' ? 0.003 : (profile === 'OFFICE' ? 0.004 : 0.005 + effectiveIntensity * 0.006);
+      airSource.connect(airHp);
+      airHp.connect(airLp);
+      airLp.connect(airGain);
+      airGain.connect(baseAir);
+      airSource.start();
+      nodes.push(airSource, airHp, airLp, airGain);
 
       // Subtle tonal bed (adds "life" without sounding like a synth).
       const humOsc = ctx.createOscillator();
       humOsc.type = 'sine';
       const humGain = ctx.createGain();
-      humGain.gain.value = (profile === 'OFFICE' ? 0.02 : 0.008) + effectiveIntensity * 0.01;
+      humGain.gain.value = (profile === 'OFFICE' ? 0.012 : 0.005) + effectiveIntensity * 0.008;
       const humFilter = ctx.createBiquadFilter();
       humFilter.type = 'lowpass';
       humFilter.frequency.value = profile === 'CITY' ? 140 : 220;
@@ -386,6 +424,132 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         src.start(now);
         src.stop(now + dur + 0.05);
         nodes.push(src, filter, pan, g);
+      };
+
+      const playClink = (strength = 1) => {
+        if (syntheticNodesRef.current.length === 0) return;
+        const pan = (rng() * 2 - 1) * 0.8;
+        const base = 1800 + rng() * 900;
+        const partials = [
+          base,
+          base * (1.42 + rng() * 0.08),
+          base * (2.15 + rng() * 0.10),
+          base * (2.92 + rng() * 0.12),
+        ];
+        const hit = playModalHit(ctx, {
+          partialsHz: partials,
+          durationSeconds: 0.18 + rng() * 0.22,
+          gain: (0.0012 + effectiveIntensity * 0.004) * strength,
+          pan,
+          master: masterGain,
+          reverb: convolver,
+        });
+        nodes.push(hit.panner, hit.outGain, ...hit.oscillators);
+      };
+
+      const playMetalClank = (strength = 1) => {
+        if (syntheticNodesRef.current.length === 0) return;
+        const pan = (rng() * 2 - 1) * 0.9;
+        const base = 220 + rng() * 120;
+        const partials = [
+          base,
+          base * (2.31 + rng() * 0.18),
+          base * (3.12 + rng() * 0.22),
+          base * (4.55 + rng() * 0.28),
+        ];
+        const hit = playModalHit(ctx, {
+          partialsHz: partials,
+          durationSeconds: 0.22 + rng() * 0.26,
+          gain: (0.0015 + effectiveIntensity * 0.006) * strength,
+          pan,
+          master: masterGain,
+          reverb: convolver,
+        });
+        nodes.push(hit.panner, hit.outGain, ...hit.oscillators);
+
+        playNoiseBurst({
+          durationMs: 30 + rng() * 70,
+          gain: 0.0015 + effectiveIntensity * 0.003,
+          filterType: 'bandpass',
+          freq: 900 + rng() * 1100,
+          q: 1.2,
+          pan,
+          reverbSend: 0.25,
+        });
+      };
+
+      const createBabbleCrowd = () => {
+        // Crowd "babble": several pseudo-voices using noise+formants with syllabic amplitude.
+        const voices = 4 + Math.floor(rng() * 3);
+        const src = ctx.createBufferSource();
+        src.buffer = createNoiseBuffer(ctx, 6, 'white', rng);
+        src.loop = true;
+
+        const bus = ctx.createGain();
+        bus.gain.value = 1;
+        const out = ctx.createGain();
+        out.gain.value = 0.010 + effectiveIntensity * 0.020;
+        bus.connect(out);
+        out.connect(masterGain);
+        out.connect(convolver);
+
+        for (let i = 0; i < voices; i++) {
+          const formant = ctx.createBiquadFilter();
+          formant.type = 'bandpass';
+          formant.Q.value = 0.65;
+          formant.frequency.value = 320 + rng() * 520;
+
+          const breathe = ctx.createBiquadFilter();
+          breathe.type = 'highpass';
+          breathe.frequency.value = 160 + rng() * 120;
+
+          const g = ctx.createGain();
+          const baseLevel = 0.22 + rng() * 0.22;
+          g.gain.value = baseLevel / voices;
+
+          const syll = ctx.createOscillator();
+          syll.type = 'sine';
+          syll.frequency.value = 2.2 + rng() * 2.8;
+          const syllGain = ctx.createGain();
+          syllGain.gain.value = 0.35;
+          syll.connect(syllGain);
+          syllGain.connect(g.gain);
+          syll.start();
+
+          const drift = ctx.createOscillator();
+          drift.type = 'sine';
+          drift.frequency.value = 0.03 + rng() * 0.05;
+          const driftGain = ctx.createGain();
+          driftGain.gain.value = 140 + rng() * 160;
+          drift.connect(driftGain);
+          driftGain.connect(formant.frequency);
+          drift.start();
+
+          src.connect(breathe);
+          breathe.connect(formant);
+          formant.connect(g);
+          g.connect(bus);
+          nodes.push(formant, breathe, g, syll, syllGain, drift, driftGain);
+
+          // Add a tiny voiced component per "person".
+          const voiceOsc = ctx.createOscillator();
+          voiceOsc.type = 'sawtooth';
+          voiceOsc.frequency.value = 90 + rng() * 90;
+          const voiceFilter = ctx.createBiquadFilter();
+          voiceFilter.type = 'bandpass';
+          voiceFilter.frequency.value = 280 + rng() * 320;
+          voiceFilter.Q.value = 0.9;
+          const voiceGain = ctx.createGain();
+          voiceGain.gain.value = (0.0008 + effectiveIntensity * 0.0016) / voices;
+          voiceOsc.connect(voiceFilter);
+          voiceFilter.connect(voiceGain);
+          voiceGain.connect(bus);
+          voiceOsc.start();
+          nodes.push(voiceOsc, voiceFilter, voiceGain);
+        }
+
+        src.start();
+        nodes.push(src, bus, out);
       };
 
       const playChirp = (opts: { baseHz: number; durationMs: number; gain: number; pan?: number }) => {
@@ -610,25 +774,11 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       };
 
       const playWeightClank = () => {
-        playNoiseBurst({
-          durationMs: 40 + rng() * 90,
-          gain: 0.003 + effectiveIntensity * 0.007,
-          filterType: 'bandpass',
-          freq: 700 + rng() * 900,
-          q: 1.6,
-          reverbSend: 0.25,
-        });
+        playMetalClank(1.0);
       };
 
       const playHammer = () => {
-        playNoiseBurst({
-          durationMs: 30 + rng() * 60,
-          gain: 0.003 + effectiveIntensity * 0.008,
-          filterType: 'bandpass',
-          freq: 420 + rng() * 380,
-          q: 1.2,
-          reverbSend: 0.2,
-        });
+        playMetalClank(0.85);
       };
 
       const playPaperShuffle = () => {
@@ -660,85 +810,93 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
       // Tag-driven beds/events (scenario-specific "rules").
       if (tags.includes('crowd')) {
-        const crowdSource = ctx.createBufferSource();
-        crowdSource.buffer = createNoiseBuffer(ctx, 6, 'pink', rng);
-        crowdSource.loop = true;
-        const crowdFilter = ctx.createBiquadFilter();
-        crowdFilter.type = 'bandpass';
-        crowdFilter.frequency.value = 540;
-        crowdFilter.Q.value = 0.6;
-        const crowdGain = ctx.createGain();
-        crowdGain.gain.value = 0.012 + effectiveIntensity * 0.02;
-        const crowdLfo = ctx.createOscillator();
-        crowdLfo.type = 'sine';
-        crowdLfo.frequency.value = 0.06 + rng() * 0.06;
-        const crowdLfoGain = ctx.createGain();
-        crowdLfoGain.gain.value = 0.25;
-        crowdLfo.connect(crowdLfoGain);
-        crowdLfoGain.connect(crowdGain.gain);
-        crowdSource.connect(crowdFilter);
-        crowdFilter.connect(crowdGain);
-        crowdGain.connect(masterGain);
-        crowdGain.connect(convolver);
-        crowdSource.start();
-        crowdLfo.start();
-        nodes.push(crowdSource, crowdFilter, crowdGain, crowdLfo, crowdLfoGain);
+        createBabbleCrowd();
       }
 
       if (tags.includes('music')) {
-        const pad = ctx.createOscillator();
-        const pad2 = ctx.createOscillator();
-        pad.type = 'triangle';
-        pad2.type = 'triangle';
-        const root = 110 + rng() * 55;
-        pad.frequency.value = root;
-        pad2.frequency.value = root * (1.5 + rng() * 0.04);
-        const padFilter = ctx.createBiquadFilter();
-        padFilter.type = 'lowpass';
-        padFilter.frequency.value = 650;
-        const padGain = ctx.createGain();
-        padGain.gain.value = 0.003 + effectiveIntensity * 0.006;
-        pad.connect(padFilter);
-        pad2.connect(padFilter);
-        padFilter.connect(padGain);
-        padGain.connect(masterGain);
-        padGain.connect(convolver);
-        pad.start();
-        pad2.start();
-        nodes.push(pad, pad2, padFilter, padGain);
+        // "Radio"-like muffled music bed: gentle chord + wow/flutter.
+        const root = 95 + rng() * 50;
+        const a = ctx.createOscillator();
+        const b = ctx.createOscillator();
+        const c = ctx.createOscillator();
+        a.type = 'triangle';
+        b.type = 'triangle';
+        c.type = 'sine';
+        a.frequency.value = root;
+        b.frequency.value = root * 1.5;
+        c.frequency.value = root * 2;
+
+        const wow = ctx.createOscillator();
+        wow.type = 'sine';
+        wow.frequency.value = 0.35 + rng() * 0.35;
+        const wowGain = ctx.createGain();
+        wowGain.gain.value = 1.2 + rng() * 1.8;
+        wow.connect(wowGain);
+        wowGain.connect(a.detune);
+        wowGain.connect(b.detune);
+        wowGain.connect(c.detune);
+
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.value = 520 + rng() * 240;
+        const hp = ctx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.value = 90;
+        const g = ctx.createGain();
+        g.gain.value = 0.002 + effectiveIntensity * 0.005;
+        a.connect(lp);
+        b.connect(lp);
+        c.connect(lp);
+        lp.connect(hp);
+        hp.connect(g);
+        g.connect(masterGain);
+        g.connect(convolver);
+        a.start();
+        b.start();
+        c.start();
+        wow.start();
+        nodes.push(a, b, c, wow, wowGain, lp, hp, g);
       }
 
       if (tags.includes('rain') || tags.includes('storm')) {
-        const rainSource = ctx.createBufferSource();
-        rainSource.buffer = createNoiseBuffer(ctx, 6, 'pink', rng);
-        rainSource.loop = true;
-        const hp = ctx.createBiquadFilter();
-        hp.type = 'highpass';
-        hp.frequency.value = 650;
-        const lp = ctx.createBiquadFilter();
-        lp.type = 'lowpass';
-        lp.frequency.value = 5200;
-        const rainGain = ctx.createGain();
-        rainGain.gain.value = 0.008 + effectiveIntensity * 0.02;
-        rainSource.connect(hp);
-        hp.connect(lp);
-        lp.connect(rainGain);
-        rainGain.connect(masterGain);
-        rainGain.connect(convolver);
-        rainSource.start();
-        nodes.push(rainSource, hp, lp, rainGain);
-
+        // Rain should feel like many micro-events, not a constant wideband hiss.
         scheduleLoop(() => {
-          // droplets
-          playNoiseBurst({
-            durationMs: 15 + rng() * 35,
-            gain: 0.001 + effectiveIntensity * 0.002,
-            filterType: 'highpass',
-            freq: 5200 + rng() * 3800,
-            q: 0.7,
-            reverbSend: 0.2,
-          });
-        }, 120, 420);
+          const dropCount = 1 + Math.floor(rng() * (2 + effectiveIntensity * 4));
+          for (let i = 0; i < dropCount; i++) {
+            schedule(() => {
+              playNoiseBurst({
+                durationMs: 8 + rng() * 18,
+                gain: 0.0008 + effectiveIntensity * 0.0022,
+                filterType: 'highpass',
+                freq: 4200 + rng() * 5200,
+                q: 0.9,
+                reverbSend: 0.22,
+              });
+            }, i * (20 + rng() * 40));
+          }
+        }, 120, 360);
+
+        if (effectiveIntensity > 0.55) {
+          // Soft "sheet" layer only when intensity is high.
+          const sheet = ctx.createBufferSource();
+          sheet.buffer = createNoiseBuffer(ctx, 6, 'pink', rng);
+          sheet.loop = true;
+          const hp = ctx.createBiquadFilter();
+          hp.type = 'highpass';
+          hp.frequency.value = 1400;
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.value = 7800;
+          const g = ctx.createGain();
+          g.gain.value = 0.004 + effectiveIntensity * 0.010;
+          sheet.connect(hp);
+          hp.connect(lp);
+          lp.connect(g);
+          g.connect(masterGain);
+          g.connect(convolver);
+          sheet.start();
+          nodes.push(sheet, hp, lp, g);
+        }
       }
 
       if (tags.includes('storm')) {
@@ -759,6 +917,49 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         scheduleLoop(() => {
           if (rng() < 0.55 + effectiveIntensity * 0.25) playAnnouncement();
         }, 9000, 21000);
+      }
+
+      if (tags.includes('traffic') || tags.includes('bus') || tags.includes('train')) {
+        // Distant engine "beds" + pass-bys, to avoid generic noise.
+        const engine = ctx.createOscillator();
+        engine.type = 'sawtooth';
+        engine.frequency.value = 42 + rng() * 35;
+        const engineLp = ctx.createBiquadFilter();
+        engineLp.type = 'lowpass';
+        engineLp.frequency.value = 180 + rng() * 120;
+        const engineGain = ctx.createGain();
+        engineGain.gain.value = 0.003 + effectiveIntensity * 0.007;
+        engine.connect(engineLp);
+        engineLp.connect(engineGain);
+        engineGain.connect(masterGain);
+        engineGain.connect(convolver);
+        engine.start();
+        nodes.push(engine, engineLp, engineGain);
+
+        scheduleLoop(() => {
+          // pass-by "whoosh" with movement
+          const pan = (rng() < 0.5 ? -1 : 1) * (0.4 + rng() * 0.5);
+          playNoiseBurst({
+            durationMs: 700 + rng() * 1300,
+            gain: 0.003 + effectiveIntensity * 0.010,
+            filterType: 'bandpass',
+            freq: 260 + rng() * 520,
+            q: 0.55,
+            pan,
+            reverbSend: 0.12,
+          });
+
+          if (tags.includes('train') && rng() < 0.35) {
+            playModalHit(ctx, {
+              partialsHz: [440, 660, 880].map(x => x * (0.85 + rng() * 0.12)),
+              durationSeconds: 0.6 + rng() * 0.6,
+              gain: 0.001 + effectiveIntensity * 0.002,
+              pan,
+              master: masterGain,
+              reverb: convolver,
+            });
+          }
+        }, 4500, 11000);
       }
 
       if (tags.includes('footsteps')) {
@@ -813,14 +1014,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       if (profile === 'CAFE') {
         // Cutlery / cup clinks.
         scheduleLoop(() => {
-          playNoiseBurst({
-            durationMs: 25 + rng() * 60,
-            gain: 0.004 + effectiveIntensity * 0.007,
-            filterType: 'bandpass',
-            freq: 2400 + rng() * 2400,
-            q: 2.5,
-            reverbSend: 0.35,
-          });
+          playClink(1.0);
+          if (rng() < 0.35) schedule(() => playClink(0.6), 60 + rng() * 140);
         }, 1800, 6000);
 
         // Chair/cloth rustle.
@@ -935,7 +1130,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         const now = ctx.currentTime;
         const drift = 0.85 + rng() * 0.4;
         baseLow.frequency.setTargetAtTime((profile === 'CITY' ? 280 : 170) * drift, now, 2.5);
-        baseAir.frequency.setTargetAtTime((profile === 'NATURE' ? 2300 : (profile === 'CAFE' ? 1600 : 1200)) * drift, now, 3.5);
+        baseAir.frequency.setTargetAtTime((profile === 'NATURE' ? 3200 : (profile === 'CAFE' ? 2400 : (profile === 'CITY' ? 2800 : 2200))) * drift, now, 3.5);
         schedule(evolve, 12000 + rng() * 14000);
       };
       schedule(evolve, 8000);
