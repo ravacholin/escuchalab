@@ -19,11 +19,16 @@
             },
             animation: {
               'marquee': 'marquee 25s linear infinite',
+              'shimmer': 'shimmer 2s linear infinite',
             },
             keyframes: {
               marquee: {
                 '0%': { transform: 'translateX(0%)' },
                 '100%': { transform: 'translateX(-100%)' },
+              },
+              shimmer: {
+                '0%': { transform: 'translateX(-100%)' },
+                '100%': { transform: 'translateX(200%)' },
               }
             }
           }
