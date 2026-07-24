@@ -169,8 +169,8 @@ Edit `data/scenarios.ts`:
 
 ### Adjusting Gemini Models
 Models defined as constants in `geminiService.ts`:
-- `GENERATION_MODEL`: Currently `"gemini-2.5-flash"`
-- `AUDIO_MODEL`: Currently `"gemini-2.5-flash-preview-tts"`
+- `GENERATION_MODEL`: Currently `"gemini-3.6-flash"` (stable, faster/cheaper than 2.5-flash; fallback: `"gemini-2.5-flash"`)
+- `AUDIO_MODEL`: Currently `"gemini-3.1-flash-tts-preview"` (low-latency TTS preview; fallback if unstable: `"gemini-2.5-flash-preview-tts"`)
 
 ## Important Notes
 
