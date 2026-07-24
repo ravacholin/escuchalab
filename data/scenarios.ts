@@ -14,7 +14,9 @@ import {
     Check, X, TrendingUp, CheckCircle, FileText, Ban, Apple, DoorOpen, Server, Lightbulb, BatteryLow, PieChart, Eye, Watch, GraduationCap,
     // New Additions
     Stamp, Popcorn, Building, HeartHandshake, Baby, Dog, Hammer, Film, BookOpen, Siren, Headphones, Guitar, Newspaper, Tent, Hash,
-    ArrowRight, Calendar, Droplet, FireExtinguisher, Leaf, LineChart, ListChecks, Moon, PiggyBank, Recycle, Shirt, Ship, Trash2, TreePine, Truck
+    ArrowRight, Calendar, Droplet, FireExtinguisher, Leaf, LineChart, ListChecks, Moon, PiggyBank, Recycle, Shirt, Ship, Trash2, TreePine, Truck,
+    // New Additions v2 (redesign)
+    Users, Radio, Handshake, Percent, Package, Cloud, Wind, Waves, Bell, Coins, Mail, Send, Vote, Building2, Volume2, Navigation, Sprout, Trophy, HandCoins, Fuel, Feather
 } from 'lucide-react';
 
 export interface ScenarioAction {
@@ -31,1065 +33,580 @@ export interface ScenarioContext {
     actions: ScenarioAction[]; // CHILDREN ACTIONS specific to this place
 }
 
-export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]>> = {
+/**
+ * CATÁLOGO DE ESCENARIOS (rediseño CEFR, panhispánico).
+ *
+ * Ejes: TextType (formato) -> Level (nivel) -> ScenarioContext (lugar/tema) -> ScenarioAction (situación).
+ *
+ * Criterio por nivel (habilidad de escucha que entrena):
+ *  - A0 (Intro): keyword spotting. Solo Diálogo y Radio. Habla nativa con UN dato literal sembrado
+ *    (número, hora, precio, deletreo, dirección, código). Situaciones transaccionales cortas.
+ *  - A1-A2 (Beginner): recall simple. Presente/pretérito básico, vocabulario frecuente, funciones cotidianas.
+ *  - B1-B2 (Intermediate): inferencia ligera. Narración, opinión, resolución de problemas, discurso conectado.
+ *  - C1 (Advanced): matiz y registro. Ironía, subtexto, argumentación compleja, jerga, especialización.
+ *
+ * IMPORTANTE (regionalidad): el contenido es NEUTRO / panhispánico. No fija moneda, tratamiento (tú/vos/usted)
+ * ni léxico local: la variante regional la impone el ACENTO elegido (ver DIALECT_PROFILES + regla LOCALIZE en
+ * services/geminiService.ts). No hardcodear €, DNI, "piso", lunfardo, etc.
+ *
+ * Podcast y Monólogo (narrativos) NO tienen A0 (por eso el nivel es Partial<Record<Level, ...>>).
+ * Todo escenario de Diálogo es una interacción de EXACTAMENTE 2 personas (nunca implica un tercero).
+ */
+export const SCENARIO_DATABASE: Record<TextType, Partial<Record<Level, ScenarioContext[]>>> = {
     [TextType.Dialogue]: {
         [Level.Intro]: [
             {
                 label: "Datos de Contacto",
-                value: "Intercambio de información personal social ruido ambiente",
-                registerInstruction: "Registro social informal y cortés. Tratamiento: tú. Frases breves y claras para pedir, confirmar y repetir datos. Evitar lunfardo fuerte, insultos o bromas.",
+                value: "Dos personas intercambian datos personales en un entorno con ruido de fondo",
+                registerInstruction: "Registro social informal y cortés. Frases breves para pedir, confirmar y repetir datos. Sin jerga fuerte, insultos ni bromas.",
                 icon: Phone,
                 actions: [
-                    { label: "Número de WhatsApp", value: "Pedir y anotar un número de teléfono. UNO de los hablantes dicta los dígitos lentamente o agrupados.", icon: Hash },
-                    { label: "Correo Electrónico", value: "Dictar un email complejo (arroba, punto, guion bajo).", icon: MessageCircle },
-                    { label: "Usuario de Instagram", value: "Preguntar cómo aparece en redes sociales y deletrear el usuario.", icon: Search }
+                    { label: "Número de Teléfono", value: "Una persona dicta su número de teléfono dígito por dígito y la otra lo repite para confirmar.", icon: Hash },
+                    { label: "Correo Electrónico", value: "Dictar un correo electrónico usando 'arroba', 'punto' y 'guion bajo'.", icon: Mail },
+                    { label: "Usuario en Redes", value: "Preguntar el usuario en redes y deletrearlo letra por letra.", icon: Search },
+                    { label: "Confirmar el Número", value: "Repetir un número dictado y corregir un dígito equivocado.", icon: Phone }
                 ]
             },
             {
                 label: "Recepción de Hotel",
-                value: "Recepción hotel check-in formal mostrador",
-                registerInstruction: "Registro formal de atención al cliente. Tratamiento: usted. Fórmulas de cortesía (buenos días, por favor, gracias). Prohibido coloquialismos, jerga o sarcasmo.",
+                value: "Mostrador de recepción de un hotel durante el registro de entrada",
+                registerInstruction: "Registro formal de atención al cliente. Tratamiento de respeto; fórmulas de cortesía. Sin coloquialismos, jerga ni sarcasmo.",
                 icon: Bed,
                 actions: [
-                    { label: "Deletrear Apellido", value: "El recepcionista no entiende el apellido y pide deletrearlo letra por letra.", icon: FileText },
-                    { label: "Número de Habitación", value: "Asignar una habitación (ej: 304, 512) y dar instrucciones del piso.", icon: Key },
-                    { label: "Horario Desayuno", value: "Informar de la hora exacta del desayuno (de 7:30 a 10:00).", icon: Clock }
+                    { label: "Deletrear el Apellido", value: "El recepcionista no entiende el apellido y pide deletrearlo letra por letra.", icon: FileText },
+                    { label: "Número de Habitación", value: "Asignar una habitación (por ejemplo 304) e indicar el piso.", icon: Key },
+                    { label: "Hora del Desayuno", value: "Informar el horario exacto del desayuno (por ejemplo de 7:30 a 10:00).", icon: Clock },
+                    { label: "Clave del Wifi", value: "Dictar la clave del wifi con letras y números, deletreando lo dudoso.", icon: Wifi }
                 ]
             },
             {
-                label: "Compras y Dinero",
-                value: "Tienda caja pagar ruido supermercado",
-                registerInstruction: "Registro de servicio en caja: formal neutro, tratamiento usted, confirmaciones de precio y cambio. Sin lunfardo, sin diminutivos excesivos, sin bromas.",
+                label: "Caja / Pagar",
+                value: "Caja de una tienda al momento de cobrar, con ruido de fondo",
+                registerInstruction: "Registro de servicio en caja: formal neutro. Confirmaciones de precio y cambio. Sin jerga ni bromas.",
                 icon: Wallet,
                 actions: [
-                    { label: "Precio Exacto", value: "El cajero dice el total con céntimos (ej: 14,95€) y el cliente busca cambio.", icon: Euro },
-                    { label: "Número de Zapato/Ropa", value: "Pedir una talla específica (38, 42, XL) y preguntar si hay.", icon: ShoppingBag },
-                    { label: "Devolución (Días)", value: "Preguntar cuántos días hay para devolver (15 días, 30 días).", icon: Clock }
+                    { label: "Precio Total", value: "El cajero dice el precio total con decimales y el cliente busca el cambio.", icon: DollarSign },
+                    { label: "Talla del Producto", value: "Pedir una talla o número específico (38, 42, XL) y preguntar si hay.", icon: ShoppingBag },
+                    { label: "Días para Devolver", value: "Preguntar el número exacto de días que hay para devolver (por ejemplo 15 o 30 días).", icon: Calendar },
+                    { label: "Número de Pedido", value: "Dictar el número de pedido o de ticket para una consulta.", icon: Receipt }
                 ]
             },
             {
-                label: "Transporte / Ciudad",
-                value: "Calle taxi parada autobús ruido tráfico",
-                registerInstruction: "Registro urbano funcional y cortés. Tratamiento usted con desconocidos; instrucciones directas. Evitar jerga local demasiado marcada, insultos o chistes.",
+                label: "Taxi / Transporte",
+                value: "En la calle o dentro de un taxi, con ruido de tráfico",
+                registerInstruction: "Registro urbano funcional y cortés. Instrucciones directas. Evitar jerga muy marcada, insultos y chistes.",
                 icon: Car,
                 actions: [
-                    { label: "Dirección Exacta", value: "Decir al taxista la calle y el número exacto del portal.", icon: MapPin },
-                    { label: "Número de Autobús", value: "Preguntar qué número de bus va al centro (el 24, el 132).", icon: Bus },
-                    { label: "Distancia / Tiempo", value: "Preguntar cuánto falta (10 minutos, 5 kilómetros).", icon: Watch }
+                    { label: "Dirección Exacta", value: "Decir al conductor la calle y el número exacto del destino.", icon: MapPin },
+                    { label: "Número de Línea", value: "Preguntar qué número de autobús va al centro (el 24, el 132).", icon: Bus },
+                    { label: "Tiempo de Llegada", value: "Preguntar cuántos minutos faltan para llegar.", icon: Watch },
+                    { label: "Precio de la Carrera", value: "Preguntar cuánto cuesta el viaje y confirmar el importe.", icon: Coins }
                 ]
             },
             {
-                label: "Citas y Agenda",
-                value: "Oficina administración teléfono cita médica",
-                registerInstruction: "Registro administrativo formal. Tratamiento: usted. Lenguaje preciso para fechas y horarios. Prohibido coloquialismos, muletillas y familiaridad.",
-                icon: Clock,
+                label: "Turno / Cita",
+                value: "Reservar por teléfono o en un mostrador administrativo",
+                registerInstruction: "Registro administrativo formal. Lenguaje preciso para fechas y horarios. Sin coloquialismos ni familiaridad.",
+                icon: Calendar,
                 actions: [
-                    { label: "Fecha de Nacimiento", value: "Dar la fecha de nacimiento para un formulario (día, mes, año).", icon: FileText },
-                    { label: "Reservar Hora", value: "Acordar una cita para un día específico a una hora concreta.", icon: Clock },
-                    { label: "Código Postal", value: "Dictar el código postal de la dirección.", icon: Hash }
+                    { label: "Reservar una Hora", value: "Acordar una cita para un día específico a una hora concreta.", icon: Clock },
+                    { label: "Fecha de Nacimiento", value: "Dar la fecha de nacimiento (día, mes y año) para un formulario.", icon: Calendar },
+                    { label: "Código Postal", value: "Dictar el código postal de la dirección dígito por dígito.", icon: Hash },
+                    { label: "Número de Documento", value: "Dictar el número del documento de identidad para el registro.", icon: FileText }
+                ]
+            },
+            {
+                label: "En la Farmacia",
+                value: "Mostrador de una farmacia atendiendo a un cliente",
+                registerInstruction: "Registro de atención sanitaria: formal y claro. Instrucciones precisas de dosis y horarios. Sin jerga ni bromas.",
+                icon: Pill,
+                actions: [
+                    { label: "La Dosis", value: "Indicar cada cuántas horas tomar el medicamento y cuántas veces al día.", icon: Clock },
+                    { label: "Precio del Medicamento", value: "Decir el precio del medicamento con decimales y cobrar.", icon: DollarSign },
+                    { label: "Deletrear el Nombre", value: "Deletrear el nombre del medicamento porque no se entiende.", icon: FileText },
+                    { label: "Horario de Guardia", value: "Informar el horario exacto de la farmacia de guardia.", icon: Clock }
                 ]
             }
         ],
         [Level.Beginner]: [
             {
-                label: "Cafetería / Restaurante",
-                value: "Cafetería restaurante bar ruidoso servicio mesa",
-                registerInstruction: "Registro de atención en restaurante: cortés y semi-formal. Cliente trata de usted al camarero, peticiones claras. Evitar jerga fuerte o insultos.",
+                label: "Café / Restaurante",
+                value: "Un cliente y un camarero en una cafetería o restaurante con ruido de fondo",
+                registerInstruction: "Registro de atención cortés y semiformal. Peticiones claras. Evitar jerga fuerte o insultos.",
                 icon: Coffee,
                 actions: [
-                    { label: "Pedir la Cuenta", value: "Cliente pide la cuenta y pregunta si aceptan tarjeta", icon: Receipt },
-                    { label: "Reclamar (Comida Fría)", value: "El plato ha llegado frío y el cliente pide cambiarlo", icon: AlertCircle },
-                    { label: "Preguntar Ingredientes", value: "Preguntar qué lleva un plato por alergia o gusto", icon: Menu },
-                    { label: "Pedir Recomendación", value: "No sabe qué pedir y pregunta al camarero qué es bueno", icon: HelpCircle },
-                    { label: "Pedir Mesa (Reserva)", value: "Llegar al local y preguntar si hay mesa libre para dos", icon: UserPlus },
-                    { label: "Pedir Agua/Pan", value: "Solicitar más agua, pan o servilletas", icon: Hand },
-                    { label: "Preguntar Ubicación Baño", value: "Preguntar educadamente dónde están los servicios", icon: MapPin },
-                    { label: "Pedir para Llevar", value: "Sobró comida y quiere una caja para llevársela", icon: ShoppingBag },
-                    { label: "Café con Leche", value: "Pedir un café específico (con leche, cortado, solo)", icon: Coffee },
-                    { label: "Error en la Cuenta", value: "Han cobrado algo que no han pedido", icon: AlertTriangle }
+                    { label: "Pedir la Cuenta", value: "El cliente pide la cuenta y pregunta si aceptan tarjeta.", icon: Receipt },
+                    { label: "Reclamar Comida Fría", value: "El plato llegó frío y el cliente pide cambiarlo con amabilidad.", icon: AlertCircle },
+                    { label: "Preguntar Ingredientes", value: "Preguntar qué lleva un plato por alergia o por gusto.", icon: Menu },
+                    { label: "Pedir Recomendación", value: "No sabe qué pedir y pregunta al camarero qué está bueno.", icon: HelpCircle },
+                    { label: "Preguntar por el Baño", value: "Preguntar educadamente dónde está el baño.", icon: MapPin },
+                    { label: "Pedir para Llevar", value: "Sobró comida y pide un recipiente para llevársela.", icon: ShoppingBag }
                 ]
             },
             {
-                label: "Mercado Callejero",
-                value: "Mercado aire libre fruta verdura ruido regateo",
-                registerInstruction: "Registro informal pero respetuoso. Tratamiento tú o usted según distancia; regateo amable. Permitidas expresiones coloquiales suaves, prohibidos insultos.",
+                label: "Mercado / Verdulería",
+                value: "Un puesto de frutas y verduras al aire libre",
+                registerInstruction: "Registro informal pero respetuoso; trato cercano. Regateo amable permitido. Sin insultos.",
                 icon: Apple,
                 actions: [
-                    { label: "Preguntar Precio Kilo", value: "Preguntar a cuánto están las naranjas hoy", icon: DollarSign },
-                    { label: "Pedir Fruta Madura", value: "Pedir aguacates que estén listos para comer hoy", icon: Hand },
-                    { label: "Regatear (Básico)", value: "Intentar bajar el precio un poco de forma amable", icon: TrendingUp },
-                    { label: "Probar Producto", value: "Preguntar si se puede probar el queso antes de comprar", icon: Smile },
-                    { label: "Origen del Producto", value: "Preguntar si los tomates son de aquí o importados", icon: Globe },
-                    { label: "Pedir Cambio", value: "Solo tiene un billete grande y necesita cambio", icon: Euro },
-                    { label: "Bolsa Rota", value: "Se le ha roto la bolsa y pide otra", icon: ShoppingBag },
-                    { label: "Horario Mercado", value: "Preguntar qué días ponen el mercado", icon: Clock }
-                ]
-            },
-            {
-                label: "Cine / Taquilla",
-                value: "Cine taquilla palomitas cola entrada",
-                registerInstruction: "Registro de ventanilla formal neutro. Tratamiento: usted. Frases cortas y directas. Sin jerga ni bromas excesivas.",
-                icon: Film,
-                actions: [
-                    { label: "Comprar Entradas", value: "Dos entradas para la película de las 7", icon: Ticket },
-                    { label: "Elegir Asientos", value: "Prefiere sentarse en el pasillo o atrás", icon: UserPlus },
-                    { label: "Combo Palomitas", value: "Pedir palomitas grandes y bebida sin hielo", icon: Popcorn },
-                    { label: "Película Subtitulada", value: "Preguntar si la peli es en versión original o doblada", icon: MessageCircle },
-                    { label: "Sala Incorrecta", value: "Preguntar dónde está la sala 5", icon: HelpCircle },
-                    { label: "Descuento Estudiante", value: "Preguntar si hay descuento con carnet joven", icon: DollarSign }
-                ]
-            },
-            {
-                label: "Oficina de Correos",
-                value: "Oficina correos paquete ventanilla cola",
-                registerInstruction: "Registro formal de trámite. Tratamiento: usted. Vocabulario funcional (envío, plazo, formulario). Prohibido coloquialismos.",
-                icon: Stamp,
-                actions: [
-                    { label: "Enviar Paquete", value: "Quiere enviar una caja a otro país", icon: Rocket },
-                    { label: "Comprar Sellos", value: "Necesita sellos para unas postales", icon: Check },
-                    { label: "Recoger Paquete", value: "Trae un aviso de llegada para recoger algo", icon: FileText },
-                    { label: "Preguntar Plazos", value: "Preguntar cuánto tarda en llegar una carta ordinaria", icon: Clock },
-                    { label: "Rellenar Formulario", value: "Pedir ayuda para rellenar el impreso de envío", icon: HelpCircle },
-                    { label: "Paquete Pesado", value: "Preguntar cuánto cuesta por kilo", icon: Scale }
-                ]
-            },
-            {
-                label: "Estación de Tren/Bus",
-                value: "Estación tren andén taquilla transporte público",
-                registerInstruction: "Registro funcional y cortés en transporte público. Tratamiento: usted. Instrucciones precisas de horarios y andenes. Sin jerga ni insultos.",
-                icon: Train,
-                actions: [
-                    { label: "Comprar Billete Ida", value: "Comprar un billete sencillo para el próximo tren", icon: Ticket },
-                    { label: "Preguntar Andén", value: "No encuentra su tren y pregunta de dónde sale", icon: HelpCircle },
-                    { label: "Reportar Objeto Perdido", value: "Ha perdido una mochila y pregunta en información", icon: Search },
-                    { label: "Cambiar Horario", value: "Quiere cambiar su billete para una hora más tarde", icon: Clock },
-                    { label: "Preguntar Retraso", value: "El tren no llega y pregunta cuánto falta", icon: AlertTriangle },
-                    { label: "Máquina Expendedora", value: "No sabe usar la máquina automática y pide ayuda", icon: Hand },
-                    { label: "Validar Ticket", value: "Preguntar dónde se pica o valida el billete", icon: Check },
-                    { label: "Asiento Reservado", value: "Alguien está sentado en su sitio y se lo indica", icon: UserPlus }
-                ]
-            },
-            {
-                label: "Biblioteca",
-                value: "Biblioteca silencio libros estudio",
-                registerInstruction: "Registro formal suave y tranquilo. Tratamiento: usted. Volumen bajo y cortesía estricta. Prohibidos coloquialismos ruidosos.",
-                icon: BookOpen,
-                actions: [
-                    { label: "Hacerse Socio", value: "Quiere el carnet de la biblioteca", icon: UserPlus },
-                    { label: "Devolver Libro", value: "Entregar un libro prestado", icon: BookOpen },
-                    { label: "Wifi", value: "Preguntar cómo conectarse a la red", icon: Wifi },
-                    { label: "Buscar Libro", value: "No encuentra una novela en la estantería", icon: Search },
-                    { label: "Multa Retraso", value: "Preguntar cuánto tiene que pagar por el retraso", icon: DollarSign },
-                    { label: "Horario Sala", value: "Preguntar hasta qué hora se puede estudiar", icon: Clock }
-                ]
-            },
-            {
-                label: "Hotel (Recepción)",
-                value: "Hotel lobby recepción turismo mostrador",
-                registerInstruction: "Registro de hotelería formal. Tratamiento: usted. Lenguaje cordial, sin familiaridad ni jerga.",
-                icon: Bed,
-                actions: [
-                    { label: "Hacer Check-in", value: "Llegada al hotel, dar pasaporte y recibir llave", icon: Key },
-                    { label: "Problema: Aire Acondicionado", value: "El aire o calefacción de la habitación no funciona", icon: Thermometer },
-                    { label: "Pedir Desayuno", value: "Preguntar horario y precio del desayuno", icon: Coffee },
-                    { label: "Pedir Taxi", value: "Solicitar que llamen a un taxi para ir al aeropuerto", icon: Car },
-                    { label: "Clave del Wifi", value: "Preguntar la contraseña de internet", icon: Wifi },
-                    { label: "Dejar Maletas", value: "Pedir guardar el equipaje después del check-out", icon: ShoppingBag },
-                    { label: "Pedir Toallas", value: "Faltan toallas en el baño y llama a recepción", icon: Hand },
-                    { label: "Despertador", value: "Pedir que le despierten a las 7:00 AM", icon: Clock }
-                ]
-            },
-            {
-                label: "En la Calle (Ciudad)",
-                value: "Calle ciudad exterior tráfico ruido peatones",
-                registerInstruction: "Registro informal cortés entre desconocidos. Tratamiento: usted o tú según cercanía, pero sin confianza excesiva. Evitar lunfardo fuerte.",
-                icon: Map,
-                actions: [
-                    { label: "Preguntar Dirección", value: "Perdido, pregunta cómo llegar a la Plaza Mayor", icon: MapPin },
-                    { label: "Preguntar Hora", value: "Se le acabó la batería y pregunta la hora", icon: Clock },
-                    { label: "Buscar Metro", value: "Preguntar dónde está la boca de metro más cercana", icon: Train },
-                    { label: "Sacar una Foto", value: "Pedir a un extraño que le saque una foto", icon: Camera },
-                    { label: "Parada de Taxi", value: "Preguntar dónde se cogen los taxis", icon: Car },
-                    { label: "Calle Cortada", value: "Un policía indica que no se puede pasar por ahí", icon: AlertOctagon },
-                    { label: "Clima / Lluvia", value: "Comentario casual sobre que empieza a llover", icon: Umbrella }
+                    { label: "Preguntar el Precio", value: "Preguntar a cuánto están las naranjas hoy.", icon: DollarSign },
+                    { label: "Pedir Fruta Madura", value: "Pedir aguacates que estén listos para comer hoy.", icon: Hand },
+                    { label: "Regatear un Poco", value: "Intentar bajar el precio de forma amable.", icon: TrendingUp },
+                    { label: "Origen del Producto", value: "Preguntar si los tomates son de la zona o de fuera.", icon: Globe },
+                    { label: "Pedir Cambio", value: "Solo tiene un billete grande y necesita cambio.", icon: Coins },
+                    { label: "Horario del Puesto", value: "Preguntar qué días está el mercado.", icon: Clock }
                 ]
             },
             {
                 label: "Tienda de Ropa",
-                value: "Tienda ropa centro comercial probadores",
-                registerInstruction: "Registro comercial formal neutro. Tratamiento: usted. Solicitudes claras sobre talla y precio. Sin jerga ni bromas.",
-                icon: ShoppingBag,
+                value: "Interior de una tienda de ropa con un dependiente",
+                registerInstruction: "Registro de atención cortés. Peticiones directas y sencillas. Sin jerga.",
+                icon: Shirt,
                 actions: [
-                    { label: "Pedir Talla Diferente", value: "La prenda es pequeña, necesita una talla más grande", icon: Search },
-                    { label: "Devolución", value: "Quiere devolver algo que compró ayer", icon: Receipt },
-                    { label: "Preguntar Precio", value: "El artículo no tiene etiqueta y quiere saber cuánto cuesta", icon: DollarSign },
-                    { label: "Buscar Probadores", value: "Preguntar dónde se puede probar la ropa", icon: MapPin },
-                    { label: "Pagar (Caja)", value: "Pagar en efectivo y pedir bolsa", icon: Wallet },
-                    { label: "Color Diferente", value: "Preguntar si tienen esto mismo en azul", icon: Palette },
-                    { label: "Regalo", value: "Pedir ticket regalo o envolver para regalo", icon: Gift }
+                    { label: "Pedir Otra Talla", value: "La prenda no le queda y pide una talla diferente.", icon: ShoppingBag },
+                    { label: "Buscar los Probadores", value: "Preguntar dónde están los probadores para probarse algo.", icon: DoorOpen },
+                    { label: "Preguntar el Precio", value: "Preguntar cuánto cuesta una prenda sin etiqueta visible.", icon: DollarSign },
+                    { label: "Otro Color", value: "Pregunta si tienen la misma prenda en otro color.", icon: Palette },
+                    { label: "Envolver para Regalo", value: "Pide que le envuelvan la compra para regalo.", icon: Gift },
+                    { label: "Pagar en Caja", value: "Llevar la prenda a la caja y elegir cómo pagar.", icon: CreditCard }
                 ]
             },
             {
-                label: "Farmacia",
-                value: "Farmacia mostrador salud medicina",
-                registerInstruction: "Registro sanitario formal y respetuoso. Tratamiento: usted. Lenguaje claro sobre síntomas y dosis. Prohibido coloquialismos.",
-                icon: Pill,
+                label: "Cine / Entradas",
+                value: "Taquilla o mostrador de un cine",
+                registerInstruction: "Registro de ventanilla, formal neutro. Frases cortas y directas. Sin bromas excesivas.",
+                icon: Film,
                 actions: [
-                    { label: "Pedir Analgésico", value: "Le duele la cabeza y pide algo para el dolor", icon: Pill },
-                    { label: "Preguntar Dosis", value: "No sabe cuántas pastillas tomar al día", icon: HelpCircle },
-                    { label: "Comprar Mascarillas/Curitas", value: "Necesita material básico de primeros auxilios", icon: ShoppingBag },
-                    { label: "Consultar Síntoma Leve", value: "Tiene tos y pide jarabe", icon: Stethoscope },
-                    { label: "Crema Solar", value: "Pedir protección solar para la playa", icon: Sun },
-                    { label: "Horario de Guardia", value: "Preguntar qué farmacia está abierta de noche", icon: Clock }
-                ]
-            }
-        ],
-        [Level.Intermediate]: [
-            {
-                label: "Comisaría de Policía",
-                value: "Comisaría policía oficina denuncias serio",
-                registerInstruction: "Registro institucional muy formal. Tratamiento: usted. Relato claro y sobrio, sin ironías ni coloquialismos. Prohibido lunfardo.",
-                icon: Siren,
-                actions: [
-                    { label: "Denunciar Robo Cartera", value: "Explicar que le robaron la cartera en el metro", icon: Wallet },
-                    { label: "Pérdida de Pasaporte", value: "Necesita un justificante porque perdió el pasaporte", icon: FileText },
-                    { label: "Queja Ruido Vecinos", value: "Poner una denuncia por ruido excesivo", icon: Music },
-                    { label: "Testigo de Accidente", value: "Dar testimonio de un choque que vio en la calle", icon: Eye },
-                    { label: "Renovar DNI", value: "Preguntar qué papeles necesita para renovar identidad", icon: FileText },
-                    { label: "Multa Injusta", value: "Intentar recurrir una multa de tráfico", icon: AlertOctagon }
+                    { label: "Comprar Entradas", value: "Pedir dos entradas para la función de la tarde.", icon: Ticket },
+                    { label: "Elegir Asientos", value: "Prefiere sentarse atrás o junto al pasillo.", icon: UserPlus },
+                    { label: "Combo de Palomitas", value: "Pedir palomitas grandes y una bebida sin hielo.", icon: Popcorn },
+                    { label: "Versión Original", value: "Preguntar si la película es subtitulada o doblada.", icon: MessageCircle },
+                    { label: "Buscar la Sala", value: "Preguntar dónde queda la sala indicada en la entrada.", icon: HelpCircle },
+                    { label: "Descuento", value: "Preguntar si hay descuento para estudiantes.", icon: Percent }
                 ]
             },
             {
-                label: "Soporte Técnico",
-                value: "Oficina informática teléfono ordenadores cables",
-                registerInstruction: "Registro técnico semi-formal. Tratamiento: usted. Descripciones precisas de fallos y pasos. Evitar jerga vulgar.",
-                icon: Headphones,
+                label: "Pedir Indicaciones",
+                value: "Dos personas en la calle: alguien perdido pregunta a un transeúnte",
+                registerInstruction: "Registro cortés entre desconocidos. Instrucciones espaciales sencillas. Sin jerga marcada.",
+                icon: MapPin,
                 actions: [
-                    { label: "Internet no Funciona", value: "El router tiene luz roja y no hay wifi", icon: Wifi },
-                    { label: "Ordenador Lento", value: "Quejarse de que el PC va muy lento", icon: Laptop },
-                    { label: "Olvido de Contraseña", value: "Pedir restablecer la contraseña del correo", icon: Lock },
-                    { label: "Impresora Atascada", value: "Pedir ayuda porque el papel se atascó", icon: FileText },
-                    { label: "Virus Detectado", value: "Mensaje de alerta en pantalla y pánico", icon: ShieldAlert },
-                    { label: "Instalar Programa", value: "Necesita permisos para instalar software", icon: Download }
+                    { label: "Cómo Llegar", value: "Preguntar cómo llegar a un museo cercano a pie.", icon: Navigation },
+                    { label: "Buscar el Metro", value: "Preguntar dónde está la estación de metro más cercana.", icon: Train },
+                    { label: "Está Lejos o Cerca", value: "Preguntar si se puede ir andando o conviene el transporte.", icon: Watch },
+                    { label: "Preguntar la Hora", value: "Preguntar la hora a alguien en la calle.", icon: Clock },
+                    { label: "Parada de Taxi", value: "Preguntar dónde puede tomar un taxi.", icon: Car },
+                    { label: "Sacar una Foto", value: "Pedir a alguien que le saque una foto y explicar cómo.", icon: Camera }
                 ]
             },
             {
-                label: "Cena con Amigos",
-                value: "Restaurante cena amigos ambiente relajado risas",
-                registerInstruction: "Registro informal entre amigos. Tratamiento: tú/vos según acento. Permitidos coloquialismos suaves y risas, pero sin insultos fuertes.",
-                icon: Utensils,
+                label: "Estación / Transporte",
+                value: "Mostrador o andén de una estación de tren o autobús",
+                registerInstruction: "Registro funcional y cortés. Vocabulario de viaje frecuente. Sin coloquialismos fuertes.",
+                icon: Train,
                 actions: [
-                    { label: "Dividir la Cuenta (Lío)", value: "Intentan pagar a escote pero las cuentas no salen y discuten", icon: DollarSign },
-                    { label: "Contar un Chisme", value: "Uno cuenta un secreto sobre una pareja que no está", icon: MessageCircle },
-                    { label: "Anunciar Noticia", value: "Alguien anuncia que se casa o se muda", icon: Sparkles },
-                    { label: "Debate sobre Comida", value: "Discusión amistosa sobre si la pizza lleva piña o no", icon: MessageCircle },
-                    { label: "Organizar Viaje", value: "Planean irse juntos de vacaciones el próximo mes", icon: Plane },
-                    { label: "Recordar Anécdota", value: "Hablar de algo divertido que les pasó hace años", icon: Smile },
-                    { label: "Cancelar Plan", value: "Uno dice que mañana no podrá ir al cine al final", icon: X },
-                    { label: "Pedir Consejo Amoroso", value: "Uno pide ayuda con su situación sentimental", icon: Heart }
+                    { label: "Comprar un Billete", value: "Comprar un billete de ida para el próximo tren.", icon: Ticket },
+                    { label: "Preguntar el Andén", value: "Preguntar de qué andén sale su tren.", icon: MapPin },
+                    { label: "Preguntar el Retraso", value: "Preguntar por qué el tren viene con retraso y cuánto.", icon: Clock },
+                    { label: "Objeto Perdido", value: "Reportar que olvidó una mochila en el vagón.", icon: Search },
+                    { label: "Cambiar de Horario", value: "Pedir cambiar el billete a un horario más tarde.", icon: ArrowRight },
+                    { label: "Usar la Máquina", value: "Pedir ayuda para sacar el billete en la máquina.", icon: CreditCard }
                 ]
             },
             {
-                label: "Trabajo / Oficina",
-                value: "Oficina trabajo reunión formal despacho",
-                registerInstruction: "Registro laboral semi-formal. Tratamiento: usted con superiores y tú con pares. Lenguaje profesional, sin lunfardo ni sarcasmo agresivo.",
-                icon: Briefcase,
+                label: "Hotel (Recepción)",
+                value: "Recepción de hotel atendiendo a un huésped ya alojado",
+                registerInstruction: "Registro formal de atención al cliente. Fórmulas de cortesía. Sin jerga ni sarcasmo.",
+                icon: Bed,
                 actions: [
-                    { label: "Justificar Retraso", value: "Llega tarde y tiene que inventar una excusa creíble al jefe", icon: Clock },
-                    { label: "Pedir Aumento/Días", value: "Negociación tensa para pedir vacaciones o más dinero", icon: DollarSign },
-                    { label: "Explicar Error", value: "Ha cometido un fallo en un informe y lo confiesa", icon: AlertTriangle },
-                    { label: "Chisme Laboral", value: "Hablar mal de un compañero que no trabaja", icon: MessageCircle },
-                    { label: "Delegar Tarea", value: "Pedir a un compañero que haga tu trabajo por una urgencia", icon: Hand },
-                    { label: "Problema Informático", value: "El ordenador no va y llama al técnico enfadado", icon: Laptop },
-                    { label: "Organizar Reunión", value: "Intentar cuadrar agendas imposibles con un cliente", icon: Clock },
-                    { label: "Despedida Compañero", value: "Hablar sobre qué regalar al que se jubila", icon: Gift }
+                    { label: "Hacer el Registro", value: "Registrarse con una reserva a nombre del huésped.", icon: FileText },
+                    { label: "Problema con el Aire", value: "El aire acondicionado no funciona y pide ayuda.", icon: Thermometer },
+                    { label: "Pedir un Taxi", value: "Pedir en recepción que le llamen un taxi para cierta hora.", icon: Car },
+                    { label: "Dejar las Maletas", value: "Pedir dejar las maletas después de dejar la habitación.", icon: Package },
+                    { label: "Pedir Toallas", value: "Pedir toallas limpias adicionales a la habitación.", icon: Hand },
+                    { label: "Servicio Despertador", value: "Pedir que le despierten a una hora concreta.", icon: Bell }
                 ]
             },
             {
-                label: "Agencia Inmobiliaria",
-                value: "Oficina inmobiliaria fotos pisos planos mesa",
-                registerInstruction: "Registro formal de negociación. Tratamiento: usted. Vocabulario de alquiler/contrato claro. Prohibido coloquialismos.",
-                icon: Building,
+                label: "Consultorio / Turno",
+                value: "Recepción de un centro de salud gestionando un turno",
+                registerInstruction: "Registro de atención sanitaria, cortés y claro. Vocabulario básico de salud. Sin tecnicismos complejos.",
+                icon: Stethoscope,
                 actions: [
-                    { label: "Buscar Alquiler", value: "Describir qué tipo de piso busca y presupuesto", icon: Home },
-                    { label: "Queja de Vecinos", value: "Llamar a la agencia porque los vecinos hacen ruido", icon: Angry },
-                    { label: "Reclamar Fianza", value: "Exigir la devolución del depósito al dejar el piso", icon: DollarSign },
-                    { label: "Negociar Contrato", value: "Intentar cambiar una cláusula sobre mascotas", icon: Dog },
-                    { label: "Avería en Piso", value: "Reportar que se ha roto la caldera y es urgente", icon: Wrench },
-                    { label: "Visitar Piso", value: "Pedir cita para ver un apartamento", icon: Key }
+                    { label: "Pedir un Turno", value: "Pedir un turno con el médico general para esta semana.", icon: Calendar },
+                    { label: "Explicar un Síntoma", value: "Explicar de forma sencilla un dolor de garganta y fiebre.", icon: Thermometer },
+                    { label: "Preguntar la Espera", value: "Preguntar cuánto falta para que le atiendan.", icon: Clock },
+                    { label: "Rellenar la Ficha", value: "Pedir ayuda para completar sus datos en la ficha.", icon: FileText },
+                    { label: "Pedir un Justificante", value: "Pedir un justificante de la consulta para el trabajo.", icon: CheckCircle },
+                    { label: "Cambiar la Cita", value: "Pedir cambiar el turno a otro día porque no puede venir.", icon: ArrowRight }
                 ]
             },
             {
                 label: "Gimnasio",
-                value: "Gimnasio pesas máquinas música eco sudor",
-                registerInstruction: "Registro informal respetuoso. Tratamiento: tú entre usuarios; usted con recepción si se queja. Evitar groserías.",
+                value: "Recepción de un gimnasio informando a un nuevo interesado",
+                registerInstruction: "Registro cercano y comercial, cortés. Vocabulario de deporte cotidiano. Sin jerga técnica.",
                 icon: Dumbbell,
                 actions: [
-                    { label: "Pedir Turno Máquina", value: "Preguntar cuánto le queda al otro en la máquina", icon: Clock },
-                    { label: "Explicar Ejercicio", value: "Uno explica al otro cómo hacer bien la sentadilla", icon: Hand },
-                    { label: "Queja de Higiene", value: "Alguien no usó toalla y dejó todo sudado", icon: Angry },
-                    { label: "Renovar Cuota", value: "Discutir en recepción porque cobraron de más", icon: DollarSign },
-                    { label: "Objetivos Año Nuevo", value: "Hablar de perder peso o ganar músculo", icon: TrendingUp },
-                    { label: "Clase de Zumba", value: "Comentar lo difícil que fue la clase de hoy", icon: Music }
-                ]
-            },
-            {
-                label: "Taller Mecánico",
-                value: "Taller mecánico coches herramientas ruido grasa",
-                registerInstruction: "Registro de servicio técnico semi-formal. Tratamiento: usted. Explicaciones concretas de averías y presupuestos. Sin jerga vulgar.",
-                icon: Wrench,
-                actions: [
-                    { label: "Describir Ruido Raro", value: "El coche hace 'clac clac' al girar", icon: HelpCircle },
-                    { label: "Presupuesto Caro", value: "El mecánico da un precio muy alto y el cliente se queja", icon: DollarSign },
-                    { label: "Prisa por Arreglo", value: "Necesita el coche para mañana sin falta", icon: Clock },
-                    { label: "ITV (Revisión)", value: "Preguntar si el coche pasará la inspección técnica", icon: CheckCircle },
-                    { label: "Batería Muerta", value: "Explicar que el coche no arranca por la mañana", icon: Zap },
-                    { label: "Rueda Pinchada", value: "Pedir que arreglen un pinchazo rápido", icon: AlertOctagon }
-                ]
-            },
-            {
-                label: "Entrevista de Trabajo",
-                value: "Despacho entrevista formal nervios curriculum",
-                registerInstruction: "Registro estrictamente formal. Tratamiento: usted. Respuestas profesionales, sin coloquialismos ni muletillas.",
-                icon: HeartHandshake,
-                actions: [
-                    { label: "Hablar de Defectos", value: "Responder a la pregunta 'cuál es tu mayor defecto'", icon: Frown },
-                    { label: "Negociar Salario", value: "Preguntar cuánto pagan sin parecer avaricioso", icon: DollarSign },
-                    { label: "Experiencia Pasada", value: "Explicar por qué dejó su último trabajo", icon: Briefcase },
-                    { label: "Preguntar Horario", value: "Saber si hay flexibilidad o teletrabajo", icon: Clock },
-                    { label: "Venderse", value: "Explicar por qué es el mejor candidato", icon: Star },
-                    { label: "Preguntas al Final", value: "Hacer preguntas inteligentes al entrevistador", icon: HelpCircle }
-                ]
-            },
-            {
-                label: "Veterinario",
-                value: "Clínica veterinaria perro gato sala espera",
-                registerInstruction: "Registro clínico formal. Tratamiento: usted. Descripciones claras de síntomas y tratamientos. Evitar jerga y bromas.",
-                icon: Dog,
-                actions: [
-                    { label: "Gato no Come", value: "Explicar que la mascota está triste y no come", icon: Frown },
-                    { label: "Vacunación", value: "Preguntar qué vacunas tocan este año", icon: Stethoscope },
-                    { label: "Urgencia", value: "El perro se ha comido algo tóxico", icon: AlertTriangle },
-                    { label: "Corte de Pelo", value: "Pedir cita para peluquería canina", icon: Scissors },
-                    { label: "Factura Alta", value: "Sorprenderse por el precio de la operación", icon: DollarSign },
-                    { label: "Comportamiento", value: "El perro ladra mucho y pide consejo", icon: MessageCircle }
-                ]
-            },
-            {
-                label: "Banco / Finanzas",
-                value: "Banco oficina cajero dinero silencio",
-                registerInstruction: "Registro financiero formal. Tratamiento: usted. Precisión en cifras y términos bancarios. Prohibidos coloquialismos y chistes.",
-                icon: Landmark,
-                actions: [
-                    { label: "Abrir Cuenta", value: "Preguntar requisitos y comisiones para abrir cuenta", icon: FileText },
-                    { label: "Préstamo Rechazado", value: "El director explica por qué no dan el crédito", icon: Ban },
-                    { label: "Tarjeta Robada", value: "Llamar para anular una tarjeta por robo", icon: CreditCard },
-                    { label: "Error en Cargo", value: "Reclamar un cobro que no reconoce en el extracto", icon: AlertTriangle },
-                    { label: "Transferencia Internacional", value: "Preguntar cómo enviar dinero al extranjero", icon: Globe }
-                ]
-            },
-            {
-                label: "Consulta Médica",
-                value: "Hospital médico consulta privado silencio",
-                registerInstruction: "Registro sanitario formal. Tratamiento: usted. Lenguaje claro y respetuoso, sin coloquialismos ni humor.",
-                icon: Stethoscope,
-                actions: [
-                    { label: "Describir Dolor Raro", value: "Explicar un dolor difuso que va y viene", icon: Frown },
-                    { label: "Pedir Baja Laboral", value: "Intentar convencer al médico de que no puede trabajar", icon: BriefcaseBusiness },
-                    { label: "Miedo a Tratamiento", value: "El paciente tiene miedo a las agujas o la operación", icon: AlertCircle },
-                    { label: "Pedir Receta", value: "Necesita medicación crónica que se le acabó", icon: Pill },
-                    { label: "Dieta y Hábitos", value: "El médico regaña al paciente por comer mal", icon: Apple },
-                    { label: "Pedir Cita Especialista", value: "Quiere que le vea el dermatólogo", icon: UserPlus }
+                    { label: "Preguntar los Precios", value: "Preguntar cuánto cuesta la cuota mensual y qué incluye.", icon: DollarSign },
+                    { label: "Horario de Clases", value: "Preguntar a qué hora son las clases de la semana.", icon: Clock },
+                    { label: "Cómo Apuntarse", value: "Preguntar qué necesita para inscribirse hoy.", icon: UserPlus },
+                    { label: "Usar una Máquina", value: "Pedir que le expliquen cómo usar una máquina.", icon: HelpCircle },
+                    { label: "Traer un Amigo", value: "Preguntar si puede traer a un amigo de invitado.", icon: Users },
+                    { label: "Congelar la Cuota", value: "Preguntar si puede pausar la cuota si se va de viaje.", icon: Ban }
                 ]
             },
             {
                 label: "Peluquería",
-                value: "Peluquería salón secadores tijeras espejo",
-                registerInstruction: "Registro cercano pero respetuoso. Tratamiento: tú o usted según edad, tono amable. Evitar groserías.",
+                value: "Un cliente y un peluquero en la peluquería",
+                registerInstruction: "Registro cercano y cortés. Descripciones sencillas de lo que se quiere. Sin jerga técnica.",
                 icon: Scissors,
                 actions: [
-                    { label: "Explicar Corte", value: "Explicar detalladamente cómo quiere el flequillo", icon: Hand },
-                    { label: "Resultado Desastroso", value: "No le gusta nada el corte y se queja sutilmente", icon: Frown },
-                    { label: "Charla Trivial", value: "Hablar del tiempo y vacaciones con el peluquero", icon: MessageCircle },
-                    { label: "Cambio de Look", value: "Quiere teñirse de un color radical", icon: Palette },
-                    { label: "Pedir Cita", value: "Llamar para reservar hora el sábado", icon: Phone }
-                ]
-            }
-        ],
-        [Level.Advanced]: [
-            {
-                label: "Backstage Concierto",
-                value: "Backstage concierto camerino música ruido caos",
-                registerInstruction: "Registro coloquial profesional del espectáculo. Tratamiento tú entre equipo, pero sin insultos extremos. Permitida jerga técnica musical.",
-                icon: Guitar,
-                actions: [
-                    { label: "Exigencias de Rider", value: "La estrella se queja de que el agua no es de la marca correcta", icon: Star },
-                    { label: "Fallo de Sonido", value: "Técnico discute con el manager por un acople", icon: Mic },
-                    { label: "Entrevista Express", value: "Periodista intenta sacar una declaración antes de salir", icon: MessageCircle },
-                    { label: "Nervios Pre-Show", value: "El cantante tiene pánico escénico", icon: Frown },
-                    { label: "Groupie Colado", value: "Seguridad echa a alguien que se ha colado", icon: Ban },
-                    { label: "Cambio de Setlist", value: "Discusión sobre qué canciones tocar", icon: FileText }
-                ]
-            },
-            {
-                label: "Redacción Periódico",
-                value: "Redacción periodismo ordenadores estrés noticias",
-                registerInstruction: "Registro profesional periodístico. Tratamiento tú entre colegas, lenguaje preciso y urgente. Prohibido lunfardo vulgar.",
-                icon: Newspaper,
-                actions: [
-                    { label: "Cambio de Portada", value: "El director cambia la noticia principal a última hora", icon: AlertTriangle },
-                    { label: "Fuente Anónima", value: "Discutir si la fuente es fiable o no", icon: ShieldAlert },
-                    { label: "Corrección de Errata", value: "Bronca por una falta de ortografía en el titular", icon: X },
-                    { label: "Entrevista Fallida", value: "El político ha cancelado la entrevista", icon: Phone },
-                    { label: "Fake News", value: "Debatir sobre si publicar un rumor viral", icon: Globe },
-                    { label: "Cierre de Edición", value: "Prisa máxima para enviar a imprenta", icon: Clock }
-                ]
-            },
-            {
-                label: "Start-up Tecnológica",
-                value: "Oficina moderna start-up sofás pizarras inglés",
-                registerInstruction: "Registro semi-formal con jerga tecnológica permitida. Tratamiento tú entre equipo. Evitar vulgaridades.",
-                icon: Rocket,
-                actions: [
-                    { label: "Pitch a Inversores", value: "Vender la idea de la empresa usando jerga (growth, kpi)", icon: TrendingUp },
-                    { label: "Despido 'Cool'", value: "Despedir a alguien diciendo que es una 'oportunidad'", icon: DoorOpen },
-                    { label: "Crisis de Servidores", value: "La app se ha caído y hay pánico técnico", icon: Server },
-                    { label: "Brainstorming Absurdo", value: "Ideas ridículas que todos aplauden por compromiso", icon: Lightbulb },
-                    { label: "Burnout (Estrés)", value: "Confesar que está quemado de trabajar 15 horas", icon: BatteryLow },
-                    { label: "Negociar Equity", value: "Discutir qué porcentaje de la empresa se queda cada uno", icon: PieChart }
-                ]
-            },
-            {
-                label: "Juicio / Legal",
-                value: "Juzgado tribunal sala legal serio eco",
-                registerInstruction: "Registro legal muy formal. Tratamiento: usted. Léxico jurídico y tono respetuoso. Prohibido coloquialismos.",
-                icon: Gavel,
-                actions: [
-                    { label: "Interrogatorio Hostil", value: "Abogado presiona a un testigo para que confiese contradicciones", icon: Zap },
-                    { label: "Alegato de Inocencia", value: "Discurso emotivo defendiendo su honorabilidad", icon: Hand },
-                    { label: "Objeción Técnica", value: "Discusión sobre un tecnicismo legal aburrido pero crucial", icon: Scale },
-                    { label: "Negociar Acuerdo", value: "Intentar llegar a un pacto secreto antes del veredicto", icon: Lock },
-                    { label: "Mentira Descubierta", value: "El juez pilla al acusado en una mentira obvia", icon: AlertTriangle },
-                    { label: "Lectura de Sentencia", value: "El momento tenso donde se lee el veredicto final", icon: FileText }
-                ]
-            },
-            {
-                label: "Galería de Arte",
-                value: "Museo galería arte moderno silencioso pasos",
-                registerInstruction: "Registro culto y moderadamente formal. Tratamiento: usted o tú según cercanía, pero con vocabulario artístico. Sin jerga vulgar.",
-                icon: Palette,
-                actions: [
-                    { label: "Crítica Pretenciosa", value: "Usar lenguaje muy culto y vacío para criticar un cuadro", icon: Brain },
-                    { label: "Fingir Saber", value: "Alguien no entiende nada pero finge ser experto para impresionar", icon: Drama },
-                    { label: "Compra de Inversión", value: "Negociar la compra de una obra por millones (blanqueo sutil)", icon: DollarSign },
-                    { label: "Debate Ético", value: "Discusión sobre si el arte debe ser político o estético", icon: MessageCircle },
-                    { label: "Accidente con Obra", value: "Alguien toca una escultura y casi la rompe", icon: AlertOctagon },
-                    { label: "Explicar el Vacío", value: "Justificar por qué un lienzo en blanco es arte", icon: Eye }
-                ]
-            },
-            {
-                label: "Terapia Psicológica",
-                value: "Consulta diván silencio reloj tic-tac íntimo",
-                registerInstruction: "Registro íntimo y respetuoso. Tratamiento: usted si es primera sesión; tono cuidadoso. Evitar sarcasmo o bromas.",
-                icon: Brain,
-                actions: [
-                    { label: "Confesión Traumática", value: "Revelar un evento del pasado que nunca contó a nadie", icon: Lock },
-                    { label: "Resistencia al Cambio", value: "El paciente se enfada cuando el psicólogo le dice la verdad", icon: Angry },
-                    { label: "Análisis de Sueño", value: "Narración surrealista de un sueño y su interpretación", icon: Ghost },
-                    { label: "Ruptura Terapéutica", value: "El paciente decide dejar la terapia porque 'ya está bien'", icon: Hand },
-                    { label: "Transferencia", value: "El paciente confiesa estar enamorado del terapeuta", icon: Heart },
-                    { label: "Silencio Incómodo", value: "Nadie habla durante un minuto entero (tensión)", icon: Watch }
-                ]
-            },
-            {
-                label: "Entrevista Política/Radio",
-                value: "Estudio radio entrevista micrófono tensión",
-                registerInstruction: "Registro formal de entrevista pública. Tratamiento: usted. Preguntas directas y respuestas medidas. Prohibido coloquialismos.",
-                icon: Mic,
-                actions: [
-                    { label: "Evasión de Respuesta", value: "El político habla mucho sin responder la pregunta difícil", icon: MessageCircle },
-                    { label: "Ataque Personal", value: "El entrevistador saca un trapo sucio del pasado", icon: Zap },
-                    { label: "Discurso Populista", value: "Promesas grandilocuentes y retórica vacía", icon: Globe },
-                    { label: "Corte de Micrófono", value: "Tensión máxima, se interrumpe la entrevista abruptamente", icon: AlertTriangle },
-                    { label: "Primicia Exclusiva", value: "Revelar un escándalo en directo", icon: Megaphone },
-                    { label: "Debate a Gritos", value: "Dos tertulianos se gritan y no se entiende nada", icon: Frown }
-                ]
-            },
-            {
-                label: "Cata de Vinos / Lujo",
-                value: "Bodega restaurante lujo copas vino silencio",
-                registerInstruction: "Registro formal y sofisticado. Tratamiento: usted. Léxico sensorial y cortesía estricta. Sin jerga vulgar.",
-                icon: Wine,
-                actions: [
-                    { label: "Descripción Sensorial", value: "Describir el sabor del vino con adjetivos imposibles (madera, cuero)", icon: Sparkles },
-                    { label: "Esnobismo Puro", value: "Mirar por encima del hombro al que pide cerveza", icon: Eye },
-                    { label: "Vino Picado", value: "Devolver una botella de 200€ porque sabe a corcho", icon: ThumbsDown },
-                    { label: "Maridaje Incorrecto", value: "El sommelier corrige al cliente por pedir pescado con tinto", icon: Hand },
-                    { label: "Brindis Hipócrita", value: "Brindar por el éxito de alguien a quien odias", icon: Smile }
-                ]
-            },
-            {
-                label: "Clase Universidad",
-                value: "Aula magna universidad eco profesor alumnos",
-                registerInstruction: "Registro académico formal. Tratamiento: usted al profesor, tú entre alumnos. Lenguaje preciso, sin coloquialismos.",
-                icon: School,
-                actions: [
-                    { label: "Pregunta Pedante", value: "Alumno pregunta solo para demostrar que sabe más que el profe", icon: GraduationCap },
-                    { label: "Revisión de Examen", value: "Discutir una décima de nota en el despacho", icon: FileText },
-                    { label: "Plagio Detectado", value: "El profesor acusa al alumno de copiar el trabajo", icon: AlertTriangle },
-                    { label: "Debate Filosófico", value: "Discusión abstracta sobre la ética y la moral", icon: Scale },
-                    { label: "Explicación Compleja", value: "El profesor explica una teoría que nadie entiende", icon: Brain },
-                    { label: "Beca Rechazada", value: "El alumno pide explicaciones por no recibir la beca", icon: DollarSign }
-                ]
-            },
-            {
-                label: "Rodaje de Cine",
-                value: "Set rodaje cámaras luces silencio acción",
-                registerInstruction: "Registro profesional con urgencia. Tratamiento tú entre equipo, instrucciones claras. Evitar insultos fuertes.",
-                icon: Camera,
-                actions: [
-                    { label: "Actor Diva", value: "El protagonista se niega a salir porque el café está frío", icon: Star },
-                    { label: "Director Enfadado", value: "Gritar 'Corten' porque nadie hace caso", icon: Megaphone },
-                    { label: "Fallo de Raccord", value: "Discutir porque el vaso estaba lleno y ahora vacío", icon: Search },
-                    { label: "Escena de Llanto", value: "Intentar llorar pero no sale, presión máxima", icon: Frown },
-                    { label: "Doble de Riesgo", value: "Negociar una escena peligrosa", icon: ShieldAlert },
-                    { label: "Lluvia Artificial", value: "Coordinar los efectos especiales que fallan", icon: Umbrella }
-                ]
-            },
-            {
-                label: "Comunidad de Vecinos",
-                value: "Reunión vecinos portal escalera quejas",
-                registerInstruction: "Registro semi-formal vecinal. Tratamiento usted en reunión oficial. Lenguaje directo pero respetuoso. Prohibido insultos.",
-                icon: Building,
-                actions: [
-                    { label: "Derrama (Gasto Extra)", value: "Discutir porque hay que pagar el ascensor nuevo", icon: Euro },
-                    { label: "Ruidos Nocturnos", value: "Quejarse del vecino del 5º que toca la batería", icon: Music },
-                    { label: "Presidente Pesado", value: "Nadie quiere ser presidente de la comunidad", icon: UserPlus },
-                    { label: "Obras Ilegales", value: "Acusar a un vecino de cerrar la terraza sin permiso", icon: Hammer },
-                    { label: "Llaves del Portal", value: "La llave de abajo no funciona bien", icon: Key },
-                    { label: "Morosos", value: "Leer la lista de vecinos que no pagan", icon: FileWarning }
-                ]
-            },
-            {
-                label: "Maternidad / Paternidad",
-                value: "Parque infantil bebés padres biberón",
-                registerInstruction: "Registro informal entre padres, tono empático. Tratamiento tú. Evitar sarcasmo o insultos.",
-                icon: Baby,
-                actions: [
-                    { label: "Consejos No Pedidos", value: "Alguien critica cómo educas a tu hijo", icon: MessageCircle },
-                    { label: "Noches sin Dormir", value: "Competir por ver quién duerme menos", icon: Frown },
-                    { label: "Elegir Colegio", value: "Debate intenso sobre qué colegio es mejor", icon: School },
-                    { label: "Berrinche Público", value: "El niño llora en el súper y todos miran", icon: AlertCircle },
-                    { label: "Logros del Bebé", value: "Presumir de que su hijo ya camina o habla", icon: Star },
-                    { label: "Comida Orgánica", value: "Debate sobre si dar potitos o comida casera", icon: Apple }
-                ]
-            },
-            {
-                label: "Negociación de Paz",
-                value: "Sala reuniones ONU banderas serio tensión",
-                registerInstruction: "Registro diplomático extremadamente formal. Tratamiento: usted. Tono protocolar y preciso. Prohibido coloquialismos.",
-                icon: Globe,
-                actions: [
-                    { label: "Traducción Errónea", value: "Un error del traductor casi causa una guerra", icon: MessageCircle },
-                    { label: "Ultimátum", value: "Una parte da 24 horas para firmar", icon: Clock },
-                    { label: "Protocolo Roto", value: "Alguien se sienta donde no debe y ofende al otro", icon: ShieldAlert },
-                    { label: "Firma del Tratado", value: "Momento solemne de firmar la paz", icon: FileText },
-                    { label: "Espionaje", value: "Descubren un micro en la sala", icon: Mic }
-                ]
-            }
-        ]
-    },
-    [TextType.PodcastInterview]: {
-        [Level.Intro]: [
-            {
-                label: "Mi Primera Cita Desastrosa",
-                value: "Podcast informal donde el invitado cuenta su primera cita romántica que salió mal: el restaurante equivocado, la comida derramada, los silencios incómodos",
-                registerInstruction: "Registro informal y cercano. Tratamiento tú. Tono humorístico y ligero. Permitido vocabulario de emociones básicas (nervios, vergüenza, risa). Sin vulgaridades.",
-                icon: Heart,
-                actions: [
-                    { label: "Dónde Fue la Cita", value: "Describir el lugar elegido: un café pequeño, un restaurante ruidoso, un parque", icon: MapPin },
-                    { label: "El Momento Incómodo", value: "Contar el momento más vergonzoso: derramó agua, se quedó en silencio, llegó tarde", icon: AlertCircle },
-                    { label: "Qué Comieron", value: "Describir la comida y si algo salió mal con el pedido", icon: Utensils },
-                    { label: "Cómo Terminó", value: "Contar si hubo segunda cita o nunca más se vieron", icon: ThumbsDown },
-                    { label: "Consejo para Otros", value: "Dar un consejo simple para primeras citas", icon: Lightbulb }
-                ]
-            },
-            {
-                label: "La Receta de Mi Abuela",
-                value: "Podcast emotivo donde el invitado describe el plato especial que hacía su abuela: los olores, el ritual de cocinar juntos, las reuniones familiares",
-                registerInstruction: "Registro cercano y emotivo. Tratamiento tú. Vocabulario sensorial simple (olor, sabor, calor). Tono nostálgico pero positivo. Sin jerga.",
-                icon: Coffee,
-                actions: [
-                    { label: "El Plato Especial", value: "Decir el nombre del plato y por qué era especial", icon: Star },
-                    { label: "Los Olores de la Cocina", value: "Describir los olores que recuerda: ajo, cebolla, especias", icon: Sparkles },
-                    { label: "El Ritual Familiar", value: "Contar quién ayudaba a cocinar y qué hacía cada uno", icon: Heart },
-                    { label: "El Momento de Comer", value: "Describir la mesa, quién se sentaba dónde", icon: UserPlus },
-                    { label: "Intentar Hacerlo Hoy", value: "Contar si intentó hacer la receta y cómo salió", icon: Smile }
-                ]
-            },
-            {
-                label: "Mi Primer Día en el País",
-                value: "Podcast donde el invitado cuenta su primer día en un país nuevo: el aeropuerto confuso, las primeras palabras en otro idioma, la comida extraña",
-                registerInstruction: "Registro informal narrativo. Tratamiento tú. Vocabulario de viaje básico. Emociones simples (miedo, sorpresa, alegría). Sin lunfardo.",
-                icon: Plane,
-                actions: [
-                    { label: "Llegada al Aeropuerto", value: "Describir el aeropuerto: grande, confuso, con carteles en otro idioma", icon: Plane },
-                    { label: "Primera Comida", value: "Contar qué comió el primer día y si le gustó", icon: Utensils },
-                    { label: "Primera Conversación", value: "Describir su primera conversación con un local: gestos, palabras básicas", icon: MessageCircle },
-                    { label: "Dónde Durmió", value: "Contar dónde pasó la primera noche: hotel, hostal, casa de familia", icon: Bed },
-                    { label: "Lo Más Sorprendente", value: "Decir qué le sorprendió más del nuevo país", icon: Sparkles }
-                ]
-            },
-            {
-                label: "Mi Mascota Me Salvó el Día",
-                value: "Podcast donde el invitado cuenta una anécdota donde su mascota hizo algo inesperado: el perro que ladró al ladrón, el gato que despertó a la familia",
-                registerInstruction: "Registro informal y tierno. Tratamiento tú. Vocabulario de animales y emociones. Tono positivo. Sin jerga.",
-                icon: Dog,
-                actions: [
-                    { label: "Presentar a la Mascota", value: "Decir nombre, tipo de animal y cómo llegó a casa", icon: Dog },
-                    { label: "El Día Normal", value: "Describir cómo empezó el día: rutina normal", icon: Sun },
-                    { label: "Lo Inesperado", value: "Contar qué hizo la mascota que sorprendió a todos", icon: Zap },
-                    { label: "La Reacción de la Familia", value: "Describir cómo reaccionaron todos", icon: Heart },
-                    { label: "Ahora Es un Héroe", value: "Contar si la mascota recibió algún premio o mimos extra", icon: Star }
-                ]
-            },
-            {
-                label: "La Fiesta de Cumpleaños Sorpresa",
-                value: "Podcast donde el invitado cuenta una fiesta sorpresa: los preparativos secretos, casi descubren todo, la cara del festejado",
-                registerInstruction: "Registro informal y alegre. Tratamiento tú. Vocabulario de celebraciones. Tono entusiasta. Sin vulgaridades.",
-                icon: Gift,
-                actions: [
-                    { label: "El Plan Secreto", value: "Contar cómo organizaron la sorpresa sin que se enterara", icon: Lock },
-                    { label: "Casi Lo Descubren", value: "Describir el momento de tensión donde casi se arruina la sorpresa", icon: AlertTriangle },
-                    { label: "La Llegada", value: "Contar el momento exacto cuando el festejado entró", icon: DoorOpen },
-                    { label: "La Cara de Sorpresa", value: "Describir la reacción: lloró, gritó, se quedó mudo", icon: Sparkles },
-                    { label: "El Mejor Momento", value: "Decir cuál fue el mejor momento de la noche", icon: Star }
-                ]
-            }
-        ],
-        [Level.Beginner]: [
-            {
-                label: "Mi Peor Viaje de Vacaciones",
-                value: "Podcast donde el invitado cuenta un viaje desastroso: el equipaje perdido, el hostal con chinches, la intoxicación alimentaria, los mosquitos",
-                registerInstruction: "Registro informal narrativo. Tratamiento tú. Orden cronológico con detalles concretos. Tono humorístico sobre las desgracias. Sin vulgaridades.",
-                icon: Plane,
-                actions: [
-                    { label: "El Destino Elegido", value: "Contar por qué eligieron ese lugar y las expectativas", icon: MapPin },
-                    { label: "El Primer Problema", value: "Describir el primer desastre: vuelo cancelado, equipaje perdido", icon: AlertTriangle },
-                    { label: "El Alojamiento", value: "Contar cómo era el hotel o hostal: ruido, bichos, sin agua caliente", icon: Bed },
-                    { label: "La Comida Peligrosa", value: "Describir si comieron algo que les cayó mal", icon: Frown },
-                    { label: "El Momento de Rendirse", value: "Contar cuándo decidieron que el viaje era un desastre", icon: X },
-                    { label: "Algo Bueno al Final", value: "Rescatar algo positivo del viaje o la lección aprendida", icon: ThumbsUp }
-                ]
-            },
-            {
-                label: "El Jefe que Todos Odiábamos",
-                value: "Podcast donde el invitado cuenta historias de un jefe terrible: las reuniones absurdas, los emails a medianoche, el micromanagement extremo",
-                registerInstruction: "Registro informal con tono de queja humorística. Tratamiento tú. Permitido sarcasmo suave. Sin insultos directos ni datos reales.",
-                icon: Briefcase,
-                actions: [
-                    { label: "Primera Impresión", value: "Contar cómo conoció al jefe y la primera señal de alarma", icon: Eye },
-                    { label: "La Reunión Absurda", value: "Describir una reunión que podía ser un email", icon: Clock },
-                    { label: "El Email de Medianoche", value: "Contar sobre mensajes fuera de hora y expectativas imposibles", icon: AlertCircle },
-                    { label: "El Compañero Favorito", value: "Hablar del favorito del jefe y cómo afectaba al equipo", icon: Star },
-                    { label: "El Día que Renunció", value: "Contar cómo terminó esa situación", icon: DoorOpen },
-                    { label: "Lo que Aprendí", value: "Explicar qué aprendió sobre trabajo y líderes", icon: Lightbulb }
-                ]
-            },
-            {
-                label: "Mi Gato Destruyó Todo",
-                value: "Podcast donde el invitado cuenta las travesuras de su mascota: el sofá arañado, los cables mordidos, el árbol de Navidad derribado",
-                registerInstruction: "Registro informal y tierno. Tratamiento tú. Tono de exasperación cariñosa. Detalles específicos de los desastres. Sin jerga.",
-                icon: Dog,
-                actions: [
-                    { label: "Presentar al Culpable", value: "Describir a la mascota: raza, personalidad, cara de inocente", icon: Dog },
-                    { label: "El Primer Desastre", value: "Contar la primera cosa que destruyó", icon: AlertTriangle },
-                    { label: "La Cosa Más Cara", value: "Describir el objeto más valioso que arruinó", icon: DollarSign },
-                    { label: "El Momento Viral", value: "Contar si grabaron un video gracioso para redes", icon: Camera },
-                    { label: "Intentos de Solución", value: "Explicar qué intentaron para evitar más desastres", icon: Wrench },
-                    { label: "Por Qué Lo Perdonan", value: "Contar por qué sigue siendo el consentido", icon: Heart }
-                ]
-            },
-            {
-                label: "Me Perdí en una Ciudad Extranjera",
-                value: "Podcast donde el invitado cuenta cómo se perdió sin GPS, sin idioma y sin mapa: las calles iguales, los gestos desesperados, la ayuda inesperada",
-                registerInstruction: "Registro informal narrativo. Tratamiento tú. Emociones claras (miedo, alivio, vergüenza). Detalles sensoriales del lugar. Sin lunfardo.",
-                icon: Map,
-                actions: [
-                    { label: "Dónde Estaba", value: "Describir la ciudad y por qué estaba solo/a", icon: MapPin },
-                    { label: "Cómo Se Perdió", value: "Contar el momento exacto: el teléfono sin batería, la calle sin nombre", icon: AlertCircle },
-                    { label: "Intentos Fallidos", value: "Describir los intentos de pedir ayuda: gestos, dibujos, señalar", icon: Hand },
-                    { label: "La Persona que Ayudó", value: "Contar quién le ayudó y cómo se comunicaron", icon: UserPlus },
-                    { label: "Cuánto Tiempo Perdido", value: "Decir cuántas horas estuvo perdido", icon: Clock },
-                    { label: "Lo que Ahora Siempre Lleva", value: "Contar qué aprendió para no repetirlo", icon: Lightbulb }
-                ]
-            },
-            {
-                label: "El Vecino Ruidoso",
-                value: "Podcast donde el invitado cuenta la guerra con un vecino: la música a las 3am, las notas pasivo-agresivas, la llamada a la policía, la reconciliación inesperada",
-                registerInstruction: "Registro informal con humor. Tratamiento tú. Escalada de conflicto con resolución. Permitido sarcasmo suave. Sin insultos.",
-                icon: Home,
-                actions: [
-                    { label: "Los Primeros Ruidos", value: "Describir cuándo empezó el problema y qué tipo de ruido", icon: Music },
-                    { label: "El Primer Reclamo", value: "Contar cómo intentó hablar con el vecino", icon: MessageCircle },
-                    { label: "La Escalada", value: "Describir cómo fue empeorando: notas, llamadas, represalias", icon: TrendingUp },
-                    { label: "El Punto Crítico", value: "Contar el momento más tenso: policía, gritos, portazo", icon: AlertTriangle },
-                    { label: "La Resolución", value: "Explicar cómo se resolvió: acuerdo, mudanza, amistad inesperada", icon: HeartHandshake },
-                    { label: "Consejo para Otros", value: "Dar un consejo para conflictos vecinales", icon: ThumbsUp }
-                ]
-            },
-            {
-                label: "Mi Primera Entrevista de Trabajo",
-                value: "Podcast donde el invitado cuenta su primera entrevista laboral: la corbata mal anudada, la pregunta trampa, el sudor nervioso, la espera eterna",
-                registerInstruction: "Registro informal y empático. Tratamiento tú. Detalles de nerviosismo y errores. Tono de aprendizaje. Sin jerga laboral compleja.",
-                icon: BriefcaseBusiness,
-                actions: [
-                    { label: "La Preparación", value: "Contar cómo se preparó: ropa, investigación, ensayo", icon: ListChecks },
-                    { label: "El Camino", value: "Describir el viaje: llegó tarde, se perdió, sudando", icon: Bus },
-                    { label: "La Sala de Espera", value: "Contar los nervios mientras esperaba", icon: Clock },
-                    { label: "La Pregunta Difícil", value: "Describir una pregunta que lo dejó en blanco", icon: HelpCircle },
-                    { label: "El Error", value: "Contar el error más vergonzoso de la entrevista", icon: AlertCircle },
-                    { label: "El Resultado", value: "Decir si consiguió el trabajo o no y qué aprendió", icon: CheckCircle }
-                ]
-            },
-            {
-                label: "Aprendí a Cocinar por YouTube",
-                value: "Podcast donde el invitado cuenta sus desastres culinarios aprendiendo con videos: la cocina llena de humo, el plato incomible, la alarma de incendios",
-                registerInstruction: "Registro informal y humorístico. Tratamiento tú. Detalles de los desastres. Tono autocrítico pero positivo. Sin jerga.",
-                icon: Utensils,
-                actions: [
-                    { label: "Por Qué Empezó", value: "Contar qué le motivó a aprender a cocinar", icon: Lightbulb },
-                    { label: "El Primer Video", value: "Describir qué receta intentó primero", icon: Film },
-                    { label: "El Primer Desastre", value: "Contar qué salió terriblemente mal", icon: AlertTriangle },
-                    { label: "La Alarma de Incendios", value: "Describir si tuvo que evacuar o si los vecinos llamaron", icon: Siren },
-                    { label: "El Plato que Funcionó", value: "Contar su primera receta exitosa", icon: Star },
-                    { label: "Ahora Qué Cocina", value: "Decir qué nivel tiene ahora", icon: CheckCircle }
-                ]
-            },
-            {
-                label: "La Mudanza Caótica",
-                value: "Podcast donde el invitado cuenta una mudanza desastrosa: la camioneta que no llegó, las cajas perdidas, el sofá atascado en la escalera",
-                registerInstruction: "Registro informal narrativo. Tratamiento tú. Detalles físicos del caos. Humor sobre el estrés. Sin vulgaridades.",
-                icon: Truck,
-                actions: [
-                    { label: "Por Qué Se Mudaba", value: "Contar el motivo de la mudanza", icon: Home },
-                    { label: "El Día D", value: "Describir cómo empezó el día de mudanza", icon: Calendar },
-                    { label: "El Primer Problema", value: "Contar el primer obstáculo: camioneta, ayudantes, lluvia", icon: AlertTriangle },
-                    { label: "El Objeto Atascado", value: "Describir el mueble que no pasaba por la puerta", icon: X },
-                    { label: "Lo que Se Perdió", value: "Contar qué caja nunca apareció", icon: Search },
-                    { label: "La Primera Noche", value: "Describir la primera noche en el piso vacío", icon: Moon }
-                ]
-            },
-            {
-                label: "El Crush del Trabajo",
-                value: "Podcast donde el invitado cuenta una historia de enamoramiento en la oficina: las miradas, los cafés coincidentes, la declaración fallida",
-                registerInstruction: "Registro informal y romántico/humorístico. Tratamiento tú. Detalles emocionales. Tono ligero. Sin contenido explícito.",
-                icon: Heart,
-                actions: [
-                    { label: "Cuándo Lo Notó", value: "Contar el momento en que se dio cuenta del crush", icon: Eye },
-                    { label: "Las Señales", value: "Describir las señales que interpretaba: miradas, sonrisas", icon: Sparkles },
-                    { label: "El Plan", value: "Contar qué estrategia usó para acercarse", icon: Lightbulb },
-                    { label: "El Momento de la Verdad", value: "Describir si se declaró o no y cómo", icon: Heart },
-                    { label: "El Resultado", value: "Contar cómo terminó: relación, rechazo, amistad", icon: CheckCircle },
-                    { label: "Consejo sobre Amor en Trabajo", value: "Dar un consejo basado en su experiencia", icon: ThumbsUp }
-                ]
-            },
-            {
-                label: "El Viaje en Bus Eterno",
-                value: "Podcast donde el invitado cuenta un viaje en bus interminable: el asiento roto, el bebé llorando, la parada de 5 horas, el compañero de asiento extraño",
-                registerInstruction: "Registro informal y quejoso-humorístico. Tratamiento tú. Detalles sensoriales del trayecto. Sin insultos.",
-                icon: Bus,
-                actions: [
-                    { label: "El Destino", value: "Contar adónde iba y cuántas horas debía durar", icon: MapPin },
-                    { label: "El Asiento", value: "Describir el estado del asiento: roto, sucio, sin espacio", icon: Frown },
-                    { label: "El Compañero", value: "Contar quién se sentó al lado y qué hacía", icon: UserPlus },
-                    { label: "La Peor Parada", value: "Describir una parada eterna en la nada", icon: Clock },
-                    { label: "Lo que No Llevó", value: "Contar qué olvidó que hubiera salvado el viaje", icon: AlertCircle },
-                    { label: "La Llegada", value: "Describir el alivio al llegar finalmente", icon: CheckCircle }
+                    { label: "Explicar el Corte", value: "Explicar cuánto quiere cortarse el pelo.", icon: Scissors },
+                    { label: "Pedir un Turno", value: "Preguntar si le pueden atender ahora o pedir turno.", icon: Calendar },
+                    { label: "Preguntar el Precio", value: "Preguntar cuánto cuesta cortar y lavar.", icon: DollarSign },
+                    { label: "Charla Ligera", value: "Conversación breve y amable mientras cortan.", icon: MessageCircle },
+                    { label: "No Muy Corto", value: "Pedir que no le corten demasiado y ajustar.", icon: Hand },
+                    { label: "Peinar para un Evento", value: "Pedir un peinado sencillo para una fiesta.", icon: Sparkles }
                 ]
             }
         ],
         [Level.Intermediate]: [
             {
-                label: "El Día que Perdí Todo el Dinero",
-                value: "Podcast donde un emprendedor cuenta cómo su negocio fracasó: la inversión perdida, la vergüenza familiar, las deudas, y cómo se recuperó",
-                registerInstruction: "Registro semi-formal reflexivo. Tratamiento tú. Tono de superación, no victimista. Detalles de emociones y aprendizajes. Sin jerga financiera compleja.",
-                icon: TrendingUp,
+                label: "Comisaría / Denuncia",
+                value: "Un ciudadano hace un trámite ante un agente en una comisaría",
+                registerInstruction: "Registro formal y preciso. Relato de hechos en pasado. Sin exabruptos; tono contenido.",
+                icon: ShieldAlert,
                 actions: [
-                    { label: "La Gran Idea", value: "Contar cuál era el negocio y por qué parecía buena idea", icon: Lightbulb },
-                    { label: "La Inversión", value: "Describir de dónde sacó el dinero: ahorros, préstamo, familia", icon: DollarSign },
-                    { label: "Las Primeras Señales", value: "Contar cuándo empezó a ir mal y qué ignoró", icon: AlertTriangle },
-                    { label: "El Día del Colapso", value: "Describir el día en que todo se derrumbó", icon: X },
-                    { label: "La Conversación Difícil", value: "Contar cómo le dijo a su familia/pareja", icon: Frown },
-                    { label: "La Reconstrucción", value: "Explicar cómo empezó de nuevo y qué aprendió", icon: Star }
+                    { label: "Denunciar un Robo", value: "Relatar cómo le robaron la cartera y describir lo sucedido.", icon: AlertTriangle },
+                    { label: "Objeto Perdido", value: "Reportar la pérdida de documentos y dar detalles.", icon: Search },
+                    { label: "Queja por Ruido", value: "Denunciar ruidos molestos de un vecino de forma reiterada.", icon: Volume2 },
+                    { label: "Testigo de un Hecho", value: "Declarar como testigo de un pequeño accidente de tránsito.", icon: Eye },
+                    { label: "Reclamar una Multa", value: "Discutir una multa que considera injusta y pedir explicaciones.", icon: FileWarning },
+                    { label: "Renovar un Documento", value: "Preguntar los pasos para renovar un documento oficial.", icon: FileText }
                 ]
             },
             {
-                label: "El Día que Me Despidieron",
-                value: "Podcast donde el invitado cuenta el día que perdió su trabajo: la llamada inesperada, vaciar el escritorio, la despedida de compañeros, reinventarse",
-                registerInstruction: "Registro semi-formal emotivo. Tratamiento tú. Detalles del momento y emociones. Arco de crisis a oportunidad. Sin victimismo.",
+                label: "Soporte Técnico",
+                value: "Llamada o mostrador de soporte técnico resolviendo un problema",
+                registerInstruction: "Registro de servicio, cortés y paciente. Vocabulario técnico accesible. Manejo de frustración sin insultos.",
+                icon: Laptop,
+                actions: [
+                    { label: "Sin Internet", value: "El internet no funciona y el técnico guía paso a paso para revisarlo.", icon: Wifi },
+                    { label: "Olvidó la Contraseña", value: "Recuperar el acceso a una cuenta tras olvidar la contraseña.", icon: Lock },
+                    { label: "Equipo Muy Lento", value: "Describir que el equipo va lento y buscar la causa.", icon: Server },
+                    { label: "Cobro Inesperado", value: "Reclamar un cobro extra que no reconoce en el servicio.", icon: DollarSign },
+                    { label: "Instalar un Programa", value: "Pedir ayuda para instalar y configurar un programa.", icon: Download },
+                    { label: "Dar de Baja", value: "Pedir cancelar el servicio y negociar la retención.", icon: Ban }
+                ]
+            },
+            {
+                label: "Trabajo / Oficina",
+                value: "Dos colegas o un empleado y su jefe conversando en la oficina",
+                registerInstruction: "Registro profesional, semiformal. Diplomacia y justificaciones. Sin chismes ofensivos ni insultos.",
                 icon: Briefcase,
                 actions: [
-                    { label: "El Trabajo Perfecto", value: "Describir por qué amaba ese trabajo", icon: Heart },
-                    { label: "Las Señales Ignoradas", value: "Contar si había señales y no las vio", icon: Eye },
-                    { label: "La Llamada", value: "Describir el momento exacto: el jefe, la sala, las palabras", icon: Phone },
-                    { label: "Vaciar el Escritorio", value: "Contar la humillación de recoger las cosas", icon: ShoppingBag },
-                    { label: "La Despedida", value: "Describir cómo fue irse: silencio, abrazos, evitar miradas", icon: DoorOpen },
-                    { label: "Qué Vino Después", value: "Contar cómo reinventó su carrera", icon: Rocket }
+                    { label: "Justificar un Retraso", value: "Explicar por qué entregó tarde un trabajo y proponer una solución.", icon: Clock },
+                    { label: "Pedir un Aumento", value: "Plantear un aumento o días libres argumentando su desempeño.", icon: TrendingUp },
+                    { label: "Explicar un Error", value: "Reconocer un error propio y ofrecer cómo corregirlo.", icon: AlertCircle },
+                    { label: "Delegar una Tarea", value: "Pedir a un colega que asuma una tarea urgente.", icon: ListChecks },
+                    { label: "Organizar una Reunión", value: "Acordar el día y la agenda de una reunión de equipo.", icon: Calendar },
+                    { label: "Dar Feedback", value: "Dar una devolución honesta pero constructiva a un compañero.", icon: MessageCircle }
                 ]
             },
             {
-                label: "Me Enamoré Durante la Cuarentena",
-                value: "Podcast donde el invitado cuenta una historia de amor en pandemia: conocerse online, videollamadas de horas, el primer encuentro físico después de meses",
-                registerInstruction: "Registro informal y romántico. Tratamiento tú. Detalles de la conexión virtual y el nerviosismo del encuentro. Sin contenido explícito.",
-                icon: Heart,
+                label: "Inmobiliaria / Alquiler",
+                value: "Un interesado y un agente inmobiliario tratando un alquiler",
+                registerInstruction: "Registro comercial formal. Negociación cortés. Vocabulario de vivienda y contratos accesible.",
+                icon: Home,
                 actions: [
-                    { label: "Cómo Se Conocieron", value: "Contar dónde se conocieron: app, redes, amigos en común", icon: Phone },
-                    { label: "La Primera Videollamada", value: "Describir los nervios, qué hablaron, cuánto duró", icon: Laptop },
-                    { label: "Las Señales Virtuales", value: "Contar cómo supieron que era algo especial", icon: Heart },
-                    { label: "El Plan del Encuentro", value: "Describir cómo decidieron verse y los miedos", icon: Calendar },
-                    { label: "El Primer Momento Real", value: "Contar el encuentro físico: nervios, reconocerse, el primer abrazo", icon: Sparkles },
-                    { label: "Cómo Están Ahora", value: "Decir si siguen juntos y qué aprendieron", icon: HeartHandshake }
+                    { label: "Buscar Alquiler", value: "Explicar qué tipo de vivienda busca y su presupuesto.", icon: Search },
+                    { label: "Visitar el Inmueble", value: "Recorrer la vivienda y preguntar por su estado y gastos.", icon: DoorOpen },
+                    { label: "Negociar el Contrato", value: "Discutir condiciones del contrato y la duración.", icon: FileText },
+                    { label: "Reclamar el Depósito", value: "Pedir la devolución del depósito al terminar el alquiler.", icon: Coins },
+                    { label: "Reportar una Avería", value: "Avisar de una avería en la vivienda y pedir arreglo.", icon: Wrench },
+                    { label: "Problemas de Convivencia", value: "Plantear un conflicto con los vecinos y buscar solución.", icon: Users }
                 ]
             },
             {
-                label: "Descubrí que Mi Profesor Era un Fraude",
-                value: "Podcast donde el invitado cuenta cómo descubrió que un profesor admirado era un fraude: plagio, mentiras en el CV, el escándalo",
-                registerInstruction: "Registro semi-formal periodístico. Tratamiento tú. Tono de denuncia pero respetuoso. Hechos y emociones de decepción.",
-                icon: GraduationCap,
+                label: "Taller Mecánico",
+                value: "Un cliente y un mecánico en un taller de coches",
+                registerInstruction: "Registro cercano y práctico. Descripción de problemas y presupuestos. Sin jerga excesiva.",
+                icon: Wrench,
                 actions: [
-                    { label: "El Mentor Admirado", value: "Describir por qué admiraba a esta persona", icon: Star },
-                    { label: "La Primera Sospecha", value: "Contar qué descubrió que no encajaba", icon: Search },
-                    { label: "La Investigación", value: "Describir cómo investigó: Google, preguntar, documentos", icon: FileText },
-                    { label: "La Revelación", value: "Contar el momento de confirmar que era mentira", icon: AlertTriangle },
-                    { label: "La Decisión de Actuar", value: "Describir si denunció o calló, y por qué", icon: Scale },
-                    { label: "Las Consecuencias", value: "Contar qué pasó después: despido, escándalo, silencio", icon: Gavel }
+                    { label: "Describir un Ruido", value: "Explicar un ruido raro del coche que no sabe identificar.", icon: Volume2 },
+                    { label: "Discutir el Presupuesto", value: "El arreglo es caro y el cliente pide alternativas.", icon: DollarSign },
+                    { label: "Apurar el Arreglo", value: "Explicar que necesita el coche cuanto antes.", icon: Clock },
+                    { label: "Revisión General", value: "Pedir una revisión completa antes de un viaje largo.", icon: ListChecks },
+                    { label: "Batería o Rueda", value: "Resolver una batería descargada o una rueda pinchada.", icon: BatteryLow },
+                    { label: "Segunda Opinión", value: "Dudar del diagnóstico y pedir que lo expliquen mejor.", icon: HelpCircle }
                 ]
             },
             {
-                label: "Mi Padre Tenía Otra Familia",
-                value: "Podcast donde el invitado cuenta cómo descubrió que su padre llevaba doble vida: la llamada extraña, la investigación, el confrontamiento",
-                registerInstruction: "Registro semi-formal íntimo. Tratamiento tú. Tono emotivo pero controlado. Respeto por todos los involucrados. Sin morbo.",
-                icon: AlertTriangle,
+                label: "Entrevista de Trabajo",
+                value: "Un candidato y un reclutador en una entrevista laboral",
+                registerInstruction: "Registro formal y cuidado. Argumentación sobre uno mismo. Sin arrogancia ni excesiva informalidad.",
+                icon: BriefcaseBusiness,
                 actions: [
-                    { label: "La Familia Original", value: "Describir cómo era la vida familiar antes de saber", icon: Home },
-                    { label: "La Primera Pista", value: "Contar qué despertó las sospechas", icon: Eye },
-                    { label: "La Investigación Secreta", value: "Describir cómo buscó la verdad", icon: Search },
-                    { label: "El Momento de la Verdad", value: "Contar cómo descubrió la otra familia", icon: Zap },
-                    { label: "La Confrontación", value: "Describir la conversación con el padre", icon: MessageCircle },
-                    { label: "Cómo Está la Familia Ahora", value: "Contar las consecuencias y si hubo reconciliación", icon: Heart }
+                    { label: "Hablar de tus Logros", value: "Contar una experiencia previa que demuestre sus capacidades.", icon: Trophy },
+                    { label: "Tus Puntos Débiles", value: "Responder con tacto a la pregunta por sus defectos.", icon: Scale },
+                    { label: "Negociar el Sueldo", value: "Plantear una expectativa salarial y justificarla.", icon: DollarSign },
+                    { label: "Preguntar por el Puesto", value: "Hacer preguntas sobre el equipo y las tareas del puesto.", icon: HelpCircle },
+                    { label: "Disponibilidad y Horario", value: "Aclarar horarios, modalidad y fecha de incorporación.", icon: Clock },
+                    { label: "El Cierre", value: "Cerrar la entrevista y preguntar los próximos pasos.", icon: Handshake }
                 ]
             },
             {
-                label: "Heredé una Deuda de un Familiar",
-                value: "Podcast donde el invitado cuenta cómo tras la muerte de un familiar descubrió deudas ocultas: el notario, los acreedores, el proceso legal",
-                registerInstruction: "Registro semi-formal informativo. Tratamiento tú. Tono de advertencia educativa. Detalles del proceso sin tecnicismos legales.",
-                icon: FileWarning,
+                label: "Banco / Finanzas",
+                value: "Un cliente y un asesor en una sucursal bancaria",
+                registerInstruction: "Registro formal y preciso. Vocabulario financiero accesible. Cortesía profesional.",
+                icon: Landmark,
                 actions: [
-                    { label: "La Muerte del Familiar", value: "Contar el contexto de la pérdida", icon: Heart },
-                    { label: "La Visita al Notario", value: "Describir el día de la lectura del testamento", icon: FileText },
-                    { label: "El Descubrimiento", value: "Contar el momento de saber de las deudas", icon: AlertTriangle },
-                    { label: "Los Acreedores", value: "Describir las llamadas y cartas que empezaron a llegar", icon: Phone },
-                    { label: "Las Opciones Legales", value: "Explicar qué opciones tenía: aceptar, renunciar", icon: Scale },
-                    { label: "Cómo Lo Resolvió", value: "Contar la decisión final y el aprendizaje", icon: CheckCircle }
+                    { label: "Abrir una Cuenta", value: "Preguntar requisitos y comisiones para abrir una cuenta.", icon: FileText },
+                    { label: "Préstamo Rechazado", value: "Preguntar por qué le negaron un préstamo y qué opciones tiene.", icon: Ban },
+                    { label: "Tarjeta Robada", value: "Reportar una tarjeta robada y bloquearla de urgencia.", icon: CreditCard },
+                    { label: "Error en un Cargo", value: "Reclamar un cargo que no reconoce en la cuenta.", icon: AlertCircle },
+                    { label: "Transferencia al Exterior", value: "Consultar cómo enviar dinero a otro país y su costo.", icon: Send },
+                    { label: "Consultar Comisiones", value: "Preguntar por comisiones ocultas y cómo evitarlas.", icon: Percent }
                 ]
             },
             {
-                label: "Me Diagnosticaron una Enfermedad Crónica",
-                value: "Podcast donde el invitado cuenta el día del diagnóstico: los síntomas ignorados, las pruebas, la noticia, la adaptación a la nueva vida",
-                registerInstruction: "Registro semi-formal empático. Tratamiento tú. Tono de esperanza y adaptación. Sin dramatismo excesivo. Respetar la privacidad médica.",
+                label: "Consulta Médica",
+                value: "Un paciente y su médico en la consulta",
+                registerInstruction: "Registro cortés y de confianza. Descripción de síntomas y dudas. Vocabulario de salud accesible.",
                 icon: Stethoscope,
                 actions: [
-                    { label: "Los Primeros Síntomas", value: "Contar cuándo empezó a sentirse mal", icon: AlertCircle },
-                    { label: "Ignorar las Señales", value: "Describir por qué tardó en ir al médico", icon: Clock },
-                    { label: "Las Pruebas", value: "Contar el proceso de diagnóstico", icon: FlaskConical },
-                    { label: "El Día del Diagnóstico", value: "Describir el momento de recibir la noticia", icon: FileText },
-                    { label: "Contárselo a la Familia", value: "Contar cómo reaccionaron los seres queridos", icon: Heart },
-                    { label: "La Nueva Normalidad", value: "Describir cómo adaptó su vida y qué aprendió", icon: Star }
+                    { label: "Describir un Dolor", value: "Explicar un dolor difícil de ubicar y cuándo aparece.", icon: Thermometer },
+                    { label: "Pedir una Baja", value: "Pedir una baja laboral y explicar su situación.", icon: FileText },
+                    { label: "Miedo al Tratamiento", value: "Expresar temor a un tratamiento y pedir alternativas.", icon: Frown },
+                    { label: "Renovar una Receta", value: "Pedir renovar la receta de un medicamento habitual.", icon: Pill },
+                    { label: "Hábitos y Dieta", value: "Conversar sobre cambios de dieta y hábitos saludables.", icon: Apple },
+                    { label: "Derivar a un Especialista", value: "Pedir una derivación a un especialista y entender por qué.", icon: ArrowRight }
                 ]
             },
             {
-                label: "Rompí con Mi Mejor Amigo de 15 Años",
-                value: "Podcast donde el invitado cuenta el fin de una amistad larga: la traición, el silencio, los intentos de reconciliación, la aceptación",
-                registerInstruction: "Registro semi-formal reflexivo. Tratamiento tú. Tono de duelo y madurez. Evitar culpar excesivamente al otro.",
-                icon: HeartHandshake,
+                label: "Veterinaria",
+                value: "Un dueño de mascota y el veterinario en la clínica",
+                registerInstruction: "Registro cercano y profesional. Preocupación por la mascota. Vocabulario accesible.",
+                icon: Dog,
                 actions: [
-                    { label: "La Historia de la Amistad", value: "Contar cómo se conocieron y los mejores momentos", icon: Star },
-                    { label: "Los Primeros Roces", value: "Describir cuándo empezaron los problemas", icon: AlertCircle },
-                    { label: "El Evento Decisivo", value: "Contar qué pasó que rompió todo", icon: Zap },
-                    { label: "El Silencio", value: "Describir los días sin hablarse", icon: X },
-                    { label: "Los Intentos de Arreglo", value: "Contar si intentaron reconciliarse", icon: MessageCircle },
-                    { label: "La Aceptación", value: "Explicar cómo aceptó que la amistad terminó", icon: Brain }
+                    { label: "No Quiere Comer", value: "Explicar que la mascota no come y desde cuándo.", icon: Utensils },
+                    { label: "Vacunas al Día", value: "Consultar el calendario de vacunas y ponerlas al día.", icon: Calendar },
+                    { label: "Una Urgencia", value: "Llegar con una urgencia y describir qué pasó.", icon: Siren },
+                    { label: "Factura Alta", value: "Sorprenderse por el costo y preguntar por opciones.", icon: DollarSign },
+                    { label: "Cambio de Conducta", value: "Contar un cambio de comportamiento del animal.", icon: AlertCircle },
+                    { label: "Cuidados en Casa", value: "Recibir indicaciones de cuidado y anotarlas.", icon: ListChecks }
                 ]
             },
             {
-                label: "Escapé de una Relación Tóxica",
-                value: "Podcast donde el invitado cuenta cómo salió de una relación dañina: las señales ignoradas, el punto de quiebre, la reconstrucción personal",
-                registerInstruction: "Registro semi-formal de superación. Tratamiento tú. Tono empoderador, no victimista. Sin detalles que identifiquen al otro.",
-                icon: Lock,
+                label: "Cena con Amigos",
+                value: "Dos amigos conversando durante una cena informal",
+                registerInstruction: "Registro coloquial entre iguales. Anécdotas y opiniones. Humor amable, sin ofensas reales.",
+                icon: Utensils,
                 actions: [
-                    { label: "El Inicio Perfecto", value: "Contar cómo empezó la relación de forma ideal", icon: Heart },
-                    { label: "Las Primeras Señales", value: "Describir los primeros comportamientos preocupantes", icon: AlertTriangle },
-                    { label: "La Escalada", value: "Contar cómo fue empeorando", icon: TrendingUp },
-                    { label: "El Punto de Quiebre", value: "Describir el momento que decidió irse", icon: Zap },
-                    { label: "La Salida", value: "Contar cómo logró dejar la relación", icon: DoorOpen },
-                    { label: "La Recuperación", value: "Describir el proceso de sanar y qué aprendió", icon: Star }
+                    { label: "Dividir la Cuenta", value: "Ponerse de acuerdo para dividir la cuenta de forma justa.", icon: Receipt },
+                    { label: "Contar una Anécdota", value: "Uno cuenta algo gracioso que le pasó esta semana.", icon: Smile },
+                    { label: "Dar una Noticia", value: "Anunciar una novedad personal importante y reaccionar.", icon: Sparkles },
+                    { label: "Organizar un Viaje", value: "Planear juntos un viaje: fechas, destino y presupuesto.", icon: Plane },
+                    { label: "Pedir un Consejo", value: "Pedir consejo sobre un problema personal.", icon: HelpCircle },
+                    { label: "Un Pequeño Desacuerdo", value: "Debatir con humor sobre gustos opuestos.", icon: MessageCircle }
                 ]
             },
             {
-                label: "Viví en Otro País Solo a los 18",
-                value: "Podcast donde el invitado cuenta su experiencia de irse solo a estudiar/trabajar al extranjero: el miedo, la soledad, el crecimiento",
-                registerInstruction: "Registro semi-formal narrativo. Tratamiento tú. Arco de vulnerabilidad a independencia. Detalles sensoriales del lugar.",
+                label: "Aeropuerto / Aerolínea",
+                value: "Un pasajero y un agente de la aerolínea en el aeropuerto",
+                registerInstruction: "Registro formal de servicio. Gestión de imprevistos con calma. Vocabulario de viajes.",
                 icon: Plane,
                 actions: [
-                    { label: "La Decisión de Irse", value: "Contar por qué decidió irse y cómo reaccionó la familia", icon: Lightbulb },
-                    { label: "La Despedida", value: "Describir el día de irse: aeropuerto, lágrimas", icon: Heart },
-                    { label: "Los Primeros Días", value: "Contar la desorientación inicial: idioma, comida, costumbres", icon: AlertCircle },
-                    { label: "El Momento Más Solitario", value: "Describir el momento de mayor soledad", icon: Frown },
-                    { label: "El Punto de Inflexión", value: "Contar cuándo empezó a sentirse bien", icon: Star },
-                    { label: "Lo que Aprendió", value: "Explicar cómo le cambió la experiencia", icon: Brain }
+                    { label: "Vuelo Cancelado", value: "El vuelo se canceló y busca reubicación y compensación.", icon: X },
+                    { label: "Maleta Perdida", value: "Reportar que su maleta no llegó y dar los datos.", icon: Package },
+                    { label: "Exceso de Equipaje", value: "Negociar el cobro por exceso de equipaje.", icon: Scale },
+                    { label: "Cambiar el Asiento", value: "Pedir cambiar de asiento por un motivo concreto.", icon: UserPlus },
+                    { label: "Conexión Ajustada", value: "Preocuparse por una conexión con poco tiempo.", icon: Clock },
+                    { label: "Documentación", value: "Resolver una duda con la documentación de viaje.", icon: FileText }
+                ]
+            },
+            {
+                label: "Servicio al Cliente",
+                value: "Un cliente y un agente de atención resolviendo un reclamo",
+                registerInstruction: "Registro de servicio formal. Gestión de queja con firmeza cortés. Sin insultos.",
+                icon: Headphones,
+                actions: [
+                    { label: "Producto Defectuoso", value: "Reclamar un producto que llegó dañado y pedir cambio.", icon: Package },
+                    { label: "Pedir un Reembolso", value: "Solicitar la devolución del dinero y justificarlo.", icon: Coins },
+                    { label: "Entrega que No Llega", value: "Reclamar por un pedido que no ha llegado a tiempo.", icon: Truck },
+                    { label: "Cancelar una Suscripción", value: "Pedir cancelar una suscripción y evitar la retención.", icon: Ban },
+                    { label: "Hablar con un Superior", value: "Pedir escalar el reclamo a un responsable.", icon: ArrowRight },
+                    { label: "Confirmar la Solución", value: "Cerrar el reclamo confirmando plazos y compromisos.", icon: CheckCircle }
                 ]
             }
         ],
         [Level.Advanced]: [
             {
-                label: "Escapé de una Secta Religiosa",
-                value: "Podcast donde el invitado cuenta cómo vivió dentro de una secta: el adoctrinamiento gradual, las señales de alarma, la planificación de la fuga, la vida después",
-                registerInstruction: "Registro formal de testimonio. Tratamiento tú. Tono respetuoso y serio. Evitar sensacionalismo. Detalles del proceso psicológico.",
-                icon: Lock,
+                label: "Redacción de Periódico",
+                value: "Dos periodistas discuten en la redacción bajo presión de cierre",
+                registerInstruction: "Registro profesional intenso. Jerga periodística, ironía y urgencia. Argumentación rápida.",
+                icon: Newspaper,
                 actions: [
-                    { label: "La Llegada a la Secta", value: "Contar cómo llegó y qué le atrajo inicialmente", icon: DoorOpen },
-                    { label: "El Adoctrinamiento", value: "Describir cómo fue cambiando su forma de pensar", icon: Brain },
-                    { label: "Las Señales Ignoradas", value: "Contar qué empezó a notar que estaba mal", icon: Eye },
-                    { label: "El Punto de Quiebre", value: "Describir el momento que decidió irse", icon: Zap },
-                    { label: "La Planificación de la Fuga", value: "Contar cómo planeó salir en secreto", icon: Map },
-                    { label: "La Vida Después", value: "Describir la reconstrucción de su identidad", icon: Star }
+                    { label: "Cambiar la Portada", value: "Debatir de urgencia si cambiar la portada por una noticia de última hora.", icon: AlertOctagon },
+                    { label: "Proteger una Fuente", value: "Discutir si publicar con una fuente anónima y sus riesgos.", icon: Lock },
+                    { label: "Corregir una Errata", value: "Tensa negociación sobre una errata ya impresa y su rectificación.", icon: FileWarning },
+                    { label: "Dudar de una Noticia", value: "Sospechar que una información es falsa y decidir qué hacer.", icon: Eye },
+                    { label: "Editar sin Piedad", value: "Recortar el artículo de un colega y justificar los cortes.", icon: Scissors },
+                    { label: "El Cierre", value: "Resolver a contrarreloj los últimos detalles antes de cerrar.", icon: Clock }
                 ]
             },
             {
-                label: "Fui Testigo de un Crimen Grave",
-                value: "Podcast donde el invitado cuenta cómo presenció un delito: el shock, la decisión de testificar, las amenazas, el juicio",
-                registerInstruction: "Registro formal y sobrio. Tratamiento tú. Tono de reflexión ciudadana. Sin detalles que comprometan identidades. Respeto por víctimas.",
-                icon: ShieldAlert,
+                label: "Startup / Inversores",
+                value: "Fundadores e inversores discuten el rumbo de una startup",
+                registerInstruction: "Registro corporativo con anglicismos moderados. Persuasión y tensión. Optimismo estratégico.",
+                icon: Rocket,
                 actions: [
-                    { label: "El Día Normal", value: "Describir cómo era el día antes de presenciarlo", icon: Sun },
-                    { label: "El Momento del Crimen", value: "Contar qué vio y su reacción inmediata", icon: AlertTriangle },
-                    { label: "La Decisión de Hablar", value: "Describir el dilema de testificar o callar", icon: Scale },
-                    { label: "Las Consecuencias Personales", value: "Contar si hubo amenazas o miedo", icon: Lock },
-                    { label: "El Proceso Judicial", value: "Describir la experiencia de testificar en juicio", icon: Gavel },
-                    { label: "La Reflexión Ética", value: "Explicar qué aprendió sobre justicia y ciudadanía", icon: Brain }
+                    { label: "Pitch a Inversores", value: "Defender el proyecto ante un inversor escéptico.", icon: TrendingUp },
+                    { label: "Negociar Participación", value: "Discutir el reparto accionario y el control de la empresa.", icon: PieChart },
+                    { label: "Crisis Técnica", value: "Gestionar una caída de servidores mientras se lanza el producto.", icon: Server },
+                    { label: "Un Despido Difícil", value: "Comunicar un despido con un discurso corporativo incómodo.", icon: X },
+                    { label: "Cambiar de Estrategia", value: "Convencer al equipo de dar un giro al modelo de negocio.", icon: ArrowRight },
+                    { label: "Agotamiento del Equipo", value: "Abordar el burnout de un fundador clave.", icon: BatteryLow }
                 ]
             },
             {
-                label: "Mi Hijo Tiene una Adicción",
-                value: "Podcast donde un padre/madre cuenta cómo descubrió la adicción de su hijo: las señales, la confrontación, el tratamiento, la esperanza",
-                registerInstruction: "Registro formal y emotivo. Tratamiento tú. Tono de testimonio esperanzador. Sin estigmatizar. Enfoque en la familia y recuperación.",
-                icon: Heart,
+                label: "Juicio / Legal",
+                value: "Una sala de audiencias durante un interrogatorio o alegato",
+                registerInstruction: "Registro jurídico formal. Retórica, objeciones y precisión. Tensión contenida.",
+                icon: Gavel,
                 actions: [
-                    { label: "Las Primeras Señales", value: "Contar cuándo empezó a sospechar algo", icon: Eye },
-                    { label: "La Confrontación", value: "Describir el momento de hablar con el hijo", icon: MessageCircle },
-                    { label: "La Negación", value: "Contar la fase de negación del hijo y/o familia", icon: X },
-                    { label: "La Búsqueda de Ayuda", value: "Describir cómo encontraron tratamiento", icon: Search },
-                    { label: "El Proceso de Recuperación", value: "Contar los altibajos del tratamiento", icon: TrendingUp },
-                    { label: "Dónde Están Ahora", value: "Describir la situación actual y la esperanza", icon: Star }
+                    { label: "Interrogatorio Hostil", value: "Un abogado presiona a un testigo con preguntas incisivas.", icon: AlertTriangle },
+                    { label: "Alegato Final", value: "Defender la inocencia con un alegato persuasivo.", icon: Megaphone },
+                    { label: "Una Objeción", value: "Plantear una objeción técnica y discutirla con el juez.", icon: Ban },
+                    { label: "Negociar un Acuerdo", value: "Negociar un acuerdo para evitar el juicio.", icon: Handshake },
+                    { label: "Una Contradicción", value: "Exponer una mentira a partir de una contradicción del testigo.", icon: Eye },
+                    { label: "Leer la Sentencia", value: "Escuchar y reaccionar a la lectura de la sentencia.", icon: FileText }
                 ]
             },
             {
-                label: "Sobreviví un Desastre Natural",
-                value: "Podcast donde el invitado cuenta su experiencia en un terremoto, inundación o huracán: el momento del impacto, la supervivencia, la pérdida, la reconstrucción",
-                registerInstruction: "Registro formal narrativo. Tratamiento tú. Detalles sensoriales del evento. Tono de supervivencia y comunidad. Sin morbo.",
-                icon: AlertTriangle,
+                label: "Galería de Arte",
+                value: "Una inauguración de arte con conversaciones entre asistentes",
+                registerInstruction: "Registro culto y pretencioso. Ironía fina, esnobismo y matices. Vocabulario artístico.",
+                icon: Palette,
                 actions: [
-                    { label: "Antes del Desastre", value: "Describir el día normal antes del evento", icon: Sun },
-                    { label: "El Momento del Impacto", value: "Contar qué sintió y vio en el momento del desastre", icon: Zap },
-                    { label: "La Supervivencia", value: "Describir cómo sobrevivió y a quién ayudó", icon: ShieldAlert },
-                    { label: "Las Pérdidas", value: "Contar qué perdió: casa, pertenencias, seres queridos", icon: Frown },
-                    { label: "La Ayuda Recibida", value: "Describir quién ayudó y cómo llegó la asistencia", icon: HeartHandshake },
-                    { label: "La Reconstrucción", value: "Contar cómo rehizo su vida después", icon: Star }
+                    { label: "Crítica Pretenciosa", value: "Comentar una obra con jerga rebuscada y algo esnob.", icon: Eye },
+                    { label: "Fingir que se Entiende", value: "Disimular que no entiende una obra abstracta.", icon: Ghost },
+                    { label: "Comprar por Inversión", value: "Negociar la compra de una obra como inversión.", icon: DollarSign },
+                    { label: "Debate Ético", value: "Discutir si una obra polémica debería exhibirse.", icon: Scale },
+                    { label: "Un Accidente", value: "Manejar con tacto que alguien rozó una obra.", icon: AlertCircle },
+                    { label: "Explicar 'el Vacío'", value: "El artista explica una obra minimalista con grandilocuencia.", icon: Sparkles }
                 ]
             },
             {
-                label: "Denuncié a Mi Propia Empresa",
-                value: "Podcast donde el invitado cuenta cómo destapó un fraude interno: el descubrimiento, el dilema moral, la denuncia, las represalias, las consecuencias",
-                registerInstruction: "Registro formal y analítico. Tratamiento tú. Tono de ética profesional. Sin nombres reales. Enfoque en el proceso de decisión.",
-                icon: Search,
+                label: "Terapia Psicológica",
+                value: "Una sesión entre terapeuta y paciente",
+                registerInstruction: "Registro íntimo y contenido. Subtexto, pausas y matices emocionales. Sin dramatismo excesivo.",
+                icon: Brain,
                 actions: [
-                    { label: "El Trabajo Normal", value: "Describir su rol en la empresa antes del descubrimiento", icon: Briefcase },
-                    { label: "El Descubrimiento", value: "Contar qué encontró que estaba mal", icon: Eye },
-                    { label: "El Dilema Interno", value: "Describir la lucha entre lealtad y ética", icon: Scale },
-                    { label: "La Decisión de Denunciar", value: "Contar cómo y a quién denunció", icon: Megaphone },
-                    { label: "Las Represalias", value: "Describir las consecuencias: despido, aislamiento, presiones", icon: AlertCircle },
-                    { label: "El Resultado Final", value: "Contar qué pasó con la empresa y con su carrera", icon: Gavel }
+                    { label: "Una Confesión Difícil", value: "El paciente revela algo que le costaba decir.", icon: Lock },
+                    { label: "Resistencia al Cambio", value: "El paciente se resiste a una interpretación del terapeuta.", icon: Ban },
+                    { label: "Analizar un Sueño", value: "Explorar el significado de un sueño recurrente.", icon: Moon },
+                    { label: "Un Silencio Incómodo", value: "Gestionar un silencio cargado en plena sesión.", icon: Volume2 },
+                    { label: "Poner un Límite", value: "El terapeuta plantea el fin del proceso y sus razones.", icon: ArrowRight },
+                    { label: "Un Avance", value: "El paciente reconoce por fin un patrón propio.", icon: Lightbulb }
                 ]
             },
             {
-                label: "Cuidé a Mi Padre con Alzheimer",
-                value: "Podcast donde el invitado cuenta la experiencia de cuidar a un padre con demencia: el diagnóstico, los cambios, las despedidas en vida, la muerte",
-                registerInstruction: "Registro formal y empático. Tratamiento tú. Tono de amor y duelo. Sin dramatismo excesivo. Enfoque en la dignidad del enfermo.",
-                icon: Heart,
+                label: "Entrevista Política",
+                value: "Un periodista entrevista en directo a una figura política",
+                registerInstruction: "Registro público y estratégico. Evasivas, retórica y tensión. Cortesía tirante.",
+                icon: Mic,
                 actions: [
-                    { label: "Los Primeros Olvidos", value: "Contar cuándo empezaron a notar los cambios", icon: Brain },
-                    { label: "El Diagnóstico", value: "Describir el día que supieron qué era", icon: FileText },
-                    { label: "La Vida Como Cuidador", value: "Contar la rutina diaria de cuidar", icon: Clock },
-                    { label: "Los Momentos de Conexión", value: "Describir un momento de lucidez o ternura", icon: Sparkles },
-                    { label: "Las Despedidas en Vida", value: "Contar cuando dejó de reconocerlo/a", icon: Frown },
-                    { label: "Después de la Muerte", value: "Describir el duelo y lo aprendido sobre la vida", icon: Star }
+                    { label: "Evadir la Respuesta", value: "El político esquiva una pregunta incómoda con rodeos.", icon: Ghost },
+                    { label: "El Ataque Personal", value: "La entrevista deriva en reproches personales controlados.", icon: Angry },
+                    { label: "Discurso de Eslóganes", value: "Responder con frases hechas y desviar el tema.", icon: Megaphone },
+                    { label: "Una Primicia", value: "El periodista busca arrancar una declaración inédita.", icon: Star },
+                    { label: "Interrumpir a Tiempo", value: "Pugna por el turno de palabra y el control del tiempo.", icon: Clock },
+                    { label: "Cifras en Disputa", value: "Discutir datos y cifras que ambos interpretan distinto.", icon: LineChart }
                 ]
             },
             {
-                label: "Fui Víctima de una Estafa Millonaria",
-                value: "Podcast donde el invitado cuenta cómo cayó en un fraude financiero: la promesa, la inversión, el descubrimiento, la ruina, la reconstrucción",
-                registerInstruction: "Registro formal de advertencia. Tratamiento tú. Tono educativo sin victimismo. Detallar las señales de alarma. Sin datos que identifiquen estafadores.",
-                icon: DollarSign,
+                label: "Cata de Vinos / Lujo",
+                value: "Una cata de vinos entre personas entendidas",
+                registerInstruction: "Registro sofisticado. Descripción sensorial rebuscada, esnobismo e ironía. Vocabulario especializado.",
+                icon: Wine,
                 actions: [
-                    { label: "La Oportunidad Perfecta", value: "Contar cómo le presentaron la inversión", icon: Lightbulb },
-                    { label: "Por Qué Confió", value: "Describir qué le convenció de invertir", icon: HeartHandshake },
-                    { label: "Las Primeras Dudas", value: "Contar cuándo empezó a sospechar", icon: Eye },
-                    { label: "El Descubrimiento del Fraude", value: "Describir el momento de saber que era estafa", icon: AlertTriangle },
-                    { label: "Las Pérdidas", value: "Contar cuánto perdió y cómo afectó su vida", icon: X },
-                    { label: "La Reconstrucción", value: "Describir cómo se recuperó financiera y emocionalmente", icon: Star }
+                    { label: "Descripción Sensorial", value: "Describir un vino con adjetivos casi imposibles.", icon: Sparkles },
+                    { label: "Esnobismo Puro", value: "Presumir de conocimientos para impresionar.", icon: Eye },
+                    { label: "El Vino Picado", value: "Detectar con tacto que una botella está en mal estado.", icon: AlertCircle },
+                    { label: "El Maridaje", value: "Debatir el maridaje ideal con cierta pedantería.", icon: Utensils },
+                    { label: "Un Brindis Hipócrita", value: "Brindar con palabras amables y doble sentido.", icon: Wine },
+                    { label: "Precio y Valor", value: "Discutir si un vino carísimo vale realmente su precio.", icon: DollarSign }
                 ]
             },
             {
-                label: "Adopté Siendo Soltera/o a los 40",
-                value: "Podcast donde el invitado cuenta el proceso de adopción monoparental: la decisión, el papeleo, la espera, el encuentro, la nueva familia",
-                registerInstruction: "Registro semi-formal y alegre. Tratamiento tú. Tono de esperanza y realismo. Sin idealizar la maternidad/paternidad. Respetar orígenes del niño/a.",
-                icon: Heart,
+                label: "Universidad / Tutoría",
+                value: "Un profesor y un estudiante en una tutoría universitaria",
+                registerInstruction: "Registro académico. Argumentación rigurosa y matices. Cortesía formal con tensión intelectual.",
+                icon: GraduationCap,
                 actions: [
-                    { label: "La Decisión de Adoptar", value: "Contar por qué decidió ser padre/madre soltero/a", icon: Lightbulb },
-                    { label: "El Proceso Burocrático", value: "Describir el papeleo, los cursos, las entrevistas", icon: FileText },
-                    { label: "La Espera Eterna", value: "Contar los meses o años de espera", icon: Clock },
-                    { label: "La Llamada", value: "Describir el día que le dijeron que había un niño/a", icon: Phone },
-                    { label: "El Primer Encuentro", value: "Contar el momento de conocer a su hijo/a", icon: Sparkles },
-                    { label: "La Nueva Familia", value: "Describir la vida ahora y lo aprendido", icon: Home }
+                    { label: "Revisar un Examen", value: "El estudiante reclama la nota y argumenta su respuesta.", icon: FileText },
+                    { label: "Sospecha de Plagio", value: "El profesor plantea con tacto una sospecha de plagio.", icon: AlertTriangle },
+                    { label: "Debate Filosófico", value: "Discrepar sobre una teoría con argumentos sólidos.", icon: Brain },
+                    { label: "Una Explicación Compleja", value: "Pedir que aclare un concepto difícil paso a paso.", icon: Lightbulb },
+                    { label: "Una Beca en Juego", value: "Negociar una prórroga clave para conservar una beca.", icon: Coins },
+                    { label: "Enfoque de la Tesis", value: "Debatir el rumbo y la viabilidad de un tema de tesis.", icon: BookOpen }
                 ]
             },
             {
-                label: "Escribí un Libro y Lo Rechazaron 50 Veces",
-                value: "Podcast donde el invitado cuenta el proceso de publicar su libro: la escritura, los rechazos, la desesperanza, el sí final, el éxito inesperado",
-                registerInstruction: "Registro semi-formal inspirador. Tratamiento tú. Tono de perseverancia. Detalles del mundo editorial. Sin arrogancia.",
-                icon: BookOpen,
+                label: "Rodaje de Cine",
+                value: "Un set de rodaje con tensión entre director y actor",
+                registerInstruction: "Registro creativo intenso. Ego, ironía y urgencia técnica. Jerga de rodaje moderada.",
+                icon: Film,
                 actions: [
-                    { label: "La Idea del Libro", value: "Contar de dónde salió la idea y cuánto tardó en escribir", icon: Lightbulb },
-                    { label: "Los Primeros Rechazos", value: "Describir cómo fueron los primeros 'no' y cómo los sintió", icon: ThumbsDown },
-                    { label: "El Punto de Rendirse", value: "Contar el momento de mayor desesperanza", icon: Frown },
-                    { label: "Lo Que Lo Mantuvo Adelante", value: "Describir qué o quién le dio fuerzas", icon: Heart },
-                    { label: "El Sí", value: "Contar el día que alguien dijo que sí", icon: Star },
-                    { label: "Después del Éxito", value: "Describir qué pasó cuando el libro salió y si tuvo éxito", icon: Rocket }
+                    { label: "Actor Caprichoso", value: "Un actor exige cambios de última hora en la escena.", icon: Star },
+                    { label: "Director Enfadado", value: "El director pierde la paciencia tras varias tomas fallidas.", icon: Angry },
+                    { label: "Un Fallo de Continuidad", value: "Detectar un error de raccord y decidir cómo resolverlo.", icon: Eye },
+                    { label: "Una Escena Difícil", value: "Preparar una escena emocional que no sale.", icon: Drama },
+                    { label: "Problemas de Presupuesto", value: "Recortar una secuencia costosa y convencer al equipo.", icon: DollarSign },
+                    { label: "El Clima No Ayuda", value: "Improvisar por un cambio de clima que arruina el plan.", icon: Cloud }
                 ]
             },
             {
-                label: "Cambié de Identidad de Género",
-                value: "Podcast donde el invitado cuenta su transición: el descubrimiento interior, contarlo a la familia, el proceso médico/social, la nueva vida",
-                registerInstruction: "Registro formal y respetuoso. Tratamiento tú. Tono de autenticidad y empoderamiento. Sin morbo ni detalles médicos innecesarios. Usar lenguaje inclusivo.",
-                icon: Star,
+                label: "Comunidad de Vecinos",
+                value: "Una reunión tensa entre vecinos de un edificio",
+                registerInstruction: "Registro coloquial pero acalorado. Reproches, negociación y sarcasmo. Sin insultos graves.",
+                icon: Building,
                 actions: [
-                    { label: "El Descubrimiento Interior", value: "Contar cuándo supo que algo no encajaba", icon: Brain },
-                    { label: "Contárselo a la Familia", value: "Describir la conversación con los seres queridos", icon: Home },
-                    { label: "Las Reacciones", value: "Contar cómo reaccionó cada persona importante", icon: Heart },
-                    { label: "El Proceso de Transición", value: "Describir los pasos que dio: terapia, cambios, trámites", icon: ArrowRight },
-                    { label: "Los Desafíos Sociales", value: "Contar dificultades en trabajo, amigos, espacios públicos", icon: AlertTriangle },
-                    { label: "La Vida Auténtica", value: "Describir cómo es vivir siendo quien realmente es", icon: Sparkles }
+                    { label: "Un Gasto Extra", value: "Debatir una derrama para una reparación costosa.", icon: Coins },
+                    { label: "Ruidos Nocturnos", value: "Encarar a un vecino por ruidos molestos de madrugada.", icon: Volume2 },
+                    { label: "El Presidente Pesado", value: "Cuestionar decisiones autoritarias del presidente.", icon: Gavel },
+                    { label: "Obras sin Permiso", value: "Denunciar obras irregulares de un vecino.", icon: Hammer },
+                    { label: "Vecinos Morosos", value: "Discutir qué hacer con quienes no pagan la cuota.", icon: Ban },
+                    { label: "El Uso del Portal", value: "Discutir el uso de espacios comunes y las llaves.", icon: DoorOpen }
+                ]
+            },
+            {
+                label: "Negociación / Diplomacia",
+                value: "Dos representantes negocian un acuerdo delicado",
+                registerInstruction: "Registro diplomático formal. Protocolo, matices y dobles sentidos. Tensión contenida.",
+                icon: Globe,
+                actions: [
+                    { label: "Un Malentendido", value: "Una traducción ambigua amenaza con romper la negociación.", icon: MessageCircle },
+                    { label: "El Ultimátum", value: "Una parte plantea una condición innegociable.", icon: AlertOctagon },
+                    { label: "Romper el Protocolo", value: "Un gesto fuera de protocolo genera tensión.", icon: Flag },
+                    { label: "Buscar un Punto Medio", value: "Explorar concesiones mutuas para un acuerdo.", icon: Handshake },
+                    { label: "La Firma", value: "Ultimar los términos justo antes de firmar.", icon: FileText },
+                    { label: "Ganar Tiempo", value: "Una parte dilata la decisión con evasivas corteses.", icon: Clock }
+                ]
+            },
+            {
+                label: "Backstage / Música",
+                value: "Entre bambalinas de un concierto, minutos antes de salir",
+                registerInstruction: "Registro informal de gremio artístico. Nervios, jerga y urgencia. Humor y tensión.",
+                icon: Guitar,
+                actions: [
+                    { label: "Exigencias del Camerino", value: "Discutir las condiciones del camerino con producción.", icon: ListChecks },
+                    { label: "Fallo de Sonido", value: "Resolver un problema técnico de sonido antes de salir.", icon: Volume2 },
+                    { label: "Nervios Antes de Salir", value: "Calmar el pánico escénico de un compañero.", icon: Frown },
+                    { label: "Cambiar el Repertorio", value: "Decidir a último momento un cambio en la lista de temas.", icon: Music },
+                    { label: "Una Entrevista Exprés", value: "Dar una entrevista rápida y esquivar preguntas incómodas.", icon: Mic },
+                    { label: "Alguien se Coló", value: "Manejar con firmeza a alguien que entró sin permiso.", icon: DoorOpen }
                 ]
             }
         ]
@@ -1097,916 +614,1525 @@ export const SCENARIO_DATABASE: Record<TextType, Record<Level, ScenarioContext[]
     [TextType.RadioNews]: {
         [Level.Intro]: [
             {
-                label: "Boletín del Tiempo",
-                value: "Radio local con reporte costero: viento, mareas y barrios afectados",
-                registerInstruction: "Registro: formal noticiero e impersonal, en tercera persona. Sin primera persona. Lunfardo: no. Dicción clara y ritmo informativo.",
+                label: "El Tiempo",
+                value: "Boletín meteorológico breve leído por un locutor",
+                registerInstruction: "Registro informativo claro y neutro. Datos concretos (grados, horas, porcentajes). Ritmo natural, sin simplificar.",
                 icon: Sun,
                 actions: [
-                    { label: "Temperatura", value: "Informar temperatura actual por barrios", icon: Thermometer },
-                    { label: "Pronóstico Mañana", value: "Indicar el clima de mañana con rangos", icon: Sun },
-                    { label: "Aviso de Lluvia", value: "Avisar lluvia y ráfagas previstas", icon: Umbrella },
-                    { label: "Consejo Ropa", value: "Recomendar abrigo, piloto o paraguas", icon: Shirt },
-                    { label: "Hora del Reporte", value: "Anunciar la hora exacta del boletín", icon: Clock }
+                    { label: "La Temperatura", value: "Dar la temperatura máxima y mínima del día en grados.", icon: Thermometer },
+                    { label: "Aviso de Lluvia", value: "Anunciar la probabilidad de lluvia y a qué hora.", icon: Droplet },
+                    { label: "El Pronóstico", value: "Adelantar la temperatura y la hora del cambio de tiempo para mañana.", icon: Cloud },
+                    { label: "Hora del Reporte", value: "Indicar la hora exacta del boletín meteorológico.", icon: Clock }
                 ]
             },
             {
-                label: "Tráfico Local",
-                value: "Boletín de tráfico en hora pico con túnel, circunvalación y obras",
-                registerInstruction: "Registro: formal informativo y objetivo. Lunfardo: no. Sin opiniones; datos precisos de vías y tiempos.",
+                label: "Tráfico",
+                value: "Reporte de tráfico urbano leído en la radio",
+                registerInstruction: "Registro informativo funcional. Calles, tiempos y números claros. Ritmo ágil.",
                 icon: Car,
                 actions: [
-                    { label: "Atasco", value: "Reportar un atasco en un acceso principal", icon: AlertTriangle },
-                    { label: "Ruta Alternativa", value: "Dar una alternativa por avenidas secundarias", icon: Map },
-                    { label: "Calle Cerrada", value: "Anunciar cierre temporal por obras", icon: AlertOctagon },
-                    { label: "Tiempo Estimado", value: "Informar minutos estimados de demora", icon: Clock },
-                    { label: "Consejo Transporte", value: "Sugerir usar bus o metro", icon: Bus }
-                ]
-            },
-            {
-                label: "Noticias de Escuela",
-                value: "Boletín institucional de un instituto público con comunicados de dirección",
-                registerInstruction: "Registro: formal institucional y directo. Lunfardo: no. Tono claro, sin bromas ni familiaridad.",
-                icon: School,
-                actions: [
-                    { label: "Actividad", value: "Anunciar una actividad escolar", icon: Flag },
-                    { label: "Examen", value: "Recordar fecha de examen", icon: FileText },
-                    { label: "Evento Deportivo", value: "Anunciar partido del colegio", icon: Dumbbell },
-                    { label: "Cambio Horario", value: "Informar cambio de horario", icon: Clock },
-                    { label: "Mensaje Dirección", value: "Leer un mensaje oficial de dirección", icon: MessageCircle }
+                    { label: "Un Atasco", value: "Informar de un atasco en una avenida y los minutos de demora.", icon: AlertTriangle },
+                    { label: "Calle Cerrada", value: "Anunciar el corte de una calle y desde qué hora.", icon: Ban },
+                    { label: "Ruta Alternativa", value: "Recomendar una ruta alternativa y cuántos minutos se ahorran.", icon: Navigation },
+                    { label: "Tiempo Estimado", value: "Decir cuántos minutos extra hay que sumar por las demoras.", icon: Clock }
                 ]
             },
             {
                 label: "Servicios de la Ciudad",
-                value: "Radio municipal con avisos de recolección y cortes programados por barrios",
-                registerInstruction: "Registro: formal municipal e impersonal. Lunfardo: no. Mensajes breves y precisos.",
-                icon: Building,
+                value: "Avisos de servicios municipales en la radio local",
+                registerInstruction: "Registro institucional claro. Horarios, teléfonos y fechas concretos. Tono neutro.",
+                icon: Recycle,
                 actions: [
-                    { label: "Basura", value: "Avisar cambio de horario de basura", icon: Trash2 },
-                    { label: "Corte de Agua/Luz", value: "Anunciar corte temporal en zonas específicas", icon: AlertCircle },
-                    { label: "Horario Biblioteca", value: "Informar horario especial de la biblioteca", icon: BookOpen },
-                    { label: "Campaña Limpieza", value: "Anunciar campaña de limpieza barrial", icon: Sparkles },
-                    { label: "Teléfono de Información", value: "Dar un número de contacto", icon: Phone }
+                    { label: "Corte de Agua", value: "Anunciar un corte de agua con horario de inicio y fin.", icon: Droplet },
+                    { label: "Recolección de Basura", value: "Informar los días y la hora de recolección.", icon: Trash2 },
+                    { label: "Teléfono de Información", value: "Dictar un número de teléfono de atención al ciudadano.", icon: Phone },
+                    { label: "Horario de la Biblioteca", value: "Dar el nuevo horario de apertura de la biblioteca.", icon: Clock }
                 ]
             },
             {
                 label: "Agenda Cultural",
-                value: "Agenda cultural de fin de semana con teatro independiente y feria del libro",
-                registerInstruction: "Registro: formal informativo. Lunfardo: no. Datos de fechas, horarios y sedes sin adornos.",
+                value: "Cartelera cultural leída en la radio",
+                registerInstruction: "Registro ameno e informativo. Horas, lugares y precios concretos. Ritmo natural.",
                 icon: Ticket,
                 actions: [
-                    { label: "Concierto", value: "Anunciar un concierto local", icon: Music },
-                    { label: "Museo Gratis", value: "Informar día gratuito en museo", icon: Palette },
-                    { label: "Feria", value: "Invitar a una feria en la plaza", icon: MapPin },
-                    { label: "Hora y Lugar", value: "Dar hora y lugar del evento", icon: Clock },
-                    { label: "Invitación", value: "Animar a asistir", icon: ThumbsUp }
+                    { label: "Un Concierto", value: "Anunciar un concierto con hora y lugar exactos.", icon: Music },
+                    { label: "Museo Gratis", value: "Informar el día y horario de entrada gratuita al museo.", icon: Landmark },
+                    { label: "Precio de la Entrada", value: "Dar el precio de las entradas de un evento.", icon: DollarSign },
+                    { label: "Dónde y Cuándo", value: "Repetir la dirección y la hora del evento.", icon: MapPin }
+                ]
+            },
+            {
+                label: "Transporte Público",
+                value: "Avisos sobre el transporte público en la radio",
+                registerInstruction: "Registro informativo funcional. Líneas, horarios y tarifas claros. Tono neutro.",
+                icon: Bus,
+                actions: [
+                    { label: "Cambio de Recorrido", value: "Anunciar el desvío de una línea de autobús indicando su número y las paradas afectadas.", icon: Navigation },
+                    { label: "Nuevo Horario", value: "Informar el nuevo horario del primer y último servicio.", icon: Clock },
+                    { label: "Precio del Billete", value: "Anunciar la nueva tarifa del billete.", icon: DollarSign },
+                    { label: "Número de Línea", value: "Indicar qué número de línea llega a la estación.", icon: Hash }
+                ]
+            },
+            {
+                label: "Avisos de la Escuela",
+                value: "Comunicados de una escuela leídos en la radio",
+                registerInstruction: "Registro institucional cercano. Fechas y horas concretas. Claridad ante todo.",
+                icon: School,
+                actions: [
+                    { label: "Fecha de un Examen", value: "Anunciar la fecha exacta de un examen importante.", icon: Calendar },
+                    { label: "Evento Deportivo", value: "Informar la hora y el lugar de un partido escolar.", icon: Trophy },
+                    { label: "Cambio de Horario", value: "Avisar de un cambio en el horario de entrada.", icon: Clock },
+                    { label: "Reunión de Padres", value: "Dar el día y la hora de la reunión de familias.", icon: Users }
                 ]
             }
         ],
         [Level.Beginner]: [
             {
-                label: "Noticias Locales",
-                value: "Noticia de barrio sobre cierre de puente peatonal y obras en la ribera",
-                registerInstruction: "Registro: formal noticioso y objetivo. Lunfardo: no. Sin opinión personal.",
-                icon: Newspaper,
+                label: "Noticias del Barrio",
+                value: "Boletín de noticias locales de un barrio",
+                registerInstruction: "Registro informativo sencillo. Frases claras, vocabulario frecuente. Ritmo natural.",
+                icon: Home,
                 actions: [
-                    { label: "Incidente Menor", value: "Contar un incidente menor en el barrio", icon: AlertTriangle },
-                    { label: "Declaración Breve", value: "Leer una declaración corta", icon: MessageCircle },
-                    { label: "Datos Básicos", value: "Dar datos básicos (lugar, hora)", icon: Clock },
-                    { label: "Estado Actual", value: "Decir cómo está la situación ahora", icon: CheckCircle },
-                    { label: "Recomendación", value: "Dar una recomendación al público", icon: ThumbsUp }
+                    { label: "Una Fiesta del Barrio", value: "Anunciar las fiestas del barrio y sus actividades.", icon: Gift },
+                    { label: "Una Obra en la Calle", value: "Informar de obras que afectan a una calle.", icon: Hammer },
+                    { label: "Un Nuevo Comercio", value: "Contar que abrió un nuevo comercio en la zona.", icon: ShoppingBag },
+                    { label: "Campaña de Limpieza", value: "Invitar a una jornada de limpieza vecinal.", icon: Recycle },
+                    { label: "Un Reconocimiento", value: "Homenajear a un vecino por su labor solidaria.", icon: Star },
+                    { label: "Un Aviso Útil", value: "Recordar un trámite municipal a los vecinos.", icon: Bell }
                 ]
             },
             {
-                label: "Deportes de Barrio",
-                value: "Boletín deportivo de liga barrial y torneo escolar de fin de semana",
-                registerInstruction: "Registro: formal deportivo con entusiasmo moderado. Lunfardo: no. Evitar gritos o jergas.",
-                icon: Dumbbell,
+                label: "Deportes Locales",
+                value: "Resumen deportivo de equipos y eventos locales",
+                registerInstruction: "Registro ameno y claro. Resultados y datos sencillos. Entusiasmo moderado.",
+                icon: Trophy,
                 actions: [
-                    { label: "Resultado", value: "Dar el resultado de un partido", icon: Star },
-                    { label: "Jugador Destacado", value: "Mencionar a un jugador destacado", icon: ThumbsUp },
-                    { label: "Próximo Encuentro", value: "Anunciar el próximo partido", icon: Calendar },
-                    { label: "Comentario Entrenador", value: "Leer un comentario del entrenador", icon: MessageCircle },
-                    { label: "Invitar a Hinchada", value: "Invitar a apoyar al equipo", icon: Flag }
+                    { label: "El Partido del Fin de Semana", value: "Contar el resultado del partido local.", icon: Trophy },
+                    { label: "Un Torneo Escolar", value: "Anunciar un torneo entre escuelas del barrio.", icon: School },
+                    { label: "Una Carrera Popular", value: "Invitar a una carrera solidaria y dar detalles.", icon: TrendingUp },
+                    { label: "Un Nuevo Fichaje", value: "Presentar a un jugador que llega al equipo.", icon: UserPlus },
+                    { label: "Clases de Deporte", value: "Anunciar clases gratuitas de deporte para jóvenes.", icon: Dumbbell },
+                    { label: "El Calendario", value: "Recordar las fechas de los próximos partidos.", icon: Calendar }
                 ]
             },
             {
-                label: "Economía Doméstica",
-                value: "Boletín sobre precios de la canasta básica en mercados barriales",
-                registerInstruction: "Registro: formal económico. Lunfardo: no. Datos y consejos claros, sin opinología.",
-                icon: DollarSign,
+                label: "Clima y Estaciones",
+                value: "Boletín ampliado del tiempo y el cambio de estación",
+                registerInstruction: "Registro informativo claro. Descripciones sencillas del clima. Consejos prácticos.",
+                icon: Cloud,
                 actions: [
-                    { label: "Subida de Precio", value: "Informar subida de un producto", icon: TrendingUp },
-                    { label: "Consejo de Ahorro", value: "Dar un consejo simple para ahorrar", icon: PiggyBank },
-                    { label: "Comparar Precios", value: "Comparar precios entre mercados", icon: Scale },
-                    { label: "Mercado del Día", value: "Describir productos del día", icon: Apple },
-                    { label: "Entrevista a Comerciante", value: "Leer una frase de un comerciante", icon: MessageCircle }
+                    { label: "Llega el Frío", value: "Anunciar una bajada de temperaturas y dar consejos.", icon: Thermometer },
+                    { label: "Una Ola de Calor", value: "Alertar de días muy calurosos y recomendar cuidados.", icon: Sun },
+                    { label: "Viento Fuerte", value: "Avisar de rachas de viento en la región.", icon: Wind },
+                    { label: "Lluvias de la Semana", value: "Adelantar los días de lluvia previstos.", icon: Droplet },
+                    { label: "Consejo de Ropa", value: "Recomendar cómo abrigarse según el pronóstico.", icon: Shirt },
+                    { label: "El Fin de Semana", value: "Resumir el tiempo esperado para el fin de semana.", icon: Calendar }
                 ]
             },
             {
-                label: "Salud Pública",
-                value: "Avisos de salud con campaña antigripal y horarios de centros",
-                registerInstruction: "Registro: formal sanitario y calmado. Lunfardo: no. Mensajes objetivos.",
+                label: "Salud y Bienestar",
+                value: "Sección de salud con consejos sencillos",
+                registerInstruction: "Registro divulgativo y cercano. Consejos claros, sin tecnicismos. Tono positivo.",
                 icon: Stethoscope,
                 actions: [
-                    { label: "Campaña Vacunación", value: "Anunciar campaña de vacunación", icon: ShieldAlert },
-                    { label: "Prevención", value: "Dar recomendaciones de prevención", icon: Hand },
-                    { label: "Síntomas Básicos", value: "Mencionar síntomas básicos", icon: AlertCircle },
-                    { label: "Lugar de Atención", value: "Indicar centros de atención", icon: MapPin },
-                    { label: "Llamado a Calma", value: "Transmitir un mensaje de calma", icon: Heart }
+                    { label: "Beber Más Agua", value: "Recomendar hidratarse bien durante el día.", icon: Droplet },
+                    { label: "Campaña de Vacunación", value: "Informar dónde y cuándo vacunarse.", icon: Pill },
+                    { label: "Dormir Mejor", value: "Dar consejos sencillos para descansar bien.", icon: Moon },
+                    { label: "Moverse Cada Día", value: "Animar a caminar y hacer ejercicio suave.", icon: Dumbbell },
+                    { label: "Comer Fruta", value: "Recomendar incluir más fruta y verdura.", icon: Apple },
+                    { label: "Cuidar la Vista", value: "Dar un consejo para descansar la vista de las pantallas.", icon: Eye }
                 ]
             },
             {
-                label: "Transporte Regional",
-                value: "Noticias sobre buses interurbanos y tren regional por obras",
-                registerInstruction: "Registro: formal informativo. Lunfardo: no. Horarios y rutas precisas.",
-                icon: Train,
+                label: "Cultura y Ocio",
+                value: "Agenda de cultura y tiempo libre para la semana",
+                registerInstruction: "Registro ameno e informativo. Vocabulario cotidiano de ocio. Ritmo natural.",
+                icon: Music,
                 actions: [
-                    { label: "Nuevo Horario", value: "Informar nuevo horario de buses", icon: Clock },
-                    { label: "Huelga Parcial", value: "Avisar una huelga parcial", icon: AlertTriangle },
-                    { label: "Venta de Billetes", value: "Explicar dónde comprar billetes", icon: Ticket },
-                    { label: "Retrasos", value: "Reportar retrasos en rutas", icon: Watch },
-                    { label: "Alternativas", value: "Sugerir rutas alternativas", icon: Map }
+                    { label: "Estreno de Cine", value: "Anunciar el estreno de una película popular.", icon: Film },
+                    { label: "Feria del Libro", value: "Invitar a una feria del libro y sus actividades.", icon: BookOpen },
+                    { label: "Concierto al Aire Libre", value: "Contar un concierto gratuito en el parque.", icon: Guitar },
+                    { label: "Taller para Niños", value: "Anunciar un taller creativo para los más pequeños.", icon: Baby },
+                    { label: "Exposición Nueva", value: "Presentar una exposición que abre esta semana.", icon: Palette },
+                    { label: "Recomendación Musical", value: "Recomendar un disco o artista de la semana.", icon: Headphones }
                 ]
             },
             {
-                label: "Clima Extremo",
-                value: "Alerta por ola de calor o tormenta con protocolo municipal",
-                registerInstruction: "Registro: formal de alerta y serio. Lunfardo: no. Mensajes directos y claros.",
-                icon: AlertOctagon,
+                label: "Transporte y Movilidad",
+                value: "Novedades del transporte y la movilidad de la ciudad",
+                registerInstruction: "Registro informativo funcional. Datos claros de líneas y horarios. Tono neutro.",
+                icon: Bus,
                 actions: [
-                    { label: "Alerta", value: "Declarar alerta por calor o frío", icon: AlertOctagon },
-                    { label: "Medidas Básicas", value: "Explicar medidas de protección", icon: ShieldAlert },
-                    { label: "Impacto Escolar", value: "Informar cambios en escuelas", icon: School },
-                    { label: "Hidratación", value: "Recomendar beber agua", icon: Droplet },
-                    { label: "Actualización", value: "Anunciar actualización en horas", icon: Clock }
+                    { label: "Nueva Línea de Bus", value: "Anunciar una línea de autobús que empieza a funcionar.", icon: Bus },
+                    { label: "Carril para Bicis", value: "Contar la apertura de un nuevo carril bici.", icon: Navigation },
+                    { label: "Cambios en el Metro", value: "Informar de obras y cambios en el metro.", icon: Train },
+                    { label: "Alquiler de Bicis", value: "Explicar un nuevo servicio de bicis compartidas.", icon: Recycle },
+                    { label: "Consejo para el Tráfico", value: "Recomendar horarios para evitar los atascos.", icon: Clock },
+                    { label: "Aparcamiento", value: "Informar de cambios en las zonas de aparcamiento.", icon: Car }
+                ]
+            },
+            {
+                label: "Consumo y Ahorro",
+                value: "Consejos prácticos de consumo y ahorro para el hogar",
+                registerInstruction: "Registro cercano y útil. Vocabulario cotidiano de dinero. Tono práctico.",
+                icon: PiggyBank,
+                actions: [
+                    { label: "Ahorrar en Casa", value: "Dar consejos sencillos para gastar menos en el hogar.", icon: Home },
+                    { label: "Ofertas de la Semana", value: "Informar de ofertas en productos básicos.", icon: Percent },
+                    { label: "Cuidado con las Estafas", value: "Alertar de una estafa común y cómo evitarla.", icon: ShieldAlert },
+                    { label: "Comparar Precios", value: "Recomendar comparar antes de comprar algo caro.", icon: Scale },
+                    { label: "Ahorrar Energía", value: "Dar consejos para reducir la factura de la luz.", icon: Zap },
+                    { label: "Reciclar y Reusar", value: "Animar a reutilizar para ahorrar y cuidar el planeta.", icon: Recycle }
                 ]
             },
             {
                 label: "Ferias y Mercados",
-                value: "Boletín sobre ferias barriales con controles sanitarios",
-                registerInstruction: "Registro: formal informativo. Lunfardo: no. Datos precisos y útiles.",
+                value: "Anuncios de ferias, mercados y eventos comerciales",
+                registerInstruction: "Registro ameno e informativo. Horarios y lugares claros. Entusiasmo moderado.",
                 icon: ShoppingBag,
                 actions: [
-                    { label: "Ubicación", value: "Informar ubicación de la feria", icon: MapPin },
-                    { label: "Horario", value: "Dar horario de apertura", icon: Clock },
-                    { label: "Precios Referencia", value: "Informar precios orientativos", icon: DollarSign },
-                    { label: "Normas Sanitarias", value: "Recordar normas sanitarias", icon: ShieldAlert },
-                    { label: "Convocatoria", value: "Invitar a asistir", icon: ThumbsUp }
+                    { label: "Mercado de Productores", value: "Invitar a un mercado de productos locales.", icon: Apple },
+                    { label: "Feria de Artesanía", value: "Anunciar una feria de artesanos y sus puestos.", icon: Gift },
+                    { label: "Mercadillo de Segunda Mano", value: "Contar un mercadillo de ropa y objetos usados.", icon: Shirt },
+                    { label: "Feria Gastronómica", value: "Presentar una feria de comida típica.", icon: Utensils },
+                    { label: "Horario y Lugar", value: "Repetir los horarios y la ubicación de la feria.", icon: MapPin },
+                    { label: "Cómo Participar", value: "Explicar cómo poner un puesto en la feria.", icon: UserPlus }
                 ]
             },
             {
-                label: "Seguridad Vial",
-                value: "Boletín de seguridad vial con controles y accidentes menores",
-                registerInstruction: "Registro: formal informativo. Lunfardo: no. Mensajes claros y preventivos.",
-                icon: ShieldAlert,
+                label: "Medio Ambiente Local",
+                value: "Noticias ambientales de la comunidad",
+                registerInstruction: "Registro divulgativo y positivo. Vocabulario ambiental sencillo. Llamado a la acción suave.",
+                icon: Leaf,
                 actions: [
-                    { label: "Control", value: "Informar un control de tránsito", icon: AlertTriangle },
-                    { label: "Accidente Menor", value: "Reportar un accidente sin heridos", icon: Car },
-                    { label: "Desvío", value: "Anunciar desvío por operativo", icon: Map },
-                    { label: "Consejo Peatones", value: "Dar consejo a peatones", icon: Hand },
-                    { label: "Emergencias", value: "Recordar número de emergencias", icon: Phone }
+                    { label: "Plantar Árboles", value: "Invitar a una jornada de plantación de árboles.", icon: TreePine },
+                    { label: "Limpieza del Río", value: "Anunciar una limpieza de la ribera del río.", icon: Waves },
+                    { label: "Reciclar Bien", value: "Explicar cómo separar la basura correctamente.", icon: Recycle },
+                    { label: "Menos Plástico", value: "Animar a reducir el uso de plástico de un solo uso.", icon: Ban },
+                    { label: "Un Parque Nuevo", value: "Contar la apertura de un nuevo parque verde.", icon: Sprout },
+                    { label: "Cuidar los Animales", value: "Recordar cómo proteger a la fauna urbana.", icon: Dog }
                 ]
             },
             {
-                label: "Consumo y Energía",
-                value: "Boletín sobre tarifas y consumo eléctrico residencial",
-                registerInstruction: "Registro: formal económico. Lunfardo: no. Información precisa y útil.",
-                icon: Lightbulb,
-                actions: [
-                    { label: "Tarifa", value: "Informar ajuste tarifario", icon: FileText },
-                    { label: "Ahorro", value: "Dar un consejo de ahorro", icon: PiggyBank },
-                    { label: "Pico de Demanda", value: "Avisar horarios de mayor demanda", icon: Clock },
-                    { label: "Corte Programado", value: "Anunciar corte programado", icon: AlertCircle },
-                    { label: "Recomendación", value: "Recomendar uso responsable", icon: ThumbsUp }
-                ]
-            },
-            {
-                label: "Turismo Local",
-                value: "Boletín turístico con datos de ocupación y actividades",
-                registerInstruction: "Registro: formal informativo. Lunfardo: no. Tono objetivo.",
+                label: "Turismo de la Región",
+                value: "Recomendaciones turísticas de la zona",
+                registerInstruction: "Registro ameno y descriptivo. Vocabulario de viaje sencillo. Tono invitador.",
                 icon: MapPin,
                 actions: [
-                    { label: "Ocupación", value: "Informar nivel de ocupación hotelera", icon: Bed },
-                    { label: "Actividad", value: "Anunciar una actividad turística", icon: Ticket },
-                    { label: "Dato de Afluencia", value: "Dar un dato de visitantes", icon: PieChart },
-                    { label: "Recomendación", value: "Sugerir un paseo", icon: ThumbsUp },
-                    { label: "Consejo Tránsito", value: "Advertir sobre accesos", icon: Car }
+                    { label: "Un Pueblo con Encanto", value: "Recomendar visitar un pueblo cercano.", icon: Home },
+                    { label: "Una Ruta de Senderismo", value: "Describir una ruta fácil para caminar.", icon: TreePine },
+                    { label: "Playa o Montaña", value: "Comparar un plan de playa y uno de montaña.", icon: Sun },
+                    { label: "Comida Típica", value: "Recomendar dónde probar la comida local.", icon: Utensils },
+                    { label: "Cómo Llegar", value: "Explicar cómo llegar en transporte público.", icon: Bus },
+                    { label: "Precio y Horarios", value: "Dar precios de entrada y horarios de visita.", icon: Clock }
                 ]
             }
         ],
         [Level.Intermediate]: [
             {
                 label: "Política Municipal",
-                value: "Sesión del concejo sobre presupuesto participativo del distrito",
-                registerInstruction: "Registro: formal político e impersonal. Lunfardo: no. Resumen objetivo sin opiniones.",
-                icon: Building,
+                value: "Noticias sobre decisiones del gobierno de la ciudad",
+                registerInstruction: "Registro informativo formal. Vocabulario cívico y administrativo. Objetividad y matices.",
+                icon: Landmark,
                 actions: [
-                    { label: "Debate", value: "Resumir un debate municipal", icon: MessageCircle },
-                    { label: "Cita de Concejal", value: "Leer una cita de un concejal", icon: FileText },
-                    { label: "Proyecto Aprobado", value: "Anunciar un proyecto aprobado", icon: CheckCircle },
-                    { label: "Posturas Opuestas", value: "Contrastar posturas políticas", icon: Scale },
-                    { label: "Próximos Pasos", value: "Explicar próximos pasos", icon: ArrowRight }
+                    { label: "Nuevo Presupuesto", value: "Informar sobre el presupuesto municipal y sus prioridades.", icon: PieChart },
+                    { label: "Debate en el Pleno", value: "Resumir un debate acalorado en el ayuntamiento.", icon: Megaphone },
+                    { label: "Una Obra Polémica", value: "Contar una obra pública que divide a los vecinos.", icon: Hammer },
+                    { label: "Consulta Ciudadana", value: "Anunciar una consulta a los vecinos sobre un plan.", icon: Vote },
+                    { label: "Impuestos Locales", value: "Explicar un cambio en las tasas municipales.", icon: Coins },
+                    { label: "Promesas y Plazos", value: "Contrastar promesas anteriores con los plazos reales.", icon: Clock }
                 ]
             },
             {
                 label: "Economía Nacional",
-                value: "Boletín con inflación mensual y datos de empleo juvenil",
-                registerInstruction: "Registro: formal económico. Lunfardo: no. Datos verificables y tono objetivo.",
-                icon: PieChart,
+                value: "Panorama económico del país explicado para el público",
+                registerInstruction: "Registro divulgativo formal. Datos económicos explicados con claridad. Cautela interpretativa.",
+                icon: LineChart,
                 actions: [
-                    { label: "Dato de Inflación", value: "Dar un dato de inflación", icon: TrendingUp },
-                    { label: "Entrevista Experta", value: "Citar a un experto", icon: MessageCircle },
-                    { label: "Impacto en Salarios", value: "Explicar impacto en salarios", icon: DollarSign },
-                    { label: "Medida Gobierno", value: "Anunciar una medida oficial", icon: FileText },
-                    { label: "Análisis Breve", value: "Hacer un análisis corto", icon: Brain }
+                    { label: "Sube el Costo de Vida", value: "Explicar cómo suben los precios y a quién afecta.", icon: TrendingUp },
+                    { label: "Empleo y Desempleo", value: "Informar las cifras de empleo del trimestre.", icon: Briefcase },
+                    { label: "El Precio de la Energía", value: "Analizar la variación en el precio de la energía.", icon: Zap },
+                    { label: "Ayudas del Estado", value: "Explicar una nueva ayuda económica y quién puede pedirla.", icon: HandCoins },
+                    { label: "Consumo de las Familias", value: "Comentar cómo cambia el gasto de los hogares.", icon: ShoppingBag },
+                    { label: "Perspectivas del Año", value: "Adelantar las previsiones económicas para el año.", icon: Calendar }
                 ]
             },
             {
                 label: "Tecnología y Sociedad",
-                value: "Noticias sobre nueva ley de datos y filtración en app popular",
-                registerInstruction: "Registro: formal informativo. Lunfardo: no. Explicaciones claras de riesgos.",
+                value: "Noticias sobre tecnología y su impacto cotidiano",
+                registerInstruction: "Registro divulgativo. Vocabulario técnico accesible. Mirada crítica moderada.",
                 icon: Laptop,
                 actions: [
-                    { label: "Nuevo Servicio", value: "Presentar un nuevo servicio digital", icon: Sparkles },
-                    { label: "Riesgos Privacidad", value: "Explicar riesgos de privacidad", icon: Lock },
-                    { label: "Declaración Empresa", value: "Leer comunicado de empresa", icon: FileText },
-                    { label: "Reacción Usuarios", value: "Contar reacción de usuarios", icon: MessageCircle },
-                    { label: "Consejo de Uso", value: "Dar consejo de uso seguro", icon: ShieldAlert }
+                    { label: "Nueva App Útil", value: "Presentar una aplicación que facilita un trámite.", icon: Download },
+                    { label: "Privacidad de los Datos", value: "Alertar sobre el uso de los datos personales.", icon: Lock },
+                    { label: "Inteligencia Artificial", value: "Explicar un uso cotidiano de la inteligencia artificial.", icon: Brain },
+                    { label: "Brecha Digital", value: "Comentar quiénes quedan fuera de la tecnología.", icon: Users },
+                    { label: "Estafas en Línea", value: "Informar de un fraude digital frecuente.", icon: ShieldAlert },
+                    { label: "Trabajo a Distancia", value: "Analizar cómo cambió el teletrabajo la vida laboral.", icon: Home }
                 ]
             },
             {
                 label: "Ciencia y Salud",
-                value: "Boletín sobre estudio de salud pública y uso de antibióticos",
-                registerInstruction: "Registro: formal divulgativo. Lunfardo: no. Tono neutral y preciso.",
+                value: "Divulgación de avances científicos y de salud",
+                registerInstruction: "Registro divulgativo riguroso. Explicar términos con claridad. Prudencia ante los datos.",
                 icon: FlaskConical,
                 actions: [
-                    { label: "Estudio Reciente", value: "Presentar un estudio reciente", icon: BookOpen },
-                    { label: "Explicación", value: "Explicar el estudio en lenguaje claro", icon: Brain },
-                    { label: "Aplicación", value: "Mencionar una aplicación práctica", icon: Wrench },
-                    { label: "Advertencia", value: "Dar una advertencia", icon: AlertTriangle },
-                    { label: "Fuente", value: "Citar la fuente del estudio", icon: FileText }
+                    { label: "Un Estudio Nuevo", value: "Resumir los resultados de un estudio reciente.", icon: FileText },
+                    { label: "Prevenir una Enfermedad", value: "Explicar cómo prevenir una enfermedad común.", icon: Stethoscope },
+                    { label: "Alimentación y Salud", value: "Comentar hallazgos sobre dieta y bienestar.", icon: Apple },
+                    { label: "Salud Mental", value: "Informar sobre la importancia del bienestar emocional.", icon: Brain },
+                    { label: "Un Avance Médico", value: "Contar un avance que mejora un tratamiento.", icon: Pill },
+                    { label: "Mitos y Verdades", value: "Desmentir un mito de salud muy extendido.", icon: HelpCircle }
                 ]
             },
             {
                 label: "Medio Ambiente",
-                value: "Noticias sobre incendio en parque natural con evacuación de campings",
-                registerInstruction: "Registro: formal y urgente. Lunfardo: no. Información precisa y objetiva.",
+                value: "Noticias ambientales de alcance regional y nacional",
+                registerInstruction: "Registro informativo comprometido pero objetivo. Vocabulario ambiental. Datos claros.",
                 icon: TreePine,
                 actions: [
-                    { label: "Incendio", value: "Reportar un incendio forestal", icon: AlertTriangle },
-                    { label: "Evacuación", value: "Informar estado de evacuación", icon: MapPin },
-                    { label: "Bomberos", value: "Contar trabajo de bomberos", icon: FireExtinguisher },
-                    { label: "Área Afectada", value: "Dar datos de área afectada", icon: Map },
-                    { label: "Consejo Seguridad", value: "Dar consejos de seguridad", icon: ShieldAlert }
+                    { label: "Cambio Climático", value: "Explicar un efecto local del cambio climático.", icon: Thermometer },
+                    { label: "Energías Renovables", value: "Informar sobre un proyecto de energía limpia.", icon: Sun },
+                    { label: "Gestión del Agua", value: "Comentar medidas para ahorrar agua en sequía.", icon: Droplet },
+                    { label: "Proteger un Bosque", value: "Contar un plan para conservar un área natural.", icon: TreePine },
+                    { label: "Contaminación del Aire", value: "Informar sobre la calidad del aire en la ciudad.", icon: Wind },
+                    { label: "Reciclaje Industrial", value: "Explicar cómo una empresa reduce sus residuos.", icon: Recycle }
                 ]
             },
             {
-                label: "Tribunales",
-                value: "Noticias de juicio por fraude en licitaciones municipales",
-                registerInstruction: "Registro: formal judicial. Lunfardo: no. Lenguaje preciso, sin opiniones.",
+                label: "Tribunales y Justicia",
+                value: "Noticias sobre casos judiciales y justicia",
+                registerInstruction: "Registro formal y prudente. Presunción de inocencia y precisión. Sin sensacionalismo.",
                 icon: Gavel,
                 actions: [
-                    { label: "Resumen del Caso", value: "Resumir el caso judicial", icon: FileText },
-                    { label: "Declaración Abogado", value: "Leer declaración del abogado", icon: MessageCircle },
-                    { label: "Calendario", value: "Anunciar fechas del juicio", icon: Calendar },
-                    { label: "Reacción Pública", value: "Explicar reacción del público", icon: Frown },
-                    { label: "Siguiente Sesión", value: "Indicar próxima sesión", icon: Clock }
+                    { label: "Un Juicio Importante", value: "Resumir el inicio de un juicio de interés público.", icon: Gavel },
+                    { label: "Una Sentencia", value: "Informar el fallo de un caso y sus consecuencias.", icon: FileText },
+                    { label: "Derechos del Consumidor", value: "Explicar una resolución que protege a los usuarios.", icon: ShieldAlert },
+                    { label: "Un Caso de Corrupción", value: "Contar los avances de una investigación por corrupción.", icon: Eye },
+                    { label: "Nueva Ley", value: "Explicar cómo afecta una ley a la vida diaria.", icon: BookOpen },
+                    { label: "Mediación y Acuerdos", value: "Informar de un acuerdo que evita un juicio largo.", icon: Handshake }
                 ]
             },
             {
-                label: "Economía Internacional",
-                value: "Boletín sobre exportación de litio y nuevos aranceles",
-                registerInstruction: "Registro: formal económico. Lunfardo: no. Datos y análisis breves.",
-                icon: Globe,
+                label: "Educación",
+                value: "Noticias del ámbito educativo",
+                registerInstruction: "Registro informativo formal. Vocabulario educativo. Equilibrio entre datos y contexto.",
+                icon: GraduationCap,
                 actions: [
-                    { label: "Tipo de Cambio", value: "Dar el tipo de cambio actual", icon: Euro },
-                    { label: "Comercio Exterior", value: "Explicar movimiento comercial", icon: Ship },
-                    { label: "Impacto Importaciones", value: "Explicar impacto en importaciones", icon: TrendingUp },
-                    { label: "Cita de Analista", value: "Citar un analista", icon: MessageCircle },
-                    { label: "Resumen Final", value: "Cerrar con resumen claro", icon: CheckCircle }
+                    { label: "Inicio de Clases", value: "Informar sobre el arranque del curso escolar.", icon: School },
+                    { label: "Becas Disponibles", value: "Explicar nuevas becas y cómo solicitarlas.", icon: Coins },
+                    { label: "Reforma Educativa", value: "Resumir un cambio en el plan de estudios.", icon: BookOpen },
+                    { label: "Tecnología en el Aula", value: "Contar cómo se usan las pantallas en la escuela.", icon: Laptop },
+                    { label: "Formación para Adultos", value: "Anunciar cursos de formación para mayores.", icon: Users },
+                    { label: "Resultados y Desafíos", value: "Comentar resultados educativos y sus retos.", icon: LineChart }
                 ]
             },
             {
                 label: "Infraestructura Urbana",
-                value: "Noticias sobre obra pública con plazos y licitaciones",
-                registerInstruction: "Registro: formal informativo. Lunfardo: no. Datos verificables.",
-                icon: Wrench,
+                value: "Noticias sobre obras e infraestructura de la ciudad",
+                registerInstruction: "Registro informativo técnico-accesible. Datos de plazos y costos. Objetividad.",
+                icon: Building2,
                 actions: [
-                    { label: "Obra", value: "Informar avance de obra", icon: Hammer },
-                    { label: "Plazos", value: "Dar plazos estimados", icon: Calendar },
-                    { label: "Impacto", value: "Explicar impacto en servicios", icon: AlertTriangle },
-                    { label: "Licitación", value: "Mencionar proceso de licitación", icon: FileText },
-                    { label: "Desvíos", value: "Informar desvíos temporales", icon: Map }
+                    { label: "Un Puente Nuevo", value: "Informar sobre la construcción de un puente y sus plazos.", icon: Building2 },
+                    { label: "Reforma de una Avenida", value: "Contar una gran obra vial y sus molestias temporales.", icon: Hammer },
+                    { label: "Ampliar el Metro", value: "Anunciar la ampliación de la red de metro.", icon: Train },
+                    { label: "Red de Agua", value: "Explicar una mejora en el suministro de agua.", icon: Droplet },
+                    { label: "Espacios Verdes", value: "Informar sobre nuevos parques y plazas.", icon: TreePine },
+                    { label: "Costos y Retrasos", value: "Comentar sobrecostos y retrasos en una obra.", icon: DollarSign }
                 ]
             },
             {
-                label: "Educación Superior",
-                value: "Boletín universitario con cupos y becas",
-                registerInstruction: "Registro: formal educativo. Lunfardo: no. Información clara y ordenada.",
-                icon: GraduationCap,
+                label: "Seguridad Vial",
+                value: "Campañas y noticias sobre seguridad en las carreteras",
+                registerInstruction: "Registro informativo con tono de prevención. Datos y consejos claros. Seriedad.",
+                icon: Car,
                 actions: [
-                    { label: "Inscripción", value: "Informar fechas de inscripción", icon: Calendar },
-                    { label: "Cupos", value: "Dar datos de cupos disponibles", icon: PieChart },
-                    { label: "Becas", value: "Anunciar becas abiertas", icon: FileText },
-                    { label: "Declaración Rector", value: "Leer declaración del rector", icon: MessageCircle },
-                    { label: "Calendario", value: "Recordar calendario académico", icon: Clock }
+                    { label: "Campaña de Velocidad", value: "Informar de controles de velocidad y sus razones.", icon: Watch },
+                    { label: "Cinturón y Casco", value: "Recordar la importancia de las medidas de seguridad.", icon: ShieldAlert },
+                    { label: "Accidentes del Fin de Semana", value: "Resumir las cifras de siniestros y sus causas.", icon: AlertTriangle },
+                    { label: "Nuevas Normas", value: "Explicar un cambio en las normas de tránsito.", icon: BookOpen },
+                    { label: "Peatones y Ciclistas", value: "Dar consejos para proteger a peatones y ciclistas.", icon: Navigation },
+                    { label: "Conducir con Lluvia", value: "Recomendar precauciones al conducir con mal tiempo.", icon: Droplet }
                 ]
             },
             {
-                label: "Seguridad Ciudadana",
-                value: "Noticias sobre operativos y estadísticas de seguridad",
-                registerInstruction: "Registro: formal informativo. Lunfardo: no. Tono sobrio.",
+                label: "Cultura y Espectáculos",
+                value: "Actualidad cultural y del mundo del espectáculo",
+                registerInstruction: "Registro ameno pero informado. Vocabulario cultural. Opinión moderada.",
+                icon: Drama,
+                actions: [
+                    { label: "Un Festival", value: "Presentar un festival cultural y su programa.", icon: Ticket },
+                    { label: "Un Premio Importante", value: "Informar sobre un premio y su ganador.", icon: Trophy },
+                    { label: "Estreno de Teatro", value: "Reseñar el estreno de una obra de teatro.", icon: Drama },
+                    { label: "Patrimonio en Riesgo", value: "Contar el estado de un monumento que necesita ayuda.", icon: Landmark },
+                    { label: "Nueva Serie o Película", value: "Comentar el éxito de una producción reciente.", icon: Tv },
+                    { label: "Artistas Emergentes", value: "Presentar a un artista joven que despunta.", icon: Star }
+                ]
+            },
+            {
+                label: "Trabajo y Empleo",
+                value: "Noticias sobre el mercado laboral",
+                registerInstruction: "Registro informativo formal. Vocabulario laboral. Datos con contexto.",
+                icon: Briefcase,
+                actions: [
+                    { label: "Ofertas de Empleo", value: "Informar sobre sectores que buscan trabajadores.", icon: Search },
+                    { label: "Derechos Laborales", value: "Explicar un derecho laboral poco conocido.", icon: ShieldAlert },
+                    { label: "Formación y Empleo", value: "Relacionar cursos con salidas laborales.", icon: GraduationCap },
+                    { label: "Salario Mínimo", value: "Comentar un cambio en el salario mínimo.", icon: Coins },
+                    { label: "Trabajo Joven", value: "Analizar la situación laboral de los jóvenes.", icon: Users },
+                    { label: "Nuevas Profesiones", value: "Presentar oficios que surgen con la tecnología.", icon: Rocket }
+                ]
+            },
+            {
+                label: "Sucesos y Comunidad",
+                value: "Sucesos locales e iniciativas comunitarias",
+                registerInstruction: "Registro informativo prudente. Equilibrio entre suceso y solidaridad. Sin morbo.",
                 icon: Siren,
                 actions: [
-                    { label: "Operativo", value: "Reportar un operativo policial", icon: ShieldAlert },
-                    { label: "Estadísticas", value: "Dar un dato estadístico", icon: PieChart },
-                    { label: "Declaración Oficial", value: "Leer una declaración oficial", icon: MessageCircle },
-                    { label: "Investigación", value: "Informar estado de una investigación", icon: Search },
-                    { label: "Recomendación", value: "Dar una recomendación preventiva", icon: Hand }
+                    { label: "Un Rescate", value: "Contar un rescate exitoso de los servicios de emergencia.", icon: FireExtinguisher },
+                    { label: "Solidaridad Vecinal", value: "Relatar cómo un barrio ayudó a una familia.", icon: HeartHandshake },
+                    { label: "Prevención de Incendios", value: "Dar consejos para prevenir incendios en verano.", icon: FireExtinguisher },
+                    { label: "Un Animal Perdido", value: "Difundir la búsqueda de una mascota perdida.", icon: Dog },
+                    { label: "Objetos Encontrados", value: "Informar sobre pertenencias halladas y cómo recuperarlas.", icon: Search },
+                    { label: "Voluntariado", value: "Invitar a sumarse a una iniciativa de voluntariado.", icon: Users }
                 ]
             }
         ],
         [Level.Advanced]: [
             {
                 label: "Última Hora",
-                value: "Última hora por sismo en la capital con cortes de energía",
-                registerInstruction: "Registro: formal de última hora e impersonal. Lunfardo: no. Prioriza hechos confirmados.",
-                icon: AlertOctagon,
+                value: "Cobertura en vivo de una noticia de última hora",
+                registerInstruction: "Registro periodístico de urgencia. Densidad informativa, matices y cautela. Ritmo alto.",
+                icon: Siren,
                 actions: [
-                    { label: "Titular Urgente", value: "Leer un titular urgente", icon: Megaphone },
-                    { label: "Confirmación Fuente", value: "Confirmar información con fuentes", icon: ShieldAlert },
-                    { label: "Datos Preliminares", value: "Dar datos preliminares", icon: FileText },
-                    { label: "Llamado Prudencia", value: "Pedir prudencia al público", icon: Hand },
-                    { label: "Actualización", value: "Prometer actualización pronto", icon: Clock }
+                    { label: "Los Primeros Datos", value: "Comunicar los primeros datos confirmados con prudencia.", icon: AlertOctagon },
+                    { label: "Fuentes en Contraste", value: "Contrastar versiones distintas de un mismo hecho.", icon: Eye },
+                    { label: "Reacciones Oficiales", value: "Recoger las primeras reacciones de las autoridades.", icon: Megaphone },
+                    { label: "El Contexto", value: "Situar la noticia en su contexto más amplio.", icon: Globe },
+                    { label: "Lo que No se Sabe", value: "Delimitar con rigor lo confirmado y lo incierto.", icon: HelpCircle },
+                    { label: "Próximas Horas", value: "Anticipar los desarrollos previstos con cautela.", icon: Clock }
                 ]
             },
             {
                 label: "Cobertura de Crisis",
-                value: "Cobertura en directo de derrame químico en un río",
-                registerInstruction: "Registro: formal y sobrio. Lunfardo: no. Información verificada y tono sereno.",
-                icon: Siren,
+                value: "Seguimiento informativo de una crisis en desarrollo",
+                registerInstruction: "Registro sobrio y riguroso. Terminología especializada, ponderación. Evitar alarmismo.",
+                icon: AlertOctagon,
                 actions: [
-                    { label: "Balance de Daños", value: "Dar balance de daños", icon: AlertTriangle },
-                    { label: "Rueda de Prensa", value: "Resumir rueda de prensa", icon: Mic },
-                    { label: "Recursos Desplegados", value: "Describir recursos desplegados", icon: Truck },
-                    { label: "Testimonio", value: "Transmitir un testimonio en directo", icon: MessageCircle },
-                    { label: "Plan de Contingencia", value: "Explicar plan de contingencia", icon: ShieldAlert }
+                    { label: "Dimensión del Problema", value: "Cuantificar el alcance de la crisis con datos.", icon: LineChart },
+                    { label: "Respuesta Institucional", value: "Analizar la gestión de las instituciones.", icon: Landmark },
+                    { label: "Voces Expertas", value: "Integrar el análisis de especialistas.", icon: Brain },
+                    { label: "Impacto en la Gente", value: "Mostrar cómo afecta a la población concreta.", icon: Users },
+                    { label: "Errores y Aciertos", value: "Evaluar con equilibrio los aciertos y fallos.", icon: Scale },
+                    { label: "Escenarios Posibles", value: "Plantear escenarios futuros con condicionales.", icon: ArrowRight }
                 ]
             },
             {
-                label: "Investigación Especial",
-                value: "Informe de investigación sobre red de sobornos en obra pública",
-                registerInstruction: "Registro: formal periodístico. Lunfardo: no. Tono objetivo y preciso.",
+                label: "Investigación Periodística",
+                value: "Reportaje de investigación con hallazgos propios",
+                registerInstruction: "Registro narrativo-informativo cuidado. Rigor, documentación y matiz. Tono contenido.",
                 icon: Search,
                 actions: [
-                    { label: "Corrupción", value: "Destapar un caso de corrupción", icon: AlertTriangle },
-                    { label: "Documentos Filtrados", value: "Citar documentos filtrados", icon: FileText },
-                    { label: "Respuesta Oficial", value: "Presentar la respuesta oficial", icon: MessageCircle },
-                    { label: "Impacto Político", value: "Analizar impacto político", icon: Globe },
-                    { label: "Próximas Revelaciones", value: "Adelantar futuras revelaciones", icon: Eye }
+                    { label: "El Hallazgo", value: "Presentar el hallazgo central de la investigación.", icon: Lightbulb },
+                    { label: "Seguir el Dinero", value: "Rastrear un circuito financiero opaco.", icon: Coins },
+                    { label: "Documentos Filtrados", value: "Explicar el valor y los límites de unos documentos.", icon: FileText },
+                    { label: "Proteger a las Fuentes", value: "Justificar el anonimato de las fuentes.", icon: Lock },
+                    { label: "El Desmentido", value: "Contrastar la versión oficial con las pruebas.", icon: Ban },
+                    { label: "Consecuencias", value: "Analizar el impacto del reportaje.", icon: Zap }
                 ]
             },
             {
-                label: "Entrevista en Directo",
-                value: "Segmento con resumen de preguntas y respuestas en conferencia de prensa",
-                registerInstruction: "Registro: formal informativo. Lunfardo: no. Narrador resume el intercambio sin diálogo directo.",
-                icon: Mic,
+                label: "Editorial de Opinión",
+                value: "Columna editorial con una tesis argumentada",
+                registerInstruction: "Registro argumentativo culto. Tesis clara, ironía y retórica. Cohesión elaborada.",
+                icon: Newspaper,
                 actions: [
-                    { label: "Pregunta Incómoda", value: "Mencionar una pregunta difícil que se realizó", icon: AlertTriangle },
-                    { label: "Respuesta Evasiva", value: "Señalar una respuesta evasiva", icon: Eye },
-                    { label: "Repregunta", value: "Resumir una repregunta clave", icon: Zap },
-                    { label: "Dato Contrastado", value: "Citar un dato verificado", icon: CheckCircle },
-                    { label: "Cierre con Titular", value: "Cerrar con una frase potente", icon: Megaphone }
+                    { label: "Plantear la Tesis", value: "Enunciar una posición y anticipar la argumentación.", icon: Flag },
+                    { label: "El Contraargumento", value: "Reconocer y refutar la objeción principal.", icon: Scale },
+                    { label: "Una Analogía", value: "Usar una analogía para iluminar el problema.", icon: Lightbulb },
+                    { label: "La Ironía", value: "Emplear ironía para criticar una postura.", icon: Drama },
+                    { label: "Datos al Servicio de la Idea", value: "Integrar datos para sostener la tesis.", icon: LineChart },
+                    { label: "El Cierre Contundente", value: "Rematar con una conclusión memorable.", icon: Megaphone }
                 ]
             },
             {
-                label: "Editorial del Día",
-                value: "Editorial sobre política de vivienda y alquileres en la ciudad",
-                registerInstruction: "Registro: formal argumentativo. Lunfardo: no. Opinión estructurada y respetuosa.",
-                icon: MessageCircle,
+                label: "Economía y Mercados",
+                value: "Análisis económico de mercados y tendencias",
+                registerInstruction: "Registro técnico-divulgativo. Jerga económica explicada, prudencia analítica. Precisión.",
+                icon: TrendingUp,
                 actions: [
-                    { label: "Opinión", value: "Dar una opinión clara", icon: ThumbsUp },
-                    { label: "Ejemplo Histórico", value: "Citar un ejemplo histórico", icon: BookOpen },
-                    { label: "Crítica", value: "Criticar una decisión política", icon: ThumbsDown },
-                    { label: "Propuesta", value: "Proponer una alternativa", icon: Lightbulb },
-                    { label: "Conclusión", value: "Cerrar con conclusión contundente", icon: Star }
-                ]
-            },
-            {
-                label: "Economía de Mercados",
-                value: "Informe de mercados con apertura de bolsa y riesgo país",
-                registerInstruction: "Registro: formal financiero. Lunfardo: no. Datos y análisis sobrios.",
-                icon: LineChart,
-                actions: [
-                    { label: "Movimiento Bursátil", value: "Describir movimientos de bolsa", icon: TrendingUp },
-                    { label: "Indicadores", value: "Leer indicadores clave", icon: PieChart },
-                    { label: "Reacción Inversores", value: "Contar reacción de inversores", icon: MessageCircle },
-                    { label: "Consejo Prudente", value: "Dar consejo prudente", icon: ShieldAlert },
-                    { label: "Análisis de Riesgo", value: "Analizar riesgos", icon: AlertTriangle }
+                    { label: "Las Bolsas", value: "Interpretar el movimiento de los mercados y sus causas.", icon: LineChart },
+                    { label: "Inflación y Tipos", value: "Explicar la relación entre inflación y tasas de interés.", icon: Percent },
+                    { label: "Riesgo y Confianza", value: "Analizar la confianza de los inversores.", icon: Scale },
+                    { label: "Materias Primas", value: "Comentar el precio de una materia prima clave.", icon: Fuel },
+                    { label: "Comercio Global", value: "Analizar tensiones en el comercio internacional.", icon: Ship },
+                    { label: "Lectura de Fondo", value: "Distinguir el ruido del dato de la tendencia real.", icon: Eye }
                 ]
             },
             {
                 label: "Geopolítica",
-                value: "Informe sobre cumbre regional y tensión en frontera",
-                registerInstruction: "Registro: formal internacional. Lunfardo: no. Tono neutral y preciso.",
+                value: "Análisis de relaciones internacionales y conflictos",
+                registerInstruction: "Registro analítico formal. Terminología diplomática, equilibrio y matiz. Sin partidismo.",
                 icon: Globe,
                 actions: [
-                    { label: "Cumbre Internacional", value: "Resumir una cumbre internacional", icon: Map },
-                    { label: "Declaración Conjunta", value: "Leer una declaración conjunta", icon: FileText },
-                    { label: "Tensión Diplomática", value: "Explicar tensión diplomática", icon: AlertTriangle },
-                    { label: "Reacción Países", value: "Describir reacciones", icon: Flag },
-                    { label: "Proyección Futuro", value: "Proyectar escenarios", icon: Eye }
+                    { label: "Un Conflicto Regional", value: "Explicar las raíces de un conflicto y sus actores.", icon: Flag },
+                    { label: "Alianzas y Tensiones", value: "Analizar el juego de alianzas entre potencias.", icon: Handshake },
+                    { label: "Sanciones Económicas", value: "Evaluar el efecto de unas sanciones.", icon: Ban },
+                    { label: "Diplomacia Silenciosa", value: "Comentar negociaciones que ocurren tras bambalinas.", icon: MessageCircle },
+                    { label: "Energía y Poder", value: "Relacionar los recursos energéticos con el poder.", icon: Zap },
+                    { label: "Escenarios a Futuro", value: "Proyectar escenarios con la debida cautela.", icon: ArrowRight }
                 ]
             },
             {
-                label: "Cultura y Sociedad",
-                value: "Debate cultural sobre inteligencia artificial en el arte",
-                registerInstruction: "Registro: formal y reflexivo. Lunfardo: no. Argumentos claros y ordenados.",
-                icon: Drama,
+                label: "Análisis Político",
+                value: "Análisis de la actualidad política nacional",
+                registerInstruction: "Registro analítico ponderado. Vocabulario político preciso. Neutralidad activa.",
+                icon: Vote,
                 actions: [
-                    { label: "Censura", value: "Debatir sobre censura cultural", icon: Ban },
-                    { label: "Impacto Artistas", value: "Explicar impacto en artistas", icon: Palette },
-                    { label: "Opiniones Contrapuestas", value: "Comparar opiniones distintas", icon: Scale },
-                    { label: "Contexto Histórico", value: "Dar contexto histórico", icon: BookOpen },
-                    { label: "Cierre Reflexivo", value: "Cerrar con reflexión", icon: Brain }
+                    { label: "El Mapa de Fuerzas", value: "Describir el equilibrio de poder entre partidos.", icon: PieChart },
+                    { label: "Un Discurso Clave", value: "Analizar el subtexto de un discurso importante.", icon: Megaphone },
+                    { label: "Encuestas y Realidad", value: "Interpretar encuestas con sentido crítico.", icon: LineChart },
+                    { label: "Pactos y Rupturas", value: "Explicar una negociación o ruptura entre aliados.", icon: Handshake },
+                    { label: "El Voto Indeciso", value: "Analizar el peso del electorado indeciso.", icon: HelpCircle },
+                    { label: "Estrategia y Relato", value: "Distinguir la estrategia real del relato público.", icon: Eye }
+                ]
+            },
+            {
+                label: "Ciencia Avanzada",
+                value: "Divulgación de ciencia de frontera",
+                registerInstruction: "Registro divulgativo riguroso. Explicar lo complejo con precisión. Entusiasmo controlado.",
+                icon: FlaskConical,
+                actions: [
+                    { label: "Un Descubrimiento", value: "Explicar un hallazgo científico y su relevancia.", icon: Lightbulb },
+                    { label: "El Método", value: "Describir cómo se llegó a una conclusión.", icon: ListChecks },
+                    { label: "Aplicaciones Futuras", value: "Anticipar usos posibles de un avance.", icon: Rocket },
+                    { label: "Los Límites del Estudio", value: "Señalar con honestidad las limitaciones.", icon: Scale },
+                    { label: "Ciencia y Sociedad", value: "Relacionar el avance con dilemas sociales.", icon: Users },
+                    { label: "Consenso y Debate", value: "Distinguir el consenso científico del debate abierto.", icon: MessageCircle }
+                ]
+            },
+            {
+                label: "Cultura y Crítica",
+                value: "Crítica cultural de una obra o fenómeno",
+                registerInstruction: "Registro culto y valorativo. Vocabulario estético, ironía fina. Argumentación sólida.",
+                icon: Palette,
+                actions: [
+                    { label: "Situar la Obra", value: "Contextualizar una obra en su corriente y época.", icon: BookOpen },
+                    { label: "Un Juicio de Valor", value: "Argumentar por qué una obra funciona o no.", icon: Scale },
+                    { label: "Fenómeno de Masas", value: "Analizar por qué algo se vuelve popular.", icon: Users },
+                    { label: "Forma y Fondo", value: "Distinguir el mérito formal del contenido.", icon: Eye },
+                    { label: "La Polémica", value: "Comentar una controversia cultural con matices.", icon: Drama },
+                    { label: "Legado y Actualidad", value: "Evaluar la vigencia de una obra clásica.", icon: Landmark }
+                ]
+            },
+            {
+                label: "Tecnología y Ética",
+                value: "Reportaje sobre dilemas éticos de la tecnología",
+                registerInstruction: "Registro reflexivo e informado. Vocabulario técnico y ético. Equilibrio crítico.",
+                icon: Server,
+                actions: [
+                    { label: "Algoritmos que Deciden", value: "Analizar decisiones automatizadas y sus sesgos.", icon: Brain },
+                    { label: "Privacidad y Vigilancia", value: "Debatir el equilibrio entre seguridad y privacidad.", icon: Eye },
+                    { label: "Empleo y Automatización", value: "Evaluar el impacto de la automatización en el trabajo.", icon: Briefcase },
+                    { label: "Desinformación", value: "Explicar cómo se propaga la desinformación.", icon: Ghost },
+                    { label: "Regular la Tecnología", value: "Comentar intentos de regular a las grandes empresas.", icon: Gavel },
+                    { label: "Poder Concentrado", value: "Analizar la concentración de poder tecnológico.", icon: Server }
+                ]
+            },
+            {
+                label: "Salud Pública",
+                value: "Análisis de políticas y desafíos de salud pública",
+                registerInstruction: "Registro riguroso y responsable. Datos epidemiológicos accesibles. Prudencia.",
+                icon: Stethoscope,
+                actions: [
+                    { label: "Una Campaña Nacional", value: "Analizar una gran campaña de salud y su alcance.", icon: Megaphone },
+                    { label: "Desigualdad en la Salud", value: "Explicar cómo la desigualdad afecta a la salud.", icon: Scale },
+                    { label: "Prevención vs. Cura", value: "Debatir la inversión en prevención.", icon: ShieldAlert },
+                    { label: "Datos y Decisiones", value: "Mostrar cómo los datos guían las políticas.", icon: LineChart },
+                    { label: "Salud Mental Colectiva", value: "Analizar el estado de la salud mental de la población.", icon: Brain },
+                    { label: "El Sistema Bajo Presión", value: "Evaluar la sostenibilidad del sistema sanitario.", icon: Stethoscope }
                 ]
             },
             {
                 label: "Debate Electoral",
-                value: "Informe sobre debate electoral con propuestas y cruces",
-                registerInstruction: "Registro: formal político e impersonal. Lunfardo: no. Resumen objetivo.",
-                icon: Flag,
+                value: "Cobertura y análisis de una campaña electoral",
+                registerInstruction: "Registro analítico equilibrado. Retórica de campaña, verificación de datos. Imparcialidad.",
+                icon: Megaphone,
                 actions: [
-                    { label: "Encuestas", value: "Dar datos de encuestas", icon: PieChart },
-                    { label: "Propuestas", value: "Resumir propuestas clave", icon: FileText },
-                    { label: "Cruce", value: "Describir un cruce relevante", icon: AlertTriangle },
-                    { label: "Fiscalización", value: "Informar sobre fiscalización", icon: ShieldAlert },
-                    { label: "Cierre", value: "Cerrar con dato relevante", icon: CheckCircle }
-                ]
-            },
-            {
-                label: "Informe de Defensa",
-                value: "Informe sobre cooperación militar y presupuesto de defensa",
-                registerInstruction: "Registro: formal internacional. Lunfardo: no. Datos precisos y tono sobrio.",
-                icon: ShieldAlert,
-                actions: [
-                    { label: "Despliegue", value: "Informar sobre despliegue", icon: Map },
-                    { label: "Presupuesto", value: "Dar cifra presupuestaria", icon: PieChart },
-                    { label: "Cooperación", value: "Explicar un acuerdo de cooperación", icon: FileText },
-                    { label: "Riesgos", value: "Mencionar riesgos regionales", icon: AlertTriangle },
-                    { label: "Declaración", value: "Leer declaración oficial", icon: MessageCircle }
+                    { label: "Las Propuestas", value: "Comparar las propuestas centrales de los candidatos.", icon: ListChecks },
+                    { label: "Verificar Promesas", value: "Contrastar afirmaciones de campaña con los hechos.", icon: CheckCircle },
+                    { label: "El Cara a Cara", value: "Analizar un debate televisado y sus golpes.", icon: Tv },
+                    { label: "El Tono de la Campaña", value: "Comentar la crispación o el respeto en la campaña.", icon: Volume2 },
+                    { label: "El Papel de los Medios", value: "Reflexionar sobre la cobertura mediática.", icon: Newspaper },
+                    { label: "La Jornada de Votación", value: "Explicar el proceso y la participación esperada.", icon: Vote }
                 ]
             }
         ]
     },
-    [TextType.Monologue]: {
-        [Level.Intro]: [
-            {
-                label: "El Día que Todo Salió Mal",
-                value: "Monólogo sobre un día caótico: perdí el bus, llegué empapado al trabajo, se me cayó el café, y al final pasó algo bueno",
-                registerInstruction: "Registro: informal cercano. Primera persona. Lunfardo: no. Frases claras y simples. Tono humorístico.",
-                icon: Sun,
-                actions: [
-                    { label: "El Despertador Falló", value: "Contar cómo empezó mal el día: la alarma que no sonó", icon: Clock },
-                    { label: "Corriendo al Bus", value: "Describir la carrera hacia el transporte y si lo perdió", icon: Bus },
-                    { label: "La Lluvia", value: "Contar cómo le agarró la lluvia sin paraguas", icon: Umbrella },
-                    { label: "El Accidente del Café", value: "Describir el momento vergonzoso del día", icon: Coffee },
-                    { label: "La Sorpresa Final", value: "Contar algo bueno inesperado que salvó el día", icon: Star }
-                ]
-            },
-            {
-                label: "El Asado Dominical",
-                value: "Monólogo sobre el ritual del asado familiar: quién cocina, las discusiones sobre la carne, el fútbol en la tele, los primos",
-                registerInstruction: "Registro: informal afectivo. Primera persona, tono cálido. Lunfardo: no. Detalles sensoriales.",
-                icon: Heart,
-                actions: [
-                    { label: "Los Preparativos", value: "Contar quién trae qué: la carne, la ensalada, el vino", icon: ShoppingBag },
-                    { label: "El Asador", value: "Describir a quien hace el asado y sus rituales", icon: Utensils },
-                    { label: "La Discusión sobre la Carne", value: "Contar la típica pelea entre quienes la quieren jugosa o cocida", icon: MessageCircle },
-                    { label: "La Mesa", value: "Describir dónde se sientan todos y quién habla más", icon: UserPlus },
-                    { label: "El Momento Favorito", value: "Contar qué momento disfruta más de la reunión", icon: Smile }
-                ]
-            },
-            {
-                label: "Mi Barrio Está Cambiando",
-                value: "Monólogo sobre cómo el barrio ha cambiado: la panadería que cerró, el café hipster nuevo, los vecinos nuevos",
-                registerInstruction: "Registro: informal descriptivo. Primera persona. Lunfardo: no. Tono nostálgico pero no triste.",
-                icon: Map,
-                actions: [
-                    { label: "Antes y Ahora", value: "Comparar cómo era el barrio antes y cómo es ahora", icon: ArrowRight },
-                    { label: "El Local que Cerró", value: "Contar sobre un negocio querido que ya no existe", icon: Frown },
-                    { label: "Lo Nuevo", value: "Describir algo nuevo que apareció: café, negocio, edificio", icon: Sparkles },
-                    { label: "Los Vecinos", value: "Hablar de si los vecinos son los mismos o hay nuevos", icon: UserPlus },
-                    { label: "Mi Opinión", value: "Decir si le gustan los cambios o no y por qué", icon: Brain }
-                ]
-            },
-            {
-                label: "Cómo Adopté a Mi Perro",
-                value: "Monólogo sobre el día que adoptó un perro del refugio: la decisión, el primer encuentro, la primera noche en casa",
-                registerInstruction: "Registro: informal y tierno. Primera persona. Lunfardo: no. Emociones claras.",
-                icon: Dog,
-                actions: [
-                    { label: "La Decisión", value: "Contar por qué decidió adoptar y no comprar", icon: Lightbulb },
-                    { label: "El Refugio", value: "Describir cómo era el refugio y los otros perros", icon: Home },
-                    { label: "El Primer Encuentro", value: "Contar el momento de ver a su perro por primera vez", icon: Heart },
-                    { label: "El Viaje a Casa", value: "Describir cómo fue traerlo a casa: nervioso, tranquilo", icon: Car },
-                    { label: "La Primera Noche", value: "Contar cómo fue la primera noche: dónde durmió, si lloró", icon: Moon }
-                ]
-            },
-            {
-                label: "El Cumpleaños Sorpresa que Salió Mal",
-                value: "Monólogo sobre un cumpleaños sorpresa que no fue como esperaban: el festejado llegó antes, el pastel se cayó",
-                registerInstruction: "Registro: informal emotivo y humorístico. Primera persona. Lunfardo: no.",
-                icon: Smile,
-                actions: [
-                    { label: "El Plan Original", value: "Contar cuál era el plan para la sorpresa", icon: ListChecks },
-                    { label: "Los Preparativos", value: "Describir cómo decoraron y qué cocinaron", icon: Gift },
-                    { label: "El Primer Desastre", value: "Contar el primer problema: el pastel, los globos, el disfraz", icon: AlertTriangle },
-                    { label: "La Llegada Inesperada", value: "Describir si el festejado llegó antes de tiempo", icon: DoorOpen },
-                    { label: "Cómo Terminó", value: "Contar si igual fue divertido a pesar del caos", icon: Smile }
-                ]
-            }
-        ],
+    [TextType.PodcastInterview]: {
         [Level.Beginner]: [
             {
-                label: "Viaje Corto",
-                value: "Relato de escapada a un pueblo costero con bus nocturno",
-                registerInstruction: "Registro: informal narrativo. Primera persona, orden cronológico. Lunfardo: no.",
-                icon: Plane,
+                label: "Mi Rutina Diaria",
+                value: "Un entrevistador pregunta a un invitado por su día a día",
+                registerInstruction: "Registro informal y cercano entre dos personas. Presente y vocabulario cotidiano. Sin jerga.",
+                icon: Sun,
                 actions: [
-                    { label: "Planificación", value: "Contar cómo planeó el viaje", icon: Calendar },
-                    { label: "Transporte", value: "Decir cómo llegó", icon: Train },
-                    { label: "Lugar Visitado", value: "Describir un lugar visitado", icon: MapPin },
-                    { label: "Problema", value: "Contar un problema pequeño", icon: AlertTriangle },
-                    { label: "Recomendación", value: "Dar un consejo para otros", icon: ThumbsUp }
+                    { label: "Cómo Empieza el Día", value: "El invitado cuenta a qué hora se levanta y qué hace primero.", icon: Coffee },
+                    { label: "El Trabajo o el Estudio", value: "Describe cómo es su mañana de trabajo o estudio.", icon: Briefcase },
+                    { label: "La Comida", value: "Cuenta qué suele comer y con quién.", icon: Utensils },
+                    { label: "El Tiempo Libre", value: "Explica qué hace por la tarde para relajarse.", icon: Music },
+                    { label: "El Fin de Semana", value: "Compara su rutina de semana con la del fin de semana.", icon: Calendar },
+                    { label: "Antes de Dormir", value: "Describe qué hace justo antes de acostarse.", icon: Moon }
                 ]
             },
             {
-                label: "Primer Trabajo/Clase",
-                value: "Relato del primer día en una cafetería universitaria",
-                registerInstruction: "Registro: informal respetuoso. Primera persona. Lunfardo: no.",
-                icon: Briefcase,
+                label: "Mi Ciudad Favorita",
+                value: "Entrevista sobre una ciudad que el invitado adora",
+                registerInstruction: "Registro informal y descriptivo. Vocabulario de lugares. Frases sencillas.",
+                icon: MapPin,
                 actions: [
-                    { label: "Contexto", value: "Explicar cómo empezó", icon: BookOpen },
-                    { label: "Tarea Principal", value: "Describir la tarea principal", icon: Hand },
-                    { label: "Persona Conocida", value: "Mencionar a alguien importante", icon: UserPlus },
-                    { label: "Dificultad", value: "Contar una dificultad", icon: AlertCircle },
-                    { label: "Lección", value: "Explicar lo aprendido", icon: Lightbulb }
+                    { label: "Por Qué Le Gusta", value: "Explica qué hace especial a esa ciudad.", icon: Heart },
+                    { label: "Un Lugar Imperdible", value: "Recomienda un sitio que hay que visitar.", icon: Star },
+                    { label: "La Comida Típica", value: "Describe un plato típico del lugar.", icon: Utensils },
+                    { label: "Moverse por la Ciudad", value: "Cuenta cómo es el transporte allí.", icon: Bus },
+                    { label: "La Gente", value: "Describe cómo es la gente de esa ciudad.", icon: Users },
+                    { label: "Un Consejo para Viajar", value: "Da un consejo para quien la visite por primera vez.", icon: Lightbulb }
                 ]
             },
             {
-                label: "Día Difícil",
-                value: "Monólogo sobre un día complicado con corte de luz y llegar tarde",
-                registerInstruction: "Registro: informal emotivo pero claro. Primera persona. Lunfardo: no.",
-                icon: Frown,
-                actions: [
-                    { label: "Qué Salió Mal", value: "Explicar qué fue mal", icon: AlertTriangle },
-                    { label: "Cómo Lo Resolví", value: "Contar la solución", icon: Wrench },
-                    { label: "Ayuda Recibida", value: "Mencionar ayuda", icon: Hand },
-                    { label: "Sentimientos", value: "Expresar emociones", icon: Heart },
-                    { label: "Resultado", value: "Decir cómo terminó", icon: CheckCircle }
-                ]
-            },
-            {
-                label: "Receta en Casa",
-                value: "Monólogo explicando una tortilla de papas paso a paso",
-                registerInstruction: "Registro: informal instructivo. Primera persona o impersonal. Lunfardo: no.",
+                label: "Aprendí a Cocinar",
+                value: "Entrevista sobre cómo el invitado aprendió a cocinar",
+                registerInstruction: "Registro informal y ameno. Pretérito básico y presente. Vocabulario de cocina simple.",
                 icon: Utensils,
                 actions: [
-                    { label: "Ingredientes", value: "Listar ingredientes básicos", icon: Menu },
-                    { label: "Pasos", value: "Explicar pasos simples", icon: Hand },
-                    { label: "Tiempo", value: "Decir tiempo de preparación", icon: Clock },
-                    { label: "Consejo", value: "Dar un consejo de cocina", icon: Smile },
-                    { label: "Resultado", value: "Describir el resultado", icon: Star }
+                    { label: "El Primer Plato", value: "Cuenta cuál fue el primer plato que aprendió.", icon: Menu },
+                    { label: "Quién le Enseñó", value: "Explica quién le enseñó a cocinar.", icon: Heart },
+                    { label: "Un Desastre en la Cocina", value: "Recuerda una vez que algo salió mal.", icon: AlertCircle },
+                    { label: "Su Plato Estrella", value: "Describe el plato que mejor le sale.", icon: Star },
+                    { label: "Ingredientes Favoritos", value: "Cuenta qué ingredientes le encanta usar.", icon: Apple },
+                    { label: "Cocinar para Otros", value: "Explica qué siente al cocinar para su familia.", icon: Users }
                 ]
             },
             {
-                label: "Una Amistad",
-                value: "Relato de amistad nacida en un curso de idioma",
-                registerInstruction: "Registro: informal cercano y positivo. Primera persona. Lunfardo: no.",
-                icon: HeartHandshake,
+                label: "Mi Primera Mascota",
+                value: "Entrevista sobre la primera mascota del invitado",
+                registerInstruction: "Registro informal y tierno. Pretérito y presente básicos. Vocabulario de animales.",
+                icon: Dog,
                 actions: [
-                    { label: "Cómo Se Conocieron", value: "Contar cómo se conocieron", icon: UserPlus },
-                    { label: "Actividad Favorita", value: "Describir actividad favorita", icon: Smile },
-                    { label: "Conflicto Pequeño", value: "Contar un conflicto", icon: AlertCircle },
-                    { label: "Solución", value: "Explicar cómo lo resolvieron", icon: CheckCircle },
-                    { label: "Importancia", value: "Decir por qué es importante", icon: Heart }
+                    { label: "Cómo Llegó", value: "Cuenta cómo consiguió a su primera mascota.", icon: Gift },
+                    { label: "Su Nombre y Carácter", value: "Describe el nombre y la personalidad del animal.", icon: Smile },
+                    { label: "Una Travesura", value: "Recuerda una travesura divertida de la mascota.", icon: Zap },
+                    { label: "El Cuidado Diario", value: "Explica cómo cuidaba a su mascota.", icon: Heart },
+                    { label: "Un Recuerdo Especial", value: "Comparte un momento inolvidable juntos.", icon: Star },
+                    { label: "Lo que Aprendió", value: "Cuenta qué aprendió de tener una mascota.", icon: Lightbulb }
                 ]
             },
             {
-                label: "Evento Cultural",
-                value: "Monólogo sobre un festival de cine barrial en un centro cultural",
-                registerInstruction: "Registro: informal descriptivo. Primera persona, tono respetuoso. Lunfardo: no.",
+                label: "Mi Trabajo Actual",
+                value: "Entrevista sobre el trabajo que hace el invitado",
+                registerInstruction: "Registro informal-profesional. Presente y vocabulario laboral básico. Claridad.",
+                icon: Briefcase,
+                actions: [
+                    { label: "En Qué Consiste", value: "Explica de forma sencilla en qué trabaja.", icon: ListChecks },
+                    { label: "Un Día Normal", value: "Describe cómo es un día típico en su trabajo.", icon: Clock },
+                    { label: "Lo que Más le Gusta", value: "Cuenta la parte que más disfruta.", icon: ThumbsUp },
+                    { label: "Lo Más Difícil", value: "Explica qué le resulta más difícil.", icon: AlertCircle },
+                    { label: "Sus Compañeros", value: "Describe cómo es el equipo con el que trabaja.", icon: Users },
+                    { label: "Un Sueño Profesional", value: "Comparte qué le gustaría hacer en el futuro.", icon: Star }
+                ]
+            },
+            {
+                label: "Un Viaje Reciente",
+                value: "Entrevista sobre un viaje que hizo el invitado",
+                registerInstruction: "Registro informal narrativo. Pretérito básico. Vocabulario de viajes sencillo.",
+                icon: Plane,
+                actions: [
+                    { label: "A Dónde Fue", value: "Cuenta a dónde viajó y con quién.", icon: MapPin },
+                    { label: "El Viaje de Ida", value: "Describe cómo fue llegar hasta allí.", icon: Plane },
+                    { label: "Lo que Más le Gustó", value: "Explica qué fue lo mejor del viaje.", icon: Heart },
+                    { label: "Una Sorpresa", value: "Recuerda algo inesperado que le pasó.", icon: Sparkles },
+                    { label: "La Comida del Lugar", value: "Cuenta qué comió y si le gustó.", icon: Utensils },
+                    { label: "Volver a Casa", value: "Describe cómo se sintió al volver.", icon: Home }
+                ]
+            },
+            {
+                label: "Mi Pasatiempo",
+                value: "Entrevista sobre el pasatiempo favorito del invitado",
+                registerInstruction: "Registro informal y entusiasta. Presente y vocabulario de aficiones. Frases claras.",
                 icon: Music,
                 actions: [
-                    { label: "Dónde Fue", value: "Decir dónde fue", icon: MapPin },
-                    { label: "Qué Vi", value: "Describir lo que vio", icon: Eye },
-                    { label: "Qué Me Gustó", value: "Decir qué le gustó", icon: ThumbsUp },
-                    { label: "Qué No", value: "Decir qué no le gustó", icon: ThumbsDown },
-                    { label: "Invitación", value: "Invitar a otros", icon: Ticket }
+                    { label: "Cómo Empezó", value: "Cuenta cómo descubrió su pasatiempo.", icon: Lightbulb },
+                    { label: "Con Qué Frecuencia", value: "Explica cada cuánto lo practica.", icon: Calendar },
+                    { label: "Lo que Necesita", value: "Describe qué materiales o cosas usa.", icon: Package },
+                    { label: "Un Logro Pequeño", value: "Comparte algo que consiguió con su afición.", icon: Trophy },
+                    { label: "Con Quién lo Comparte", value: "Cuenta si lo hace solo o con otros.", icon: Users },
+                    { label: "Por Qué le Gusta", value: "Explica qué siente cuando lo practica.", icon: Heart }
                 ]
             },
             {
-                label: "Mudanza",
-                value: "Monólogo sobre una mudanza a un departamento pequeño",
-                registerInstruction: "Registro: informal narrativo. Primera persona. Lunfardo: no.",
+                label: "Mi Familia",
+                value: "Entrevista sobre la familia del invitado",
+                registerInstruction: "Registro informal y cálido. Presente y vocabulario familiar. Sin temas delicados.",
+                icon: Users,
+                actions: [
+                    { label: "Quiénes Son", value: "Presenta a los miembros de su familia.", icon: Users },
+                    { label: "Un Recuerdo de la Infancia", value: "Comparte un recuerdo bonito de pequeño.", icon: Baby },
+                    { label: "Una Tradición Familiar", value: "Describe una costumbre que hacen juntos.", icon: Gift },
+                    { label: "La Comida en Familia", value: "Cuenta cómo son las comidas familiares.", icon: Utensils },
+                    { label: "A Quién se Parece", value: "Explica a quién se parece y en qué.", icon: Smile },
+                    { label: "Lo que Más Valora", value: "Dice qué aprecia más de su familia.", icon: Heart }
+                ]
+            },
+            {
+                label: "Cómo Cambié de Casa",
+                value: "Entrevista sobre una mudanza del invitado",
+                registerInstruction: "Registro informal narrativo. Pretérito y presente. Vocabulario del hogar.",
                 icon: Home,
                 actions: [
-                    { label: "Preparación", value: "Contar cómo preparó las cajas", icon: ListChecks },
-                    { label: "Ayuda", value: "Mencionar quién ayudó", icon: Hand },
-                    { label: "Problema", value: "Contar un problema durante la mudanza", icon: AlertTriangle },
-                    { label: "Emoción", value: "Expresar cómo se sintió", icon: Heart },
-                    { label: "Resultado", value: "Decir cómo terminó todo", icon: CheckCircle }
+                    { label: "Por Qué se Mudó", value: "Explica el motivo de la mudanza.", icon: ArrowRight },
+                    { label: "El Día de la Mudanza", value: "Cuenta cómo fue ese día tan movido.", icon: Truck },
+                    { label: "La Casa Nueva", value: "Describe cómo es su nueva casa.", icon: Home },
+                    { label: "El Barrio", value: "Habla de cómo es el nuevo barrio.", icon: MapPin },
+                    { label: "Lo que Extraña", value: "Cuenta qué echa de menos de antes.", icon: Frown },
+                    { label: "Lo que Ganó", value: "Explica qué mejoró con el cambio.", icon: ThumbsUp }
                 ]
             },
             {
-                label: "Primer Día de Gimnasio",
-                value: "Monólogo sobre el primer día de gimnasio",
-                registerInstruction: "Registro: informal motivador. Primera persona. Lunfardo: no.",
+                label: "Mi Deporte Favorito",
+                value: "Entrevista sobre el deporte que practica el invitado",
+                registerInstruction: "Registro informal y dinámico. Presente y vocabulario deportivo básico. Entusiasmo.",
                 icon: Dumbbell,
                 actions: [
-                    { label: "Expectativa", value: "Contar qué esperaba", icon: Lightbulb },
-                    { label: "Ejercicio", value: "Describir un ejercicio que hizo", icon: Hand },
-                    { label: "Dificultad", value: "Contar una dificultad", icon: AlertCircle },
-                    { label: "Consejo", value: "Dar un consejo simple", icon: ThumbsUp },
-                    { label: "Emoción", value: "Decir cómo se sintió", icon: Smile }
-                ]
-            },
-            {
-                label: "Aprender a Conducir",
-                value: "Monólogo sobre clases de conducción en ciudad",
-                registerInstruction: "Registro: informal claro. Primera persona. Lunfardo: no.",
-                icon: Car,
-                actions: [
-                    { label: "Clases", value: "Contar cómo son las clases", icon: Calendar },
-                    { label: "Error", value: "Mencionar un error cometido", icon: AlertTriangle },
-                    { label: "Instructor", value: "Describir al instructor", icon: UserPlus },
-                    { label: "Miedo", value: "Expresar un miedo", icon: Frown },
-                    { label: "Progreso", value: "Contar un avance", icon: TrendingUp }
-                ]
-            },
-            {
-                label: "Celebración de Barrio",
-                value: "Monólogo sobre una fiesta barrial con música y comidas",
-                registerInstruction: "Registro: informal descriptivo. Primera persona. Lunfardo: no.",
-                icon: Music,
-                actions: [
-                    { label: "Preparación", value: "Describir la preparación", icon: ListChecks },
-                    { label: "Actividad", value: "Contar una actividad principal", icon: Flag },
-                    { label: "Encuentro", value: "Mencionar con quién se encontró", icon: UserPlus },
-                    { label: "Comida", value: "Describir la comida típica", icon: Utensils },
-                    { label: "Cierre", value: "Cerrar con una sensación final", icon: Heart }
+                    { label: "Qué Deporte Practica", value: "Cuenta qué deporte hace y desde cuándo.", icon: Dumbbell },
+                    { label: "Cómo lo Descubrió", value: "Explica cómo empezó a practicarlo.", icon: Lightbulb },
+                    { label: "Su Rutina", value: "Describe cuándo y dónde entrena.", icon: Clock },
+                    { label: "Un Buen Momento", value: "Comparte un partido o logro que recuerda.", icon: Trophy },
+                    { label: "Lo Difícil", value: "Cuenta qué le cuesta más de ese deporte.", icon: AlertCircle },
+                    { label: "Un Consejo", value: "Da un consejo a quien quiera empezar.", icon: ThumbsUp }
                 ]
             }
         ],
         [Level.Intermediate]: [
             {
-                label: "Decisión Importante",
-                value: "Monólogo sobre la decisión de mudarse por una beca",
-                registerInstruction: "Registro: semi-formal reflexivo. Primera persona. Lunfardo: no.",
-                icon: Scale,
-                actions: [
-                    { label: "Contexto", value: "Explicar el contexto", icon: FileText },
-                    { label: "Opciones", value: "Presentar opciones", icon: Scale },
-                    { label: "Dudas", value: "Expresar dudas", icon: Frown },
-                    { label: "Decisión", value: "Contar la decisión final", icon: CheckCircle },
-                    { label: "Consecuencia", value: "Explicar la consecuencia", icon: ArrowRight }
-                ]
-            },
-            {
-                label: "Problema y Solución",
-                value: "Relato de un proyecto grupal que falló y cómo se reorganizó",
-                registerInstruction: "Registro: semi-formal narrativo. Primera persona. Lunfardo: no.",
-                icon: AlertTriangle,
-                actions: [
-                    { label: "Problema", value: "Describir el problema", icon: AlertTriangle },
-                    { label: "Pasos", value: "Explicar los pasos para resolverlo", icon: ListChecks },
-                    { label: "Obstáculo", value: "Mencionar un obstáculo", icon: X },
-                    { label: "Resultado", value: "Contar el resultado", icon: CheckCircle },
-                    { label: "Reflexión", value: "Reflexionar sobre lo aprendido", icon: Brain }
-                ]
-            },
-            {
-                label: "Historia de Superación",
-                value: "Monólogo sobre volver a entrenar tras una lesión deportiva",
-                registerInstruction: "Registro: informal motivador. Primera persona. Lunfardo: no.",
-                icon: TrendingUp,
-                actions: [
-                    { label: "Dificultad", value: "Describir dificultad inicial", icon: AlertCircle },
-                    { label: "Esfuerzo", value: "Contar el esfuerzo", icon: Dumbbell },
-                    { label: "Apoyo", value: "Mencionar apoyo recibido", icon: Heart },
-                    { label: "Logro", value: "Describir el logro", icon: Star },
-                    { label: "Aprendizaje", value: "Cierre con aprendizaje", icon: Lightbulb }
-                ]
-            },
-            {
-                label: "Relato de Ciudad",
-                value: "Monólogo sobre cambios en la ciudad por nueva línea de metro",
-                registerInstruction: "Registro: semi-formal descriptivo. Primera persona. Lunfardo: no.",
-                icon: Building,
-                actions: [
-                    { label: "Cambio", value: "Explicar un cambio reciente", icon: Sparkles },
-                    { label: "Causa", value: "Describir causas", icon: Search },
-                    { label: "Reacción", value: "Contar reacción de la gente", icon: MessageCircle },
-                    { label: "Balance", value: "Hablar de beneficios y problemas", icon: Scale },
-                    { label: "Deseo Futuro", value: "Expresar un deseo futuro", icon: Star }
-                ]
-            },
-            {
-                label: "Crónica de Evento",
-                value: "Relato cronológico de una maratón solidaria en la ciudad",
-                registerInstruction: "Registro: semi-formal narrativo. Primera persona. Lunfardo: no.",
-                icon: Calendar,
-                actions: [
-                    { label: "Inicio", value: "Describir el inicio", icon: Flag },
-                    { label: "Momento Clave", value: "Narrar el momento clave", icon: Zap },
-                    { label: "Ambiente", value: "Describir el ambiente", icon: Music },
-                    { label: "Opinión", value: "Dar opinión personal", icon: ThumbsUp },
-                    { label: "Conclusión", value: "Cerrar la crónica", icon: CheckCircle }
-                ]
-            },
-            {
-                label: "Reflexión Cultural",
-                value: "Monólogo sobre la tradición del mate y cambios generacionales",
-                registerInstruction: "Registro: semi-formal reflexivo. Primera persona. Lunfardo: no.",
-                icon: Palette,
-                actions: [
-                    { label: "Tradición", value: "Explicar una tradición", icon: BookOpen },
-                    { label: "Valor Cultural", value: "Describir su valor", icon: Heart },
-                    { label: "Cambio Generacional", value: "Comparar generaciones", icon: Scale },
-                    { label: "Experiencia", value: "Contar experiencia personal", icon: MessageCircle },
-                    { label: "Conclusión", value: "Cerrar con reflexión", icon: Brain }
-                ]
-            },
-            {
-                label: "Carta Abierta",
-                value: "Monólogo en forma de carta a la municipalidad por espacios verdes",
-                registerInstruction: "Registro: formal epistolar. Primera persona dirigida a un destinatario. Lunfardo: no.",
-                icon: FileText,
-                actions: [
-                    { label: "Destinatario", value: "Decir a quién va la carta", icon: UserPlus },
-                    { label: "Motivo", value: "Explicar el motivo", icon: MessageCircle },
-                    { label: "Argumento", value: "Desarrollar argumento principal", icon: Scale },
-                    { label: "Ejemplo", value: "Dar un ejemplo concreto", icon: Search },
-                    { label: "Cierre Emotivo", value: "Cerrar con tono emotivo", icon: Heart }
-                ]
-            },
-            {
-                label: "Cambio de Trabajo",
-                value: "Monólogo sobre dejar un empleo y empezar otro",
-                registerInstruction: "Registro: semi-formal reflexivo. Primera persona. Lunfardo: no.",
+                label: "El Día que Me Despidieron",
+                value: "Un invitado relata cómo perdió su empleo y qué vino después",
+                registerInstruction: "Registro informal reflexivo entre dos personas. Narración en pasado, emociones y opinión. Sin datos reales.",
                 icon: Briefcase,
                 actions: [
-                    { label: "Motivo", value: "Explicar el motivo del cambio", icon: MessageCircle },
-                    { label: "Transición", value: "Contar cómo fue la transición", icon: ArrowRight },
-                    { label: "Miedo", value: "Expresar un miedo o duda", icon: Frown },
-                    { label: "Aprendizaje", value: "Describir un aprendizaje", icon: Lightbulb },
-                    { label: "Resultado", value: "Contar el resultado final", icon: CheckCircle }
+                    { label: "Cómo Fue el Momento", value: "Relata cómo le comunicaron el despido.", icon: X },
+                    { label: "La Primera Reacción", value: "Describe qué sintió y cómo reaccionó.", icon: Frown },
+                    { label: "Contárselo a los Demás", value: "Cuenta cómo se lo dijo a su familia.", icon: Users },
+                    { label: "Buscar de Nuevo", value: "Explica cómo empezó a buscar otro trabajo.", icon: Search },
+                    { label: "Lo que Aprendió", value: "Reflexiona sobre lo que le enseñó la experiencia.", icon: Lightbulb },
+                    { label: "Cómo Está Ahora", value: "Cuenta cómo cambió su vida después.", icon: TrendingUp }
                 ]
             },
             {
-                label: "Proyecto Creativo",
-                value: "Monólogo sobre un proyecto artístico personal",
-                registerInstruction: "Registro: semi-formal narrativo. Primera persona. Lunfardo: no.",
-                icon: Palette,
+                label: "Emprender de Cero",
+                value: "Entrevista a alguien que montó su propio negocio",
+                registerInstruction: "Registro cercano y motivador. Pasado y presente, opinión. Vocabulario de negocios accesible.",
+                icon: Rocket,
                 actions: [
-                    { label: "Idea", value: "Describir la idea inicial", icon: Lightbulb },
-                    { label: "Proceso", value: "Contar el proceso de trabajo", icon: ListChecks },
-                    { label: "Bloqueo", value: "Mencionar un bloqueo creativo", icon: AlertCircle },
-                    { label: "Solución", value: "Explicar cómo lo resolvió", icon: Wrench },
-                    { label: "Balance", value: "Hacer un balance final", icon: Scale }
+                    { label: "La Idea Inicial", value: "Cuenta cómo se le ocurrió la idea.", icon: Lightbulb },
+                    { label: "Los Primeros Pasos", value: "Describe cómo empezó con poco dinero.", icon: ArrowRight },
+                    { label: "El Primer Cliente", value: "Recuerda su primera venta o cliente.", icon: HandCoins },
+                    { label: "Un Momento de Dudas", value: "Relata cuándo pensó en rendirse.", icon: Frown },
+                    { label: "Aprender de los Errores", value: "Explica un error del que aprendió mucho.", icon: AlertCircle },
+                    { label: "Consejos para Empezar", value: "Da consejos a quien quiera emprender.", icon: ThumbsUp }
                 ]
             },
             {
-                label: "Viaje en Solitario",
-                value: "Monólogo sobre viajar solo por primera vez",
-                registerInstruction: "Registro: semi-formal narrativo. Primera persona. Lunfardo: no.",
+                label: "Vivir en el Extranjero",
+                value: "Entrevista a alguien que se mudó a otro país",
+                registerInstruction: "Registro informal reflexivo. Narración y comparación cultural. Vocabulario intermedio.",
+                icon: Globe,
+                actions: [
+                    { label: "Por Qué se Fue", value: "Explica qué le llevó a mudarse de país.", icon: Plane },
+                    { label: "El Choque Cultural", value: "Cuenta qué le sorprendió al llegar.", icon: Sparkles },
+                    { label: "El Idioma", value: "Relata cómo se manejó con otro idioma.", icon: MessageCircle },
+                    { label: "Hacer Amigos", value: "Describe cómo construyó una nueva red de amigos.", icon: Users },
+                    { label: "Lo que Extraña", value: "Habla de lo que echa de menos de su país.", icon: Home },
+                    { label: "¿Volvería?", value: "Reflexiona sobre si volvería o se quedaría.", icon: HelpCircle }
+                ]
+            },
+            {
+                label: "Superé una Lesión",
+                value: "Entrevista sobre recuperarse de una lesión importante",
+                registerInstruction: "Registro cercano y honesto. Narración con emoción contenida. Vocabulario de salud accesible.",
+                icon: Stethoscope,
+                actions: [
+                    { label: "Cómo Pasó", value: "Cuenta cómo ocurrió la lesión.", icon: AlertTriangle },
+                    { label: "El Diagnóstico", value: "Relata el momento en que supo su alcance.", icon: FileText },
+                    { label: "La Recuperación", value: "Describe el proceso de rehabilitación.", icon: TrendingUp },
+                    { label: "El Apoyo", value: "Habla de quién le ayudó a seguir.", icon: HeartHandshake },
+                    { label: "El Momento Más Duro", value: "Recuerda el peor momento del proceso.", icon: Frown },
+                    { label: "La Nueva Perspectiva", value: "Explica cómo cambió su forma de ver la vida.", icon: Eye }
+                ]
+            },
+            {
+                label: "Cambié de Carrera",
+                value: "Entrevista a alguien que cambió de profesión",
+                registerInstruction: "Registro reflexivo y cercano. Pasado, presente y condicional simple. Opinión personal.",
+                icon: ArrowRight,
+                actions: [
+                    { label: "La Vida Anterior", value: "Describe a qué se dedicaba antes.", icon: Briefcase },
+                    { label: "La Chispa del Cambio", value: "Cuenta qué le hizo replantearse todo.", icon: Zap },
+                    { label: "El Miedo a Empezar", value: "Relata sus dudas antes de dar el paso.", icon: Frown },
+                    { label: "Volver a Estudiar", value: "Explica cómo se formó de nuevo.", icon: GraduationCap },
+                    { label: "La Reacción de los Demás", value: "Cuenta qué le dijeron sus allegados.", icon: Users },
+                    { label: "¿Valió la Pena?", value: "Reflexiona sobre si repetiría la decisión.", icon: Scale }
+                ]
+            },
+            {
+                label: "Un Estilo de Vida Nuevo",
+                value: "Entrevista sobre adoptar un hábito o estilo de vida",
+                registerInstruction: "Registro cercano y divulgativo. Presente y pasado, argumentación simple. Vocabulario de hábitos.",
+                icon: Leaf,
+                actions: [
+                    { label: "El Antes", value: "Describe cómo vivía antes del cambio.", icon: Clock },
+                    { label: "La Decisión", value: "Explica por qué decidió cambiar.", icon: Lightbulb },
+                    { label: "Los Primeros Días", value: "Cuenta lo difícil de empezar.", icon: AlertCircle },
+                    { label: "Los Beneficios", value: "Describe qué mejoró en su vida.", icon: ThumbsUp },
+                    { label: "Las Críticas", value: "Relata cómo respondió a quienes dudaban.", icon: MessageCircle },
+                    { label: "Mantenerlo", value: "Explica cómo sostiene el hábito hoy.", icon: CheckCircle }
+                ]
+            },
+            {
+                label: "Mi Relación a Distancia",
+                value: "Entrevista sobre mantener una relación a distancia",
+                registerInstruction: "Registro íntimo pero pudoroso. Narración y emoción. Vocabulario afectivo intermedio.",
+                icon: Heart,
+                actions: [
+                    { label: "Cómo Empezó", value: "Cuenta cómo se conocieron y por qué la distancia.", icon: Sparkles },
+                    { label: "El Día a Día", value: "Describe cómo mantenían el contacto.", icon: Phone },
+                    { label: "Los Reencuentros", value: "Relata la emoción de volver a verse.", icon: Plane },
+                    { label: "Los Momentos Difíciles", value: "Habla de las dudas y los celos.", icon: Frown },
+                    { label: "La Confianza", value: "Explica cómo cuidaban la confianza.", icon: HeartHandshake },
+                    { label: "El Desenlace", value: "Cuenta cómo terminó o cómo siguió.", icon: ArrowRight }
+                ]
+            },
+            {
+                label: "Aprendí un Oficio",
+                value: "Entrevista a alguien que aprendió un oficio manual",
+                registerInstruction: "Registro cercano y práctico. Narración y descripción de procesos. Vocabulario de oficios.",
+                icon: Hammer,
+                actions: [
+                    { label: "Qué Oficio Aprendió", value: "Cuenta qué oficio eligió y por qué.", icon: Wrench },
+                    { label: "El Maestro", value: "Describe a quién le enseñó y cómo.", icon: Users },
+                    { label: "El Primer Trabajo", value: "Recuerda su primer encargo real.", icon: Package },
+                    { label: "Los Errores", value: "Relata errores que le enseñaron el oficio.", icon: AlertCircle },
+                    { label: "El Orgullo del Trabajo", value: "Explica qué siente al terminar una pieza.", icon: Trophy },
+                    { label: "El Futuro del Oficio", value: "Reflexiona sobre el futuro de su trabajo.", icon: TrendingUp }
+                ]
+            },
+            {
+                label: "Todo Salió Mal en un Evento",
+                value: "Entrevista sobre organizar un evento que fue un caos",
+                registerInstruction: "Registro informal con humor. Narración en pasado, tono ligero. Vocabulario intermedio.",
+                icon: AlertTriangle,
+                actions: [
+                    { label: "El Plan Perfecto", value: "Describe cómo lo tenía todo planeado.", icon: ListChecks },
+                    { label: "El Primer Fallo", value: "Cuenta qué fue lo primero que salió mal.", icon: X },
+                    { label: "El Efecto Dominó", value: "Relata cómo un problema llevó a otro.", icon: Zap },
+                    { label: "Improvisar", value: "Explica cómo intentó salvar la situación.", icon: Lightbulb },
+                    { label: "La Reacción de la Gente", value: "Cuenta cómo lo tomaron los asistentes.", icon: Users },
+                    { label: "Reírse Después", value: "Reflexiona sobre cómo hoy se ríe de todo.", icon: Smile }
+                ]
+            },
+            {
+                label: "Convivir con Compañeros",
+                value: "Entrevista sobre compartir vivienda con otras personas",
+                registerInstruction: "Registro informal cotidiano. Narración y opinión. Vocabulario de convivencia.",
+                icon: Home,
+                actions: [
+                    { label: "Cómo Empezó", value: "Cuenta por qué decidió compartir piso.", icon: DoorOpen },
+                    { label: "Las Reglas de la Casa", value: "Describe las normas que acordaron.", icon: ListChecks },
+                    { label: "Un Conflicto", value: "Relata un roce por la limpieza o el ruido.", icon: AlertCircle },
+                    { label: "Los Buenos Momentos", value: "Habla de lo que disfrutó de convivir.", icon: Smile },
+                    { label: "Aprender a Ceder", value: "Explica cómo aprendió a negociar.", icon: Handshake },
+                    { label: "Lo que se Lleva", value: "Reflexiona sobre lo que aprendió de la experiencia.", icon: Lightbulb }
+                ]
+            },
+            {
+                label: "Cómo Salí de una Deuda",
+                value: "Entrevista sobre superar una situación económica difícil",
+                registerInstruction: "Registro honesto y cercano. Narración y consejos. Vocabulario financiero accesible.",
+                icon: PiggyBank,
+                actions: [
+                    { label: "Cómo se Endeudó", value: "Explica cómo llegó a esa situación.", icon: TrendingUp },
+                    { label: "Darse Cuenta", value: "Cuenta el momento en que asumió el problema.", icon: Eye },
+                    { label: "El Plan", value: "Describe cómo organizó sus gastos.", icon: ListChecks },
+                    { label: "Los Sacrificios", value: "Relata a qué tuvo que renunciar.", icon: Scale },
+                    { label: "Pequeñas Victorias", value: "Habla de los avances que le motivaban.", icon: Trophy },
+                    { label: "La Lección Financiera", value: "Comparte lo que aprendió sobre el dinero.", icon: Lightbulb }
+                ]
+            },
+            {
+                label: "Mi Experiencia de Voluntario",
+                value: "Entrevista a alguien sobre su labor de voluntariado",
+                registerInstruction: "Registro cálido y reflexivo. Narración y valoración. Vocabulario solidario intermedio.",
+                icon: HeartHandshake,
+                actions: [
+                    { label: "Cómo Empezó", value: "Cuenta cómo llegó al voluntariado.", icon: DoorOpen },
+                    { label: "Qué Hacía", value: "Describe las tareas que realizaba.", icon: ListChecks },
+                    { label: "Una Historia que le Marcó", value: "Relata un encuentro que le conmovió.", icon: Heart },
+                    { label: "Lo Difícil", value: "Habla de los momentos duros de ayudar.", icon: Frown },
+                    { label: "Lo que Recibió", value: "Explica qué ganó él con la experiencia.", icon: Sparkles },
+                    { label: "Animar a Otros", value: "Invita a los oyentes a participar.", icon: Megaphone }
+                ]
+            }
+        ],
+        [Level.Advanced]: [
+            {
+                label: "Escapé de una Situación de Control",
+                value: "Un invitado relata cómo salió de una relación o entorno de control",
+                registerInstruction: "Registro íntimo y grave, pero contenido. Narración compleja, matices psicológicos. Sin morbo ni datos reales.",
+                icon: ShieldAlert,
+                actions: [
+                    { label: "Cómo Empezó Todo", value: "Relata cómo no vio las señales al principio.", icon: Eye },
+                    { label: "El Punto de Inflexión", value: "Describe el momento en que entendió la situación.", icon: Zap },
+                    { label: "Planear la Salida", value: "Cuenta cómo preparó su salida con cuidado.", icon: ListChecks },
+                    { label: "El Miedo y la Culpa", value: "Explora las emociones contradictorias que sintió.", icon: Ghost },
+                    { label: "Reconstruirse", value: "Habla de cómo recuperó su autonomía.", icon: Sprout },
+                    { label: "Su Mensaje Hoy", value: "Comparte una reflexión para quien lo vive.", icon: Megaphone }
+                ]
+            },
+            {
+                label: "Fui Testigo de un Hecho Grave",
+                value: "Entrevista a un testigo de un acontecimiento serio",
+                registerInstruction: "Registro sobrio y reflexivo. Narración precisa, dilemas morales. Prudencia y matiz.",
+                icon: Eye,
+                actions: [
+                    { label: "El Momento", value: "Describe con detalle contenido lo que presenció.", icon: AlertOctagon },
+                    { label: "La Decisión de Actuar", value: "Relata su dilema entre intervenir o no.", icon: Scale },
+                    { label: "Las Consecuencias", value: "Cuenta qué pasó después para él.", icon: ArrowRight },
+                    { label: "Declarar", value: "Explica cómo fue relatar los hechos oficialmente.", icon: FileText },
+                    { label: "El Peso Emocional", value: "Habla de cómo le afectó psicológicamente.", icon: Brain },
+                    { label: "Lo que Cambiaría", value: "Reflexiona sobre qué haría distinto.", icon: HelpCircle }
+                ]
+            },
+            {
+                label: "Cuidé a un Familiar Enfermo",
+                value: "Entrevista sobre acompañar a un familiar en una enfermedad larga",
+                registerInstruction: "Registro íntimo y sereno. Narración emocional madura. Vocabulario de cuidado y duelo.",
+                icon: HeartHandshake,
+                actions: [
+                    { label: "El Diagnóstico", value: "Relata cómo recibieron la noticia.", icon: FileText },
+                    { label: "Cambiar de Vida", value: "Explica cómo reorganizó su rutina para cuidar.", icon: ArrowRight },
+                    { label: "Los Días Difíciles", value: "Describe el desgaste físico y emocional.", icon: BatteryLow },
+                    { label: "Momentos de Ternura", value: "Comparte instantes de conexión profunda.", icon: Heart },
+                    { label: "El Cuidador Olvidado", value: "Reflexiona sobre cuidar también de uno mismo.", icon: Users },
+                    { label: "Lo que Queda", value: "Habla de lo que aprendió sobre la vida.", icon: Sprout }
+                ]
+            },
+            {
+                label: "Sobreviví a un Desastre",
+                value: "Entrevista a alguien que vivió un desastre natural",
+                registerInstruction: "Registro intenso pero mesurado. Narración vívida, reflexión. Vocabulario amplio.",
+                icon: Umbrella,
+                actions: [
+                    { label: "Los Primeros Signos", value: "Relata las señales previas al desastre.", icon: AlertTriangle },
+                    { label: "El Momento Crítico", value: "Describe la hora más peligrosa.", icon: Waves },
+                    { label: "La Comunidad", value: "Cuenta cómo la gente se ayudó entre sí.", icon: Users },
+                    { label: "La Pérdida", value: "Habla de lo que perdió y cómo lo asumió.", icon: Frown },
+                    { label: "Reconstruir", value: "Explica el largo proceso de volver a empezar.", icon: Hammer },
+                    { label: "Otra Mirada sobre la Vida", value: "Reflexiona sobre qué es esencial ahora.", icon: Eye }
+                ]
+            },
+            {
+                label: "Denuncié Malas Prácticas",
+                value: "Entrevista a alguien que denunció irregularidades en su empresa",
+                registerInstruction: "Registro serio y ético. Narración argumentada, dilemas. Vocabulario laboral y legal.",
+                icon: FileWarning,
+                actions: [
+                    { label: "Lo que Descubrió", value: "Explica qué irregularidad detectó.", icon: Search },
+                    { label: "El Dilema Moral", value: "Relata su lucha entre callar o denunciar.", icon: Scale },
+                    { label: "Dar el Paso", value: "Cuenta cómo y ante quién denunció.", icon: Megaphone },
+                    { label: "Las Represalias", value: "Describe las consecuencias que enfrentó.", icon: AlertTriangle },
+                    { label: "El Apoyo y la Soledad", value: "Habla de quién le apoyó y quién le dio la espalda.", icon: Users },
+                    { label: "¿Lo Volvería a Hacer?", value: "Reflexiona sobre el precio de la integridad.", icon: HelpCircle }
+                ]
+            },
+            {
+                label: "Reconstruí mi Identidad",
+                value: "Entrevista sobre reinventarse tras una crisis personal",
+                registerInstruction: "Registro reflexivo y maduro. Narración introspectiva, abstracción. Vocabulario rico.",
+                icon: Sparkles,
+                actions: [
+                    { label: "La Vida que Se Rompió", value: "Describe la crisis que lo cambió todo.", icon: X },
+                    { label: "Tocar Fondo", value: "Relata el momento más bajo con honestidad.", icon: Frown },
+                    { label: "La Pregunta Clave", value: "Cuenta la pregunta que se hizo a sí mismo.", icon: HelpCircle },
+                    { label: "Pequeños Pasos", value: "Explica cómo empezó a reconstruirse.", icon: Sprout },
+                    { label: "Una Nueva Definición", value: "Habla de cómo redefinió quién es.", icon: Eye },
+                    { label: "El Sentido", value: "Reflexiona sobre lo que da sentido a su vida.", icon: Star }
+                ]
+            },
+            {
+                label: "La Fama y sus Costos",
+                value: "Entrevista a alguien que vivió una exposición pública intensa",
+                registerInstruction: "Registro reflexivo y algo desencantado. Análisis de la exposición pública. Ironía madura.",
+                icon: Star,
+                actions: [
+                    { label: "El Ascenso", value: "Relata cómo llegó la atención repentina.", icon: TrendingUp },
+                    { label: "La Cara B", value: "Describe el lado oscuro de la exposición.", icon: Moon },
+                    { label: "Perder la Privacidad", value: "Habla de vivir bajo la mirada ajena.", icon: Eye },
+                    { label: "Las Críticas", value: "Explica cómo aprendió a convivir con el juicio.", icon: MessageCircle },
+                    { label: "Quién Sos sin Eso", value: "Reflexiona sobre su identidad más allá de la fama.", icon: Ghost },
+                    { label: "Un Consejo Sincero", value: "Comparte una advertencia honesta.", icon: Lightbulb }
+                ]
+            },
+            {
+                label: "Rechazos Antes de Publicar",
+                value: "Entrevista a un autor rechazado muchas veces antes de triunfar",
+                registerInstruction: "Registro cálido y perseverante. Narración con humor e ironía. Vocabulario literario.",
+                icon: BookOpen,
+                actions: [
+                    { label: "El Primer Manuscrito", value: "Cuenta cómo nació su primera obra.", icon: Feather },
+                    { label: "La Colección de 'No'", value: "Relata con humor los rechazos acumulados.", icon: X },
+                    { label: "La Duda", value: "Describe cuándo pensó en abandonar.", icon: Frown },
+                    { label: "Seguir Escribiendo", value: "Explica qué le hacía continuar.", icon: Sprout },
+                    { label: "El 'Sí'", value: "Relata el momento en que le aceptaron.", icon: CheckCircle },
+                    { label: "Qué le Diría a su Yo de Antes", value: "Reflexiona sobre la perseverancia.", icon: Clock }
+                ]
+            },
+            {
+                label: "Ética en las Decisiones",
+                value: "Entrevista a un profesional sobre dilemas éticos de su trabajo",
+                registerInstruction: "Registro intelectual y ponderado. Argumentación abstracta, matices. Vocabulario especializado.",
+                icon: Scale,
+                actions: [
+                    { label: "Un Caso Concreto", value: "Plantea un dilema real de su profesión.", icon: HelpCircle },
+                    { label: "Las Dos Caras", value: "Expone los argumentos de cada lado.", icon: Scale },
+                    { label: "La Presión", value: "Relata las presiones que complican decidir.", icon: AlertTriangle },
+                    { label: "La Línea Roja", value: "Explica dónde pone su límite y por qué.", icon: Ban },
+                    { label: "Vivir con la Decisión", value: "Habla de asumir las consecuencias.", icon: Brain },
+                    { label: "Enseñar a Decidir", value: "Reflexiona sobre cómo se forma el criterio ético.", icon: GraduationCap }
+                ]
+            },
+            {
+                label: "Migrar y Empezar de Nuevo",
+                value: "Entrevista sobre migrar y rehacer la vida en otro lugar",
+                registerInstruction: "Registro emotivo y reflexivo. Narración compleja, identidad y pertenencia. Vocabulario amplio.",
                 icon: Plane,
                 actions: [
-                    { label: "Decisión", value: "Contar por qué decidió viajar", icon: CheckCircle },
-                    { label: "Logística", value: "Describir la logística del viaje", icon: Calendar },
-                    { label: "Desafío", value: "Contar un desafío", icon: AlertTriangle },
-                    { label: "Encuentro", value: "Narrar un encuentro interesante", icon: UserPlus },
-                    { label: "Reflexión", value: "Cerrar con una reflexión", icon: Brain }
+                    { label: "La Decisión de Partir", value: "Explica qué le empujó a migrar.", icon: DoorOpen },
+                    { label: "El Duelo Migratorio", value: "Describe lo que dejó atrás.", icon: Frown },
+                    { label: "Los Trámites y las Puertas", value: "Relata las barreras burocráticas.", icon: FileText },
+                    { label: "Entre Dos Mundos", value: "Habla de sentirse de aquí y de allá.", icon: Globe },
+                    { label: "Echar Raíces", value: "Cuenta cómo construyó un nuevo hogar.", icon: Sprout },
+                    { label: "La Identidad", value: "Reflexiona sobre quién es tras el viaje.", icon: Eye }
+                ]
+            },
+            {
+                label: "La Enfermedad que Me Cambió",
+                value: "Entrevista sobre convivir con una enfermedad crónica",
+                registerInstruction: "Registro íntimo y sereno. Narración madura, resiliencia. Vocabulario de salud avanzado.",
+                icon: Stethoscope,
+                actions: [
+                    { label: "Los Primeros Síntomas", value: "Relata cómo empezó todo.", icon: Thermometer },
+                    { label: "El Diagnóstico", value: "Describe el impacto de conocer su condición.", icon: FileText },
+                    { label: "Reaprender a Vivir", value: "Explica cómo adaptó su vida diaria.", icon: ArrowRight },
+                    { label: "El Estigma", value: "Habla de los prejuicios que enfrentó.", icon: Eye },
+                    { label: "Lo que Ganó", value: "Comparte lo que la enfermedad le enseñó.", icon: Sprout },
+                    { label: "Su Voz", value: "Reflexiona sobre visibilizar su experiencia.", icon: Megaphone }
+                ]
+            },
+            {
+                label: "Perdón y Reconciliación",
+                value: "Entrevista sobre reconciliarse tras un conflicto familiar largo",
+                registerInstruction: "Registro íntimo y matizado. Narración emocional compleja. Vocabulario afectivo rico.",
+                icon: HeartHandshake,
+                actions: [
+                    { label: "La Herida", value: "Relata el origen del distanciamiento.", icon: Frown },
+                    { label: "Los Años de Silencio", value: "Describe cómo fue la distancia.", icon: Volume2 },
+                    { label: "El Primer Gesto", value: "Cuenta quién y cómo tendió la mano.", icon: Hand },
+                    { label: "Perdonar de Verdad", value: "Reflexiona sobre qué significa perdonar.", icon: Heart },
+                    { label: "Lo que No se Recupera", value: "Habla de lo que ya no volverá a ser igual.", icon: Clock },
+                    { label: "La Paz Posible", value: "Explica cómo es su relación hoy.", icon: Sprout }
+                ]
+            }
+        ]
+    },
+    [TextType.Monologue]: {
+        [Level.Beginner]: [
+            {
+                label: "Un Día Cualquiera",
+                value: "Una persona narra en primera persona cómo es un día normal de su vida",
+                registerInstruction: "Registro informal narrativo, un solo hablante. Presente y pretérito básico. Vocabulario cotidiano.",
+                icon: Sun,
+                actions: [
+                    { label: "La Mañana", value: "Narra cómo empieza su mañana paso a paso.", icon: Coffee },
+                    { label: "Ir al Trabajo", value: "Cuenta cómo va al trabajo o al estudio.", icon: Bus },
+                    { label: "La Hora de Comer", value: "Describe qué come y con quién.", icon: Utensils },
+                    { label: "La Tarde", value: "Relata qué hace por la tarde.", icon: Clock },
+                    { label: "Un Momento Favorito", value: "Comparte su momento preferido del día.", icon: Heart },
+                    { label: "La Noche", value: "Cuenta cómo termina el día.", icon: Moon }
+                ]
+            },
+            {
+                label: "Mi Comida Favorita",
+                value: "Alguien narra por qué ama un plato en particular",
+                registerInstruction: "Registro informal y sensorial. Presente y vocabulario de comida. Frases claras.",
+                icon: Utensils,
+                actions: [
+                    { label: "Qué Plato Es", value: "Presenta cuál es su comida favorita.", icon: Menu },
+                    { label: "A Qué Sabe", value: "Describe el sabor y el olor.", icon: Sparkles },
+                    { label: "Quién lo Prepara", value: "Cuenta quién lo cocina mejor.", icon: Heart },
+                    { label: "Cuándo lo Come", value: "Explica en qué ocasiones lo disfruta.", icon: Calendar },
+                    { label: "Un Recuerdo", value: "Comparte un recuerdo ligado a ese plato.", icon: Star },
+                    { label: "La Receta Simple", value: "Explica de forma sencilla cómo se hace.", icon: ListChecks }
+                ]
+            },
+            {
+                label: "Una Fiesta Familiar",
+                value: "Alguien narra una celebración con su familia",
+                registerInstruction: "Registro informal y cálido. Pretérito básico. Vocabulario de celebraciones.",
+                icon: Gift,
+                actions: [
+                    { label: "La Ocasión", value: "Cuenta qué se celebraba y dónde.", icon: Calendar },
+                    { label: "Quiénes Fueron", value: "Describe a la gente que asistió.", icon: Users },
+                    { label: "La Comida", value: "Relata qué comieron todos juntos.", icon: Utensils },
+                    { label: "La Música y el Baile", value: "Cuenta cómo fue el ambiente.", icon: Music },
+                    { label: "Un Momento Divertido", value: "Recuerda algo gracioso que pasó.", icon: Smile },
+                    { label: "El Final de la Fiesta", value: "Describe cómo terminó la celebración.", icon: Moon }
+                ]
+            },
+            {
+                label: "Cómo Conocí a mi Mejor Amigo",
+                value: "Alguien narra el origen de una gran amistad",
+                registerInstruction: "Registro informal y afectivo. Pretérito básico. Vocabulario de emociones simples.",
+                icon: Users,
+                actions: [
+                    { label: "El Primer Encuentro", value: "Cuenta dónde y cómo se conocieron.", icon: DoorOpen },
+                    { label: "La Primera Impresión", value: "Describe qué pensó al principio.", icon: Eye },
+                    { label: "Algo en Común", value: "Explica qué gusto compartían.", icon: Heart },
+                    { label: "Una Anécdota", value: "Relata una aventura juntos.", icon: Sparkles },
+                    { label: "Por Qué es Especial", value: "Dice por qué valora tanto esa amistad.", icon: Star },
+                    { label: "Hoy en Día", value: "Cuenta cómo es su amistad ahora.", icon: Smile }
+                ]
+            },
+            {
+                label: "Mi Primer Viaje",
+                value: "Alguien narra el primer viaje que hizo solo o con amigos",
+                registerInstruction: "Registro informal narrativo. Pretérito básico. Vocabulario de viajes sencillo.",
+                icon: Plane,
+                actions: [
+                    { label: "El Destino", value: "Cuenta a dónde fue y con quién.", icon: MapPin },
+                    { label: "Los Preparativos", value: "Describe cómo preparó el viaje.", icon: Package },
+                    { label: "La Llegada", value: "Relata la emoción de llegar.", icon: Sparkles },
+                    { label: "Lo que Hizo", value: "Cuenta las actividades del viaje.", icon: Camera },
+                    { label: "Un Imprevisto", value: "Recuerda algo que no salió como esperaba.", icon: AlertCircle },
+                    { label: "El Recuerdo", value: "Explica por qué lo recuerda con cariño.", icon: Heart }
+                ]
+            },
+            {
+                label: "Aprendí Algo Nuevo",
+                value: "Alguien narra cómo aprendió una habilidad nueva",
+                registerInstruction: "Registro informal y motivador. Presente y pretérito. Vocabulario de aprendizaje.",
+                icon: Lightbulb,
+                actions: [
+                    { label: "Qué Quiso Aprender", value: "Cuenta qué decidió aprender y por qué.", icon: Star },
+                    { label: "Los Primeros Intentos", value: "Describe lo difícil del comienzo.", icon: AlertCircle },
+                    { label: "Cómo Practicó", value: "Explica cómo se organizó para practicar.", icon: Clock },
+                    { label: "Un Pequeño Avance", value: "Relata el momento en que empezó a lograrlo.", icon: TrendingUp },
+                    { label: "Quién le Ayudó", value: "Cuenta si alguien le apoyó.", icon: Users },
+                    { label: "Cómo se Sintió", value: "Describe la satisfacción de lograrlo.", icon: Smile }
+                ]
+            },
+            {
+                label: "Mi Rincón Favorito",
+                value: "Alguien describe su lugar preferido de la ciudad",
+                registerInstruction: "Registro informal y descriptivo. Presente. Vocabulario de lugares y sensaciones.",
+                icon: MapPin,
+                actions: [
+                    { label: "Dónde Está", value: "Presenta el lugar y dónde queda.", icon: MapPin },
+                    { label: "Cómo Es", value: "Describe cómo se ve y qué hay allí.", icon: Eye },
+                    { label: "Qué Hace Allí", value: "Cuenta qué suele hacer en ese lugar.", icon: BookOpen },
+                    { label: "Cuándo Va", value: "Explica en qué momentos lo visita.", icon: Clock },
+                    { label: "Por Qué le Gusta", value: "Dice qué siente cuando está allí.", icon: Heart },
+                    { label: "Una Invitación", value: "Invita a los oyentes a conocerlo.", icon: Hand }
+                ]
+            },
+            {
+                label: "Una Mascota Especial",
+                value: "Alguien narra la historia de una mascota querida",
+                registerInstruction: "Registro informal y tierno. Pretérito y presente. Vocabulario de animales.",
+                icon: Dog,
+                actions: [
+                    { label: "Cómo Llegó", value: "Cuenta cómo su mascota llegó a su vida.", icon: Gift },
+                    { label: "Su Personalidad", value: "Describe cómo es el carácter del animal.", icon: Smile },
+                    { label: "La Rutina Juntos", value: "Relata qué hacen a diario.", icon: Clock },
+                    { label: "Una Travesura", value: "Recuerda una travesura memorable.", icon: Zap },
+                    { label: "Un Momento Tierno", value: "Comparte un momento de cariño.", icon: Heart },
+                    { label: "Lo que Significa", value: "Explica qué representa para él.", icon: Star }
+                ]
+            },
+            {
+                label: "Mi Fin de Semana",
+                value: "Alguien narra cómo pasa un fin de semana típico",
+                registerInstruction: "Registro informal relajado. Presente y pretérito básico. Vocabulario de ocio.",
+                icon: Coffee,
+                actions: [
+                    { label: "El Sábado por la Mañana", value: "Cuenta cómo empieza el sábado.", icon: Sun },
+                    { label: "Un Plan Favorito", value: "Describe su actividad preferida del fin de semana.", icon: Music },
+                    { label: "Con Quién lo Pasa", value: "Explica con quién comparte esos días.", icon: Users },
+                    { label: "Comer Rico", value: "Relata alguna comida especial del finde.", icon: Utensils },
+                    { label: "El Domingo Tranquilo", value: "Describe cómo es su domingo.", icon: Moon },
+                    { label: "Prepararse para la Semana", value: "Cuenta cómo cierra el fin de semana.", icon: Calendar }
+                ]
+            },
+            {
+                label: "Un Pequeño Logro",
+                value: "Alguien narra algo que consiguió y le hizo sentir orgullo",
+                registerInstruction: "Registro informal y positivo. Pretérito básico. Vocabulario de emociones y esfuerzo.",
+                icon: Trophy,
+                actions: [
+                    { label: "Qué Consiguió", value: "Cuenta cuál fue su pequeño logro.", icon: Star },
+                    { label: "El Punto de Partida", value: "Describe de dónde partía.", icon: MapPin },
+                    { label: "El Esfuerzo", value: "Relata qué tuvo que hacer para lograrlo.", icon: Dumbbell },
+                    { label: "Un Obstáculo", value: "Cuenta una dificultad que superó.", icon: AlertCircle },
+                    { label: "El Momento del Logro", value: "Describe cómo se sintió al conseguirlo.", icon: Trophy },
+                    { label: "El Siguiente Objetivo", value: "Comparte qué quiere lograr ahora.", icon: ArrowRight }
+                ]
+            }
+        ],
+        [Level.Intermediate]: [
+            {
+                label: "Una Decisión que Cambió Todo",
+                value: "Un narrador reflexiona sobre una decisión que marcó su vida",
+                registerInstruction: "Registro narrativo reflexivo, un hablante. Pasado y condicional, opinión. Discurso conectado.",
+                icon: ArrowRight,
+                actions: [
+                    { label: "La Vida de Antes", value: "Describe cómo era su vida antes de decidir.", icon: Clock },
+                    { label: "La Encrucijada", value: "Relata el momento en que tuvo que elegir.", icon: HelpCircle },
+                    { label: "Las Dudas", value: "Cuenta qué le hacía dudar.", icon: Scale },
+                    { label: "Dar el Paso", value: "Describe cómo tomó la decisión.", icon: Zap },
+                    { label: "Las Consecuencias", value: "Explica qué cambió después.", icon: TrendingUp },
+                    { label: "La Mirada de Hoy", value: "Reflexiona sobre si fue la decisión correcta.", icon: Eye }
+                ]
+            },
+            {
+                label: "Un Problema y su Solución",
+                value: "Un narrador cuenta cómo resolvió un problema complicado",
+                registerInstruction: "Registro narrativo claro. Pasado y presente, argumentación simple. Vocabulario intermedio.",
+                icon: Lightbulb,
+                actions: [
+                    { label: "El Problema", value: "Describe la situación difícil que enfrentaba.", icon: AlertTriangle },
+                    { label: "Por Qué Era Difícil", value: "Explica qué lo complicaba tanto.", icon: Frown },
+                    { label: "Buscar Ayuda", value: "Cuenta a quién o qué recurrió.", icon: Users },
+                    { label: "Probar y Fallar", value: "Relata intentos que no funcionaron.", icon: X },
+                    { label: "La Solución", value: "Describe cómo finalmente lo resolvió.", icon: CheckCircle },
+                    { label: "La Lección", value: "Reflexiona sobre lo que aprendió.", icon: Lightbulb }
+                ]
+            },
+            {
+                label: "Una Historia de Superación",
+                value: "Un narrador cuenta cómo salió adelante tras una adversidad",
+                registerInstruction: "Registro narrativo emotivo pero contenido. Pasado, opinión. Vocabulario de esfuerzo.",
+                icon: TrendingUp,
+                actions: [
+                    { label: "El Momento Bajo", value: "Describe la situación más difícil.", icon: Frown },
+                    { label: "La Chispa", value: "Cuenta qué le dio fuerzas para reaccionar.", icon: Zap },
+                    { label: "El Primer Paso", value: "Relata cómo empezó a cambiar las cosas.", icon: ArrowRight },
+                    { label: "Los Apoyos", value: "Explica quién le acompañó.", icon: HeartHandshake },
+                    { label: "El Progreso", value: "Describe cómo fue mejorando.", icon: TrendingUp },
+                    { label: "Dónde Está Hoy", value: "Reflexiona sobre su presente.", icon: Star }
+                ]
+            },
+            {
+                label: "Crónica de mi Barrio",
+                value: "Un narrador describe cómo ha cambiado su barrio con los años",
+                registerInstruction: "Registro descriptivo-reflexivo. Pasado y presente, comparación. Vocabulario urbano.",
+                icon: Home,
+                actions: [
+                    { label: "El Barrio de Antes", value: "Describe cómo era el barrio años atrás.", icon: Clock },
+                    { label: "Lo que Desapareció", value: "Cuenta un negocio o lugar que ya no está.", icon: X },
+                    { label: "Lo Nuevo", value: "Describe lo que ha llegado al barrio.", icon: Sparkles },
+                    { label: "Los Vecinos", value: "Habla de cómo cambió la gente del barrio.", icon: Users },
+                    { label: "Lo que se Perdió y se Ganó", value: "Compara lo bueno y lo malo del cambio.", icon: Scale },
+                    { label: "Su Deseo", value: "Reflexiona sobre cómo le gustaría que fuera.", icon: Heart }
+                ]
+            },
+            {
+                label: "El Día que Perdí Algo",
+                value: "Un narrador cuenta cuando perdió algo importante",
+                registerInstruction: "Registro narrativo emotivo. Pasado, emoción contenida. Vocabulario intermedio.",
+                icon: Frown,
+                actions: [
+                    { label: "Qué Perdió", value: "Cuenta qué perdió y por qué importaba.", icon: Package },
+                    { label: "Cómo Pasó", value: "Relata las circunstancias de la pérdida.", icon: AlertCircle },
+                    { label: "La Búsqueda", value: "Describe cómo intentó recuperarlo.", icon: Search },
+                    { label: "Aceptarlo", value: "Explica cómo asumió que no volvería.", icon: Scale },
+                    { label: "Lo que Descubrió", value: "Cuenta qué aprendió de la experiencia.", icon: Eye },
+                    { label: "El Valor Real", value: "Reflexiona sobre qué importa de verdad.", icon: Heart }
+                ]
+            },
+            {
+                label: "Un Viaje en Solitario",
+                value: "Un narrador relata una experiencia de viajar solo",
+                registerInstruction: "Registro reflexivo y vívido. Pasado, introspección. Vocabulario de viaje intermedio.",
+                icon: Plane,
+                actions: [
+                    { label: "Decidir Ir Solo", value: "Explica por qué viajó sin compañía.", icon: DoorOpen },
+                    { label: "El Miedo Inicial", value: "Cuenta sus temores antes de partir.", icon: Frown },
+                    { label: "Un Encuentro", value: "Relata a alguien que conoció en el camino.", icon: Users },
+                    { label: "Perderse", value: "Describe una vez que se perdió o improvisó.", icon: MapPin },
+                    { label: "El Silencio", value: "Habla de lo que descubrió estando solo.", icon: Eye },
+                    { label: "Volver Distinto", value: "Reflexiona sobre cómo volvió cambiado.", icon: TrendingUp }
+                ]
+            },
+            {
+                label: "Reencuentro Inesperado",
+                value: "Un narrador cuenta un reencuentro con alguien del pasado",
+                registerInstruction: "Registro narrativo emotivo. Pasado y presente. Vocabulario afectivo intermedio.",
+                icon: Heart,
+                actions: [
+                    { label: "Quién Era", value: "Presenta a la persona y su historia juntos.", icon: Users },
+                    { label: "La Separación", value: "Cuenta por qué se distanciaron.", icon: ArrowRight },
+                    { label: "El Encuentro Casual", value: "Relata cómo volvieron a verse.", icon: Sparkles },
+                    { label: "La Emoción", value: "Describe qué sintió en ese momento.", icon: Heart },
+                    { label: "Ponerse al Día", value: "Cuenta qué había cambiado en cada uno.", icon: MessageCircle },
+                    { label: "Qué Quedó", value: "Reflexiona sobre el sentido del reencuentro.", icon: Star }
+                ]
+            },
+            {
+                label: "Cambié de Trabajo",
+                value: "Un narrador relata su transición a un nuevo empleo",
+                registerInstruction: "Registro reflexivo profesional. Pasado y presente, valoración. Vocabulario laboral.",
+                icon: Briefcase,
+                actions: [
+                    { label: "El Trabajo Anterior", value: "Describe cómo era su empleo previo.", icon: Clock },
+                    { label: "Por Qué se Fue", value: "Explica qué le motivó a cambiar.", icon: ArrowRight },
+                    { label: "La Búsqueda", value: "Relata el proceso de buscar y postular.", icon: Search },
+                    { label: "Los Primeros Días", value: "Cuenta cómo fue adaptarse.", icon: DoorOpen },
+                    { label: "Lo que Ganó", value: "Describe las mejoras del cambio.", icon: ThumbsUp },
+                    { label: "Lo que Extraña", value: "Reflexiona sobre lo que dejó atrás.", icon: Frown }
+                ]
+            },
+            {
+                label: "Un Proyecto Personal",
+                value: "Un narrador cuenta un proyecto creativo que emprendió",
+                registerInstruction: "Registro entusiasta y reflexivo. Pasado y presente. Vocabulario de creatividad.",
+                icon: Palette,
+                actions: [
+                    { label: "La Idea", value: "Cuenta cómo surgió el proyecto.", icon: Lightbulb },
+                    { label: "Empezar de Cero", value: "Describe los primeros pasos.", icon: Sprout },
+                    { label: "Los Obstáculos", value: "Relata las dificultades que encontró.", icon: AlertTriangle },
+                    { label: "Mantener la Motivación", value: "Explica cómo siguió adelante.", icon: Zap },
+                    { label: "El Resultado", value: "Describe en qué se convirtió el proyecto.", icon: Trophy },
+                    { label: "Lo que Aprendió", value: "Reflexiona sobre lo que descubrió de sí mismo.", icon: Eye }
+                ]
+            },
+            {
+                label: "La Vez que Me Equivoqué",
+                value: "Un narrador reflexiona sobre un error que cometió",
+                registerInstruction: "Registro honesto y reflexivo. Pasado, autocrítica. Vocabulario intermedio.",
+                icon: AlertCircle,
+                actions: [
+                    { label: "El Error", value: "Cuenta qué error cometió.", icon: X },
+                    { label: "Cómo Pasó", value: "Explica las circunstancias que lo llevaron a fallar.", icon: AlertTriangle },
+                    { label: "Darse Cuenta", value: "Relata el momento en que lo comprendió.", icon: Eye },
+                    { label: "Las Consecuencias", value: "Describe qué provocó su error.", icon: ArrowRight },
+                    { label: "Pedir Disculpas", value: "Cuenta cómo intentó repararlo.", icon: Hand },
+                    { label: "La Enseñanza", value: "Reflexiona sobre lo que le dejó.", icon: Lightbulb }
+                ]
+            },
+            {
+                label: "Una Tradición que Heredé",
+                value: "Un narrador cuenta una costumbre familiar que continúa",
+                registerInstruction: "Registro cálido y reflexivo. Pasado y presente. Vocabulario cultural intermedio.",
+                icon: Sparkles,
+                actions: [
+                    { label: "Qué Tradición Es", value: "Presenta la costumbre y su origen.", icon: Gift },
+                    { label: "De Dónde Viene", value: "Cuenta quién se la transmitió.", icon: Users },
+                    { label: "Cómo se Celebra", value: "Describe cómo la practican.", icon: Calendar },
+                    { label: "Un Recuerdo", value: "Comparte un momento ligado a ella.", icon: Heart },
+                    { label: "Adaptarla a Hoy", value: "Explica cómo la mantiene viva.", icon: ArrowRight },
+                    { label: "Por Qué Importa", value: "Reflexiona sobre su valor.", icon: Star }
+                ]
+            },
+            {
+                label: "Lo que Aprendí de un Fracaso",
+                value: "Un narrador reflexiona sobre algo que salió mal y le enseñó",
+                registerInstruction: "Registro reflexivo y maduro. Pasado, análisis. Vocabulario intermedio-alto.",
+                icon: Ban,
+                actions: [
+                    { label: "El Sueño", value: "Cuenta qué quería lograr.", icon: Star },
+                    { label: "El Plan", value: "Describe cómo intentó conseguirlo.", icon: ListChecks },
+                    { label: "El Fracaso", value: "Relata cómo y por qué falló.", icon: X },
+                    { label: "El Golpe", value: "Explica cómo se sintió al fracasar.", icon: Frown },
+                    { label: "Levantarse", value: "Cuenta cómo se recuperó.", icon: TrendingUp },
+                    { label: "El Regalo Oculto", value: "Reflexiona sobre lo bueno que sacó de todo.", icon: Sparkles }
                 ]
             }
         ],
         [Level.Advanced]: [
             {
                 label: "Ensayo Personal",
-                value: "Monólogo con tesis sobre trabajo remoto y vida urbana",
-                registerInstruction: "Registro: formal argumentativo. Primera persona moderada. Lunfardo: no.",
-                icon: FileText,
+                value: "Un narrador desarrolla una reflexión ensayística sobre un tema abstracto",
+                registerInstruction: "Registro culto y reflexivo, un hablante. Argumentación, abstracción y matiz. Cohesión elaborada.",
+                icon: Feather,
                 actions: [
-                    { label: "Tesis", value: "Presentar una tesis personal", icon: Lightbulb },
-                    { label: "Argumento", value: "Desarrollar argumento principal", icon: Scale },
-                    { label: "Contraargumento", value: "Incluir contraargumento", icon: X },
-                    { label: "Ejemplo", value: "Dar un ejemplo claro", icon: Search },
-                    { label: "Cierre", value: "Cerrar con conclusión", icon: CheckCircle }
+                    { label: "La Pregunta de Fondo", value: "Plantea la pregunta que vertebra el ensayo.", icon: HelpCircle },
+                    { label: "Una Experiencia Propia", value: "Ancla la idea en una vivencia personal.", icon: Eye },
+                    { label: "El Giro", value: "Introduce una idea que complica lo anterior.", icon: ArrowRight },
+                    { label: "La Contradicción", value: "Explora una tensión sin resolverla del todo.", icon: Scale },
+                    { label: "Una Imagen", value: "Usa una metáfora para iluminar la idea.", icon: Sparkles },
+                    { label: "El Cierre Abierto", value: "Cierra dejando una reflexión suspendida.", icon: Moon }
                 ]
             },
             {
                 label: "Confesión y Catarsis",
-                value: "Monólogo íntimo sobre dejar una carrera universitaria",
-                registerInstruction: "Registro: informal íntimo y serio. Primera persona. Lunfardo: no.",
-                icon: Heart,
+                value: "Un narrador confiesa algo íntimo en un monólogo intenso",
+                registerInstruction: "Registro íntimo e intenso pero controlado. Introspección, subtexto. Vocabulario emocional rico.",
+                icon: Ghost,
                 actions: [
-                    { label: "Confesión", value: "Confesar un hecho", icon: Lock },
-                    { label: "Contexto Emocional", value: "Explicar emociones", icon: Frown },
-                    { label: "Consecuencias", value: "Describir consecuencias", icon: AlertTriangle },
-                    { label: "Responsabilidad", value: "Asumir responsabilidad", icon: Hand },
-                    { label: "Aprendizaje", value: "Cerrar con aprendizaje", icon: Star }
+                    { label: "El Secreto", value: "Revela lo que ha guardado durante tiempo.", icon: Lock },
+                    { label: "El Peso", value: "Describe cómo le ha afectado callarlo.", icon: BatteryLow },
+                    { label: "La Justificación", value: "Explora por qué lo hizo o lo calló.", icon: Scale },
+                    { label: "La Vergüenza", value: "Enfrenta el juicio propio y ajeno.", icon: Eye },
+                    { label: "El Alivio", value: "Relata la liberación de decirlo por fin.", icon: Wind },
+                    { label: "La Reconciliación Consigo Mismo", value: "Reflexiona sobre perdonarse.", icon: Sprout }
                 ]
             },
             {
                 label: "Crónica de Investigación",
-                value: "Monólogo investigativo sobre comedores escolares y presupuestos",
-                registerInstruction: "Registro: formal periodístico. Primera persona con tono objetivo. Lunfardo: no.",
+                value: "Un narrador relata en primera persona una investigación que llevó a cabo",
+                registerInstruction: "Registro narrativo-periodístico cuidado. Rigor y suspenso, matiz. Vocabulario amplio.",
                 icon: Search,
                 actions: [
-                    { label: "Inicio", value: "Explicar cómo empezó", icon: Flag },
-                    { label: "Fuentes", value: "Describir fuentes consultadas", icon: FileText },
-                    { label: "Hallazgo", value: "Revelar hallazgo clave", icon: Sparkles },
-                    { label: "Reacción", value: "Contar reacciones", icon: MessageCircle },
-                    { label: "Conclusión", value: "Cerrar con conclusión", icon: CheckCircle }
+                    { label: "La Sospecha Inicial", value: "Cuenta qué le hizo empezar a indagar.", icon: Eye },
+                    { label: "Las Primeras Pistas", value: "Relata los primeros hallazgos.", icon: Lightbulb },
+                    { label: "El Callejón sin Salida", value: "Describe un obstáculo que casi lo detiene.", icon: Ban },
+                    { label: "La Pieza Clave", value: "Narra el descubrimiento decisivo.", icon: Key },
+                    { label: "Las Implicaciones", value: "Explica qué reveló su investigación.", icon: Zap },
+                    { label: "El Precio de Saber", value: "Reflexiona sobre lo que le costó averiguarlo.", icon: Scale }
                 ]
             },
             {
                 label: "Relato Literario",
-                value: "Monólogo literario ambientado en una estación de tren nocturna",
-                registerInstruction: "Registro: literario cuidado. Primera persona o narrador. Lunfardo: no.",
+                value: "Un narrador cuenta un relato con voluntad estética",
+                registerInstruction: "Registro literario. Recursos narrativos, imágenes, ritmo. Vocabulario rico y preciso.",
                 icon: BookOpen,
                 actions: [
-                    { label: "Inicio Atmosférico", value: "Crear ambiente inicial", icon: Moon },
-                    { label: "Giro Inesperado", value: "Narrar un giro", icon: Zap },
-                    { label: "Personaje", value: "Desarrollar personaje", icon: UserPlus },
-                    { label: "Clímax", value: "Narrar clímax", icon: AlertTriangle },
-                    { label: "Final Abierto", value: "Cerrar con final abierto", icon: Eye }
+                    { label: "La Atmósfera", value: "Construye el ambiente con detalles sensoriales.", icon: Cloud },
+                    { label: "El Personaje", value: "Presenta a alguien con una pincelada precisa.", icon: Users },
+                    { label: "El Conflicto", value: "Introduce la tensión que mueve el relato.", icon: Zap },
+                    { label: "El Punto de Giro", value: "Narra el momento que lo cambia todo.", icon: ArrowRight },
+                    { label: "El Clímax", value: "Lleva la historia a su punto más alto.", icon: Sparkles },
+                    { label: "El Desenlace", value: "Cierra el relato con un eco final.", icon: Moon }
                 ]
             },
             {
                 label: "Discurso Motivacional",
-                value: "Discurso para graduación con llamado a la acción",
-                registerInstruction: "Registro: semi-formal inspirador. Primera persona. Lunfardo: no.",
+                value: "Un orador pronuncia un discurso para inspirar a la audiencia",
+                registerInstruction: "Registro persuasivo y enérgico. Retórica, anáfora, apelación. Vocabulario elevado.",
                 icon: Megaphone,
                 actions: [
-                    { label: "Historia Personal", value: "Contar historia personal", icon: Heart },
-                    { label: "Obstáculo", value: "Describir un obstáculo", icon: AlertCircle },
-                    { label: "Mensaje Inspirador", value: "Dar mensaje inspirador", icon: Sparkles },
-                    { label: "Llamado a la Acción", value: "Invitar a actuar", icon: ArrowRight },
-                    { label: "Cierre Potente", value: "Cerrar con frase potente", icon: Star }
+                    { label: "El Enganche", value: "Abre con una historia o pregunta que atrapa.", icon: Zap },
+                    { label: "El Obstáculo Común", value: "Nombra el miedo que todos comparten.", icon: AlertTriangle },
+                    { label: "El Cambio de Marco", value: "Ofrece una nueva forma de ver el problema.", icon: Eye },
+                    { label: "La Prueba", value: "Refuerza con un ejemplo poderoso.", icon: Trophy },
+                    { label: "El Llamado a la Acción", value: "Invita a la audiencia a actuar.", icon: Flag },
+                    { label: "El Cierre Memorable", value: "Termina con una frase que perdura.", icon: Star }
                 ]
             },
             {
                 label: "Análisis Social",
-                value: "Monólogo analítico sobre alquileres y acceso a vivienda",
-                registerInstruction: "Registro: formal analítico. Primera persona moderada. Lunfardo: no.",
-                icon: Globe,
+                value: "Un narrador analiza un fenómeno de la sociedad actual",
+                registerInstruction: "Registro ensayístico y analítico. Argumentación, datos y crítica. Vocabulario sociológico.",
+                icon: Users,
                 actions: [
-                    { label: "Problema Social", value: "Describir un problema social", icon: AlertTriangle },
-                    { label: "Datos", value: "Mencionar datos o evidencia", icon: PieChart },
-                    { label: "Causas", value: "Analizar causas estructurales", icon: Brain },
-                    { label: "Impacto Humano", value: "Hablar del impacto humano", icon: Heart },
-                    { label: "Propuesta", value: "Proponer una acción", icon: Lightbulb }
+                    { label: "El Fenómeno", value: "Describe el comportamiento social que analiza.", icon: Eye },
+                    { label: "Las Causas", value: "Explora por qué ocurre.", icon: HelpCircle },
+                    { label: "Los Datos", value: "Apoya su análisis con evidencia.", icon: LineChart },
+                    { label: "Las Voces en Disputa", value: "Presenta interpretaciones enfrentadas.", icon: MessageCircle },
+                    { label: "Las Consecuencias", value: "Analiza el impacto a futuro.", icon: ArrowRight },
+                    { label: "Una Propuesta", value: "Sugiere una vía posible con matices.", icon: Lightbulb }
                 ]
             },
             {
                 label: "Memoria Histórica",
-                value: "Monólogo sobre una migración familiar tras una crisis económica",
-                registerInstruction: "Registro: formal y respetuoso. Primera persona o narrador. Lunfardo: no.",
-                icon: BookOpen,
+                value: "Un narrador rememora un momento histórico que vivió o heredó",
+                registerInstruction: "Registro evocador y solemne. Narración con perspectiva histórica. Vocabulario rico.",
+                icon: Landmark,
                 actions: [
-                    { label: "Contexto", value: "Dar contexto histórico", icon: Calendar },
-                    { label: "Testimonio", value: "Citar un testimonio", icon: MessageCircle },
-                    { label: "Detalle Simbólico", value: "Describir un símbolo", icon: Star },
-                    { label: "Reflexión", value: "Reflexionar sobre el pasado", icon: Brain },
-                    { label: "Lección", value: "Extraer una lección", icon: Lightbulb }
+                    { label: "El Contexto", value: "Sitúa la época y lo que se vivía.", icon: Clock },
+                    { label: "El Testimonio", value: "Relata lo que él o su familia vivieron.", icon: Users },
+                    { label: "El Detalle que Perdura", value: "Rescata un detalle cotidiano revelador.", icon: Eye },
+                    { label: "La Herida", value: "Aborda lo doloroso con respeto.", icon: Frown },
+                    { label: "La Transmisión", value: "Explica por qué es importante recordar.", icon: BookOpen },
+                    { label: "El Deber de Memoria", value: "Reflexiona sobre no olvidar.", icon: Flag }
                 ]
             },
             {
-                label: "Monólogo Humorístico",
-                value: "Monólogo con humor sobre trámites burocráticos y ventanillas",
-                registerInstruction: "Registro: informal humorístico. Primera persona. Lunfardo: permitido leve si no ofende.",
-                icon: Smile,
+                label: "Monólogo de Humor",
+                value: "Un humorista construye un monólogo cómico sobre la vida cotidiana",
+                registerInstruction: "Registro coloquial ingenioso. Ironía, exageración y timing. Juegos de palabras. Sin ofensas graves.",
+                icon: Drama,
                 actions: [
-                    { label: "Tema Cotidiano", value: "Elegir un tema cotidiano", icon: Home },
-                    { label: "Exageración", value: "Usar exageración", icon: Zap },
-                    { label: "Comparación", value: "Hacer una comparación graciosa", icon: Scale },
-                    { label: "Remate", value: "Preparar el remate", icon: Megaphone },
-                    { label: "Cierre", value: "Cerrar con broma", icon: ThumbsUp }
+                    { label: "La Observación", value: "Parte de un detalle absurdo de lo cotidiano.", icon: Eye },
+                    { label: "La Exageración", value: "Lleva la idea al extremo cómico.", icon: TrendingUp },
+                    { label: "El Autorretrato", value: "Se ríe de sus propias manías.", icon: Smile },
+                    { label: "El Giro Inesperado", value: "Sorprende con un remate que no se veía venir.", icon: Zap },
+                    { label: "La Complicidad", value: "Conecta con lo que todos han vivido.", icon: Users },
+                    { label: "El Remate Final", value: "Cierra con el mejor chiste guardado.", icon: Star }
                 ]
             },
             {
                 label: "Discurso de Despedida",
-                value: "Monólogo de despedida en un cierre de etapa",
-                registerInstruction: "Registro: formal emotivo. Primera persona. Lunfardo: no.",
-                icon: Heart,
+                value: "Alguien pronuncia un discurso de despedida ante los suyos",
+                registerInstruction: "Registro solemne y emotivo, contenido. Gratitud, memoria y proyección. Vocabulario cuidado.",
+                icon: HeartHandshake,
                 actions: [
-                    { label: "Agradecimiento", value: "Agradecer a personas clave", icon: ThumbsUp },
-                    { label: "Recuerdo", value: "Recordar un momento importante", icon: Star },
-                    { label: "Legado", value: "Hablar del legado dejado", icon: BookOpen },
-                    { label: "Consejo", value: "Dar un consejo final", icon: Lightbulb },
-                    { label: "Cierre", value: "Cerrar con una frase emotiva", icon: MessageCircle }
+                    { label: "El Agradecimiento", value: "Abre agradeciendo a quienes le acompañaron.", icon: Hand },
+                    { label: "El Recorrido", value: "Repasa el camino compartido.", icon: Clock },
+                    { label: "Una Anécdota", value: "Rescata un momento significativo.", icon: Sparkles },
+                    { label: "Lo Aprendido", value: "Comparte las lecciones del trayecto.", icon: Lightbulb },
+                    { label: "El Deseo", value: "Expresa sus buenos deseos para el futuro.", icon: Star },
+                    { label: "La Despedida", value: "Cierra con una despedida sentida.", icon: Wind }
+                ]
+            },
+            {
+                label: "Reflexión sobre el Tiempo",
+                value: "Un narrador reflexiona filosóficamente sobre el paso del tiempo",
+                registerInstruction: "Registro filosófico y poético. Abstracción, metáfora, matiz. Vocabulario elevado.",
+                icon: Clock,
+                actions: [
+                    { label: "El Tiempo que se Escapa", value: "Medita sobre lo rápido que pasa la vida.", icon: Wind },
+                    { label: "La Memoria", value: "Reflexiona sobre cómo recordamos el pasado.", icon: Brain },
+                    { label: "El Presente", value: "Explora la dificultad de habitar el ahora.", icon: Eye },
+                    { label: "Los Ritmos", value: "Contrasta el tiempo del reloj y el tiempo vivido.", icon: Watch },
+                    { label: "El Legado", value: "Piensa en lo que dejamos tras nosotros.", icon: Sprout },
+                    { label: "Aceptar la Finitud", value: "Cierra reconciliándose con el paso del tiempo.", icon: Moon }
+                ]
+            },
+            {
+                label: "Manifiesto Creativo",
+                value: "Un artista expone su visión y principios creativos",
+                registerInstruction: "Registro apasionado y programático. Retórica, convicción y matiz. Vocabulario estético.",
+                icon: Palette,
+                actions: [
+                    { label: "La Declaración", value: "Enuncia con fuerza en qué cree.", icon: Flag },
+                    { label: "Contra la Corriente", value: "Se posiciona frente a lo establecido.", icon: Ban },
+                    { label: "El Método", value: "Explica cómo entiende su propio proceso.", icon: ListChecks },
+                    { label: "El Riesgo", value: "Defiende el valor de arriesgarse.", icon: Zap },
+                    { label: "El Público", value: "Reflexiona sobre para quién crea.", icon: Users },
+                    { label: "La Promesa", value: "Cierra comprometiéndose con su visión.", icon: Star }
+                ]
+            },
+            {
+                label: "Carta Abierta",
+                value: "Un narrador dirige una carta abierta a alguien o a la sociedad",
+                registerInstruction: "Registro público y apelativo. Argumentación emotiva, segunda persona. Vocabulario elaborado.",
+                icon: Mail,
+                actions: [
+                    { label: "El Destinatario", value: "Se dirige a quien va destinada la carta.", icon: Send },
+                    { label: "El Motivo", value: "Explica qué le impulsa a escribir.", icon: Zap },
+                    { label: "El Reproche o la Súplica", value: "Plantea su demanda con firmeza.", icon: Megaphone },
+                    { label: "La Argumentación", value: "Sostiene su postura con razones.", icon: Scale },
+                    { label: "La Apelación", value: "Interpela directamente a la conciencia del otro.", icon: Heart },
+                    { label: "El Cierre", value: "Termina con un llamado o una esperanza.", icon: Flag }
                 ]
             }
         ]

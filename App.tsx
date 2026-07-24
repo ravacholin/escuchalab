@@ -15,6 +15,19 @@ const LEVELS = Object.values(Level);
 const LENGTHS = Object.values(Length);
 const TEXT_TYPES = Object.values(TextType);
 const ACCENTS = Object.values(Accent);
+
+// A0 (keyword spotting) solo tiene sentido en formatos transaccionales/expositivos.
+// Podcast y Monólogo son narrativos: arrancan en A1-A2.
+const NARRATIVE_FORMATS: TextType[] = [TextType.PodcastInterview, TextType.Monologue];
+const availableLevels = (textType: TextType): Level[] =>
+    NARRATIVE_FORMATS.includes(textType) ? LEVELS.filter(l => l !== Level.Intro) : LEVELS;
+
+// Resuelve la lista de contextos de forma segura (nunca undefined/empty → evita crash al indexar [0]).
+const resolveContextList = (textType: TextType, level: Level): ScenarioContext[] => {
+    const formatDb = SCENARIO_DATABASE[textType] || SCENARIO_DATABASE[TextType.Dialogue];
+    const list = formatDb[level] || formatDb[Level.Beginner] || formatDb[Level.Intro];
+    return (list && list.length > 0) ? list : SCENARIO_DATABASE[TextType.Dialogue][Level.Beginner];
+};
 const MODES = [
     { value: AppMode.Standard, label: 'Estándar', icon: Layout },
     { value: AppMode.Vocabulary, label: 'Vocabulario', icon: BookOpen },
@@ -91,10 +104,10 @@ const App: React.FC = () => {
     };
 
     // 1. Get List of Contexts (Locus) for current Level
-    const currentContextList = useMemo(() => {
-        const formatDb = SCENARIO_DATABASE[state.config.textType] || SCENARIO_DATABASE[TextType.Dialogue];
-        return formatDb[state.config.level] || formatDb[Level.Intro];
-    }, [state.config.level, state.config.textType]);
+    const currentContextList = useMemo(
+        () => resolveContextList(state.config.textType, state.config.level),
+        [state.config.level, state.config.textType]
+    );
 
     // 2. Select Locus (Scenario)
     const [selectedLocus, setSelectedLocus] = useState<ScenarioContext>(currentContextList[0]);
@@ -115,11 +128,20 @@ const App: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'transcript' | 'comprehension' | 'vocabulary'>('transcript');
     const [audioError, setAudioError] = useState<string | null>(null);
 
+    // --- EFFECT: COERCE INVALID LEVEL FOR NARRATIVE FORMATS ---
+    // Podcast/Monólogo no tienen A0: si el usuario cambia a esos formatos estando en A0,
+    // saltamos a A1-A2 antes de que se intente indexar un bucket inexistente.
+    useEffect(() => {
+        if (NARRATIVE_FORMATS.includes(state.config.textType) && state.config.level === Level.Intro) {
+            setState(prev => ({ ...prev, config: { ...prev.config, level: Level.Beginner } }));
+        }
+    }, [state.config.textType, state.config.level]);
+
     // --- EFFECT: LEVEL CHANGE ---
     useEffect(() => {
-        const formatDb = SCENARIO_DATABASE[state.config.textType] || SCENARIO_DATABASE[TextType.Dialogue];
-        const db = formatDb[state.config.level] || formatDb[Level.Intro];
+        const db = resolveContextList(state.config.textType, state.config.level);
         const firstLocus = db[0];
+        if (!firstLocus) return;
         setSelectedLocus(firstLocus);
         setSelectedModus(firstLocus.actions[0]);
     }, [state.config.level, state.config.textType]);
@@ -132,8 +154,7 @@ const App: React.FC = () => {
 
     // --- RANDOMIZER LOGIC ---
     const handleRandomizeMatrix = useCallback(() => {
-        const formatDb = SCENARIO_DATABASE[state.config.textType] || SCENARIO_DATABASE[TextType.Dialogue];
-        const contexts = formatDb[state.config.level] || formatDb[Level.Intro];
+        const contexts = resolveContextList(state.config.textType, state.config.level);
         const randomCtx = contexts[Math.floor(Math.random() * contexts.length)];
 
         const actions = randomCtx.actions;
@@ -331,7 +352,7 @@ const App: React.FC = () => {
                                 <SelectInput
                                     label="Nivel de Competencia"
                                     value={state.config.level}
-                                    options={LEVELS}
+                                    options={availableLevels(state.config.textType)}
                                     highlight={true}
                                     onChange={(e: any) => setState({ ...state, config: { ...state.config, level: e.target.value } })}
                                 />
