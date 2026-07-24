@@ -20,7 +20,7 @@
 ## Configuration & Secrets
 
 - Do not commit secrets. Use `.env.local` (gitignored via `*.local`).
-- Vite config reads `GEMINI_API_KEY` and `VITE_FREESOUND_API_KEY` (`vite.config.ts`).
+- Vite config reads `GEMINI_API_KEY` (`vite.config.ts`).
 - The UI also stores the Gemini key in `localStorage` under `gemini_api_key`.
 
 ## Coding Style & Naming

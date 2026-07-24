@@ -3,6 +3,7 @@ import React, { useMemo, useRef, useState, useEffect } from 'react';
 import { Play, Pause, RotateCcw, Activity, Radio, Sparkles } from 'lucide-react';
 import { getAmbiencePreset } from '../services/ambiencePresets';
 import type { EnvironmentProfile, AmbienceTag } from '../services/ambiencePresets';
+import { loadAmbienceBed } from '../services/ambienceLibrary';
 
 interface AudioPlayerProps {
   speechSrc: string; // Base64 raw PCM
@@ -187,8 +188,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const duckingRafRef = useRef<number | null>(null);
   const speechAnalyserRef = useRef<AnalyserNode | null>(null);
   const speechSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
+  const ambienceGenerationRef = useRef(0);
 
   const [isPlaying, setIsPlaying] = useState(false);
+  const [hasRealBed, setHasRealBed] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [speechUrl, setSpeechUrl] = useState<string | null>(null);
@@ -274,6 +277,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const initSyntheticAmbience = () => {
     try {
       stopSyntheticAmbience();
+      const myGeneration = ++ambienceGenerationRef.current;
+      setHasRealBed(false);
 
       if (!syntheticCtxRef.current) {
         const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
@@ -1124,6 +1129,45 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         }, 6000, 16000);
       }
 
+      // --- REAL AMBIENCE BED (bundled, same-origin — no network dependency) ---
+      // Layers a genuine recorded/rendered texture (services/ambienceLibrary.ts)
+      // under the live event generators above. If it fails to load for any
+      // reason, we simply stay on the synthetic-only bed that already existed —
+      // no behavior regresses.
+      loadAmbienceBed(ctx, profile).then((buffer) => {
+        if (myGeneration !== ambienceGenerationRef.current) return; // scene changed / stopped meanwhile
+        if (!buffer) return;
+        if (syntheticNodesRef.current.length === 0) return;
+
+        const bedSource = ctx.createBufferSource();
+        bedSource.buffer = buffer;
+        bedSource.loop = true;
+
+        const bedGain = ctx.createGain();
+        bedGain.gain.setValueAtTime(0, ctx.currentTime);
+        bedGain.gain.linearRampToValueAtTime(0.85, ctx.currentTime + 2.5);
+
+        bedSource.connect(bedGain);
+        bedGain.connect(masterGain);
+        bedGain.connect(convolver);
+        bedSource.start();
+
+        nodes.push(bedSource, bedGain);
+
+        // A real texture is now carrying the "room" character — pull the
+        // purely-synthetic continuous layers back so they add cohesion
+        // without doubling/muddying it. Discrete events (footsteps, doors,
+        // crowd, etc.) are untouched: a generic loop can't provide those.
+        const attenuate = (target: GainNode, factor: number) => {
+          target.gain.setTargetAtTime(target.gain.value * factor, ctx.currentTime, 1.5);
+        };
+        attenuate(baseLowGain, 0.45);
+        attenuate(baseAirGain, 0.5);
+        attenuate(humGain, 0.5);
+
+        setHasRealBed(true);
+      });
+
       // Slow evolution: shift base filters over time so it doesn't feel looped.
       const evolve = () => {
         if (syntheticNodesRef.current.length === 0) return;
@@ -1330,7 +1374,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           <div className="flex items-center justify-between px-4 py-3 bg-black">
             <div className="flex items-center gap-2">
               {isPlaying ? <Sparkles size={14} className="text-zinc-300 animate-pulse" /> : <Activity size={14} className="text-zinc-500" />}
-              <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-300">Ambiente: {env}</span>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-300">Ambiente: {env}{hasRealBed ? ' · Textura Real' : ''}</span>
             </div>
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2 group">
