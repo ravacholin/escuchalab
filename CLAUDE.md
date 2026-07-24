@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**EscuchaLAB** is an AI-powered Spanish listening practice application that generates level-appropriate dialogues, audio, and exercises based on the CEFR framework. The app uses Google's Gemini API for content generation and text-to-speech, and integrates with Freesound for ambient audio.
+**EscuchaLAB** is an AI-powered Spanish listening practice application that generates level-appropriate dialogues, audio, and exercises based on the CEFR framework. The app uses Google's Gemini API for content generation and text-to-speech, and a bundled, scenario-aware ambient sound engine (real recorded/rendered textures + live synthetic events) to make dialogues feel situated in their context.
 
 Built with: React 19, TypeScript, Vite, Google GenAI SDK, Tailwind CSS (via CDN in index.html)
 
@@ -51,7 +51,7 @@ The app uses a single `AppState` object managed in `App.tsx` with the following 
 1. User configures lesson parameters (level, mode, topic, accent, length, format)
 2. `generateLessonPlan()` in `geminiService.ts` creates structured lesson content
 3. `generateAudio()` converts dialogue to speech with appropriate voice profiles
-4. AudioPlayer fetches ambient sound from Freesound API
+4. AudioPlayer resolves an `AmbiencePreset` (`services/ambiencePresets.ts`) from the scenario/topic and layers a bundled ambient bed with live synthetic events
 5. User interacts with transcript, comprehension, and vocabulary tabs
 
 ### App Modes (AppMode enum)
@@ -89,13 +89,13 @@ Key implementation notes:
 - Returns base64-encoded audio data
 - Error handling for "non-audio response" rejections
 
-### Freesound Integration
-Located in `AudioPlayer.tsx`:
-- API key hardcoded: `UyddwR1Kqoj3J1tSagw6oLTBKETViLioFdGjF0Nl`
-- Maps Spanish topics to English queries via regex patterns
-- Fetches ambient sounds sorted by rating (min duration: 8s, license: Creative Commons)
-- Downloads and mixes with dialogue audio at 15% volume
-- Preference for loopable sounds (tag: "loop")
+### Ambient Sound System
+A hybrid, fully self-contained system — no external API calls, no CORS/rate-limit/key-exposure risk in production:
+- `services/ambiencePresets.ts`: maps each `ScenarioContext.label` (from `data/scenarios.ts`, ~145 entries) to an `EnvironmentProfile` (`CITY | CAFE | OFFICE | NATURE | ROOM`) and a list of `AmbienceTag`s (crowd, traffic, kitchen, footsteps, door, rain, market, etc.), with a keyword-regex fallback (`inferFallbackProfile`) for custom topics/Vocabulary/AccentChallenge modes where no scenario label exists.
+- `services/ambienceLibrary.ts`: resolves each `EnvironmentProfile` to a bundled, same-origin audio file under `public/ambience/*.wav` and fetch+decodes it into an `AudioBuffer` (cached per URL).
+- `scripts/generate-ambience-beds.mjs`: offline Node script that renders those five `.wav` beds (long, seamlessly-looping, layered/filtered noise textures per profile). Re-run it to regenerate or retune the beds — nothing at runtime depends on this script.
+- `components/AudioPlayer.tsx`: at playback start, loads the resolved bed as a looping `AudioBufferSourceNode` layered under a rich set of live, tag-driven synthetic event generators (footsteps, door chimes, crowd babble, sirens, honks, printer bursts, rain drops, bird chirps, etc. — see the file for the full list) built with the Web Audio API. When the real bed loads, the purely-synthetic continuous "hum/air" layers are attenuated (not removed) to avoid doubling, while all discrete events stay at full richness. If the bed fails to load for any reason, playback silently continues with the pre-existing synthetic-only bed — there is no user-facing failure mode.
+- Real-time ducking (lowers ambience under speech) and light reverb/delay tied to the dialogue audio are also handled in `AudioPlayer.tsx`, via an `AnalyserNode` on the speech track and a `duckGain` node wrapping the whole ambience mix.
 
 ### Exercise System
 Five exercise types in `types.ts`:
@@ -109,7 +109,7 @@ Validation logic in `geminiService.ts` ensures proper structure before rendering
 
 ### Component Structure
 - `App.tsx`: Main orchestrator (580 lines) - handles all state and screen rendering
-- `AudioPlayer.tsx`: Integrated audio playback with Freesound ambient mixing
+- `AudioPlayer.tsx`: Integrated audio playback with bundled ambient bed + synthetic event mixing (see Ambient Sound System above)
 - `ExerciseCard.tsx`: Polymorphic exercise renderer based on type
 - `MatrixSelector.tsx`: Locus × Modus grid interface for Standard mode
 - `AuthScreen.tsx`: API key entry with localStorage persistence
@@ -177,7 +177,7 @@ Models defined as constants in `geminiService.ts`:
 - **API Key Security**: Keys stored in localStorage and injected via Vite config; never commit `.env.local`
 - **Audio Sanitization**: TTS will reject text with stage directions - always sanitize before sending
 - **Speaker Mapping**: TTS requires consistent internal speaker IDs; use "SpeakerA"/"SpeakerB" mapping for robustness
-- **Freesound Rate Limits**: API has rate limiting; implement caching if fetching frequently
+- **Ambient Beds Are Bundled Assets**: `public/ambience/*.wav` ship with the app; there is no external ambient-audio API call, so there's nothing to rate-limit or fail at runtime. Regenerate/retune them with `node scripts/generate-ambience-beds.mjs`.
 - **Exercise Validation**: Always validate exercise structure before rendering to prevent UI crashes
 - **Accent Consistency**: In Standard/Vocabulary modes, both speakers use same accent; only AccentChallenge uses mixed accents
 
