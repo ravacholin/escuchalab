@@ -571,6 +571,7 @@ const DIALECT_PROFILES: Record<Accent, string> = {
     [GRAMÁTICA] Distinción tú/usted marcada. Plural: vosotros. Leísmo de persona posible ("Le vi"). Uso de "vosotros" en imperativos (venid, sentaos).
     [PRAGMÁTICA] Directo, eficiente y sobrio; cortesía breve. Pausas cortas y ritmo conversacional rápido pero claro.
     [LÉXICO] Base estándar; 1–2 localismos puntuales ("molar", "curro", "coche"). NO depender de argot.
+    [REALIA] Moneda: euro (€), precios "X euros con Y céntimos". Tratamiento: tú (informal) / usted (formal); plural vosotros/ustedes. Cotidiano: coche, móvil, piso, DNI, metro/autobús. Instituciones y realia peninsulares.
   `,
   [Accent.Andalusia]: `
     DIALECTO: ESPAÑA - ANDALUCÍA (OCCIDENTAL).
@@ -578,6 +579,7 @@ const DIALECT_PROFILES: Record<Accent, string> = {
     [GRAMÁTICA] Ustedes como plural frecuente (verbo en 3ª). Apócopes coloquiales ("pa'", "na'") en registro informal.
     [PRAGMÁTICA] Cercanía afectuosa y cálida; ritmo ágil con sonoridad abierta.
     [LÉXICO] Español común con 1–2 marcas leves ("illo", "miarma"). NO depender de argot.
+    [REALIA] Moneda: euro (€), precios "X euros con Y céntimos". Tratamiento: tú (informal) / usted (formal); plural ustedes frecuente. Cotidiano: coche, móvil, piso, DNI, autobús. Realia peninsulares.
   `,
   [Accent.MexicoCity]: `
     DIALECTO: MÉXICO - CDMX (CHILANGO).
@@ -585,6 +587,7 @@ const DIALECT_PROFILES: Record<Accent, string> = {
     [GRAMÁTICA] Ustedes único plural. Diminutivos frecuentes ("cafecito"). Uso de "¿verdad?" como coletilla neutra.
     [PRAGMÁTICA] Cortesía alta y mitigación ("disculpe", "¿me permite?"). "Mande" como respuesta. Evitar rudeza directa.
     [LÉXICO] Español estándar con pocas marcas opcionales ("carro", "computadora", "platicar"). NO depender de argot ni muletillas locales.
+    [REALIA] Moneda: peso mexicano ($, "pesos", centavos). Tratamiento: tú (informal) / usted (formal); plural ustedes. Cotidiano: carro, celular, departamento, credencial del INE, camión/metro. Realia mexicanas.
   `,
   [Accent.Bogota]: `
     DIALECTO: COLOMBIA - BOGOTÁ (ROLO).
@@ -592,6 +595,7 @@ const DIALECT_PROFILES: Record<Accent, string> = {
     [GRAMÁTICA] Ustedeo frecuente entre cercanos. Diminutivos moderados.
     [PRAGMÁTICA] Cortesía alta y fórmulas atenuadoras ("qué pena", "con mucho gusto"). Peticiones con "regáleme".
     [LÉXICO] Español general con 1–2 marcas suaves ("tinto", "chévere"). NO depender de argot.
+    [REALIA] Moneda: peso colombiano ($, "pesos"). Tratamiento: ustedeo frecuente incluso entre cercanos; usted/tú. Plural ustedes. Cotidiano: carro, celular, apartamento, cédula, Transmilenio/bus. Realia colombianas.
   `,
   [Accent.Caribbean]: `
     DIALECTO: CARIBE (PUERTO RICO / CUBA).
@@ -599,6 +603,7 @@ const DIALECT_PROFILES: Record<Accent, string> = {
     [GRAMÁTICA] Preguntas sin inversión ocasional ("¿Qué tú quieres?") y redundancia pronominal posible.
     [PRAGMÁTICA] Expresivo, con exclamaciones breves y énfasis; energía alta sin groserías.
     [LÉXICO] Español común con 1–2 marcas suaves ("guagua", "pana"). NO depender de argot.
+    [REALIA] Moneda: dólar (US$) en Puerto Rico; peso cubano en Cuba — elige UNA y sé consistente. Tratamiento: tú predominante; usted formal; plural ustedes. Cotidiano: carro, celular, apartamento, guagua (autobús). Realia caribeñas.
   `,
   [Accent.BuenosAires]: `
     DIALECTO: ARGENTINA (RIOPLATENSE).
@@ -606,6 +611,7 @@ const DIALECT_PROFILES: Record<Accent, string> = {
     [GRAMÁTICA] Voseo ("vos tenés", "vení"). Uso de "che" como apelativo puntual.
     [PRAGMÁTICA] Directo y enfático, con marcadores discursivos moderados.
     [LÉXICO] Español estándar con pocas marcas ("che", "bondi" opcional). NO depender de argot.
+    [REALIA] Moneda: peso argentino ($, "pesos"). Tratamiento: voseo ("vos tenés"); usted formal; plural ustedes. Cotidiano: auto, celular, departamento, DNI, colectivo/subte. Realia rioplatenses.
   `,
   [Accent.Santiago]: `
     DIALECTO: CHILE - SANTIAGO.
@@ -613,6 +619,7 @@ const DIALECT_PROFILES: Record<Accent, string> = {
     [GRAMÁTICA] Voseo mixto en informal ("tú estái", "vos querís"), tuteo estándar en formal. Uso frecuente de "¿cachái?" en informal.
     [PRAGMÁTICA] Cadencia rápida y elisión en habla casual; en registro formal, claridad y neutralidad.
     [LÉXICO] Español general; 1–2 marcas suaves opcionales ("al tiro", "po"). Evitar "weón" y argot fuerte salvo contexto explícito.
+    [REALIA] Moneda: peso chileno ($, "pesos"; sin centavos). Tratamiento: tú estándar; usted formal; plural ustedes. Cotidiano: auto, celular, departamento, carnet, micro/metro. Realia chilenas.
   `,
   [Accent.Lima]: `
     DIALECTO: PERÚ - LIMA.
@@ -620,6 +627,7 @@ const DIALECT_PROFILES: Record<Accent, string> = {
     [GRAMÁTICA] Tuteo estándar. "Nomás" pospuesto ("pasa nomás"). Diminutivos moderados.
     [PRAGMÁTICA] Cortesía ligera y respuestas breves ("ya", "claro"); tono amable y calmado.
     [LÉXICO] Español general con 1–2 marcas suaves ("al toque", "chamba"). NO depender de argot.
+    [REALIA] Moneda: sol (S/, "soles", céntimos). Tratamiento: tú estándar; usted formal; plural ustedes. Cotidiano: carro/auto, celular, departamento, DNI, combi/bus. Realia peruanas.
   `
 };
 
@@ -781,18 +789,26 @@ export const generateLessonPlan = async (
     const t = topic.toLowerCase();
     let mandatoryInclusion = "";
 
-    if (t.includes("deletrear") || t.includes("apellido") || t.includes("nombre")) {
-      mandatoryInclusion = "MANDATORY: One speaker MUST SPELL a name/surname letter by letter (e.g., 'G-A-R-C-I-A'). It must be clear.";
-    } else if (t.includes("teléfono") || t.includes("whatsapp")) {
-      mandatoryInclusion = "MANDATORY: One speaker MUST dictate a phone number digit by digit (e.g., '6-5-4...').";
-    } else if (t.includes("precio") || t.includes("cuenta") || t.includes("cuesta")) {
-      mandatoryInclusion = "MANDATORY: Mention specific prices with cents (e.g., '14 euros con 95').";
-    } else if (t.includes("dirección") || t.includes("calle")) {
-      mandatoryInclusion = "MANDATORY: Mention a specific street name and number.";
-    } else if (t.includes("hora") || t.includes("cita")) {
-      mandatoryInclusion = "MANDATORY: Mention specific times (e.g., 'A las 5 y media').";
-    } else if (t.includes("correo") || t.includes("email")) {
+    if (t.includes("correo") || t.includes("email") || t.includes("arroba")) {
       mandatoryInclusion = "MANDATORY: Dictate an email address using 'arroba', 'punto', 'guion bajo'.";
+    } else if (t.includes("deletre") || t.includes("apellido") || t.includes("letra por letra") || t.includes("usuario")) {
+      mandatoryInclusion = "MANDATORY: One speaker MUST SPELL a name/surname/username letter by letter (e.g., 'G-A-R-C-I-A'). It must be clear.";
+    } else if (t.includes("teléfono") || t.includes("telefono") || t.includes("whatsapp") || t.includes("celular") || t.includes("móvil") || t.includes("movil")) {
+      mandatoryInclusion = "MANDATORY: One speaker MUST dictate a phone number digit by digit (e.g., '6-5-4...').";
+    } else if (t.includes("precio") || t.includes("cuenta") || t.includes("cuesta") || t.includes("pagar") || t.includes("total")) {
+      mandatoryInclusion = "MANDATORY: Mention a specific price with decimals in the local currency of the chosen accent (e.g., '14 con 95'). Do NOT force euros.";
+    } else if (t.includes("dirección") || t.includes("direccion") || t.includes("calle") || t.includes("dirección exacta")) {
+      mandatoryInclusion = "MANDATORY: Mention a specific street name and building number.";
+    } else if (t.includes("código") || t.includes("codigo") || t.includes("postal") || t.includes("matrícula") || t.includes("matricula") || t.includes("documento")) {
+      mandatoryInclusion = "MANDATORY: Dictate a specific alphanumeric code/postal code digit by digit.";
+    } else if (t.includes("fecha") || t.includes("nacimiento") || t.includes("día") || t.includes("dia ")) {
+      mandatoryInclusion = "MANDATORY: State a specific date (day, month, year) clearly.";
+    } else if (t.includes("hora") || t.includes("cita") || t.includes("horario") || t.includes("reservar")) {
+      mandatoryInclusion = "MANDATORY: Mention specific times (e.g., 'A las 5 y media').";
+    } else if (t.includes("número") || t.includes("numero") || t.includes("dígito") || t.includes("digito") || t.includes("talla") || t.includes("cantidad")) {
+      mandatoryInclusion = "MANDATORY: One speaker MUST state a specific number/quantity clearly (e.g., a bus line, a size, a room number).";
+    } else {
+      mandatoryInclusion = "MANDATORY: One speaker MUST state a concrete literal datum (a number, time, price, code or spelled name) clearly, so the learner can extract it.";
     }
 
     constraint = `
@@ -836,6 +852,16 @@ export const generateLessonPlan = async (
   const exerciseLogic = getExerciseInstructions(level, mode);
   const registerInstruction = getRegisterInstruction(textType);
 
+  // LOCALIZACIÓN: el contenido de los escenarios es neutro/panhispánico; aquí se adapta
+  // TODO (moneda, tratamiento, léxico, realia) a la variante regional elegida, sin mezclar.
+  const localizationInstruction = (mode === AppMode.AccentChallenge)
+    ? "LOCALIZACIÓN: cada hablante usa la moneda, el tratamiento y el léxico propios de SU región; no los mezcles entre hablantes."
+    : `LOCALIZACIÓN OBLIGATORIA (acento ${accent}): adapta el 100% del contenido a esa región y NUNCA mezcles marcas de otras.
+      - Moneda y precios SIEMPRE en la moneda local (no conviertas ni uses símbolos de otra región).
+      - Tratamiento (tú/vos/usted/vosotros/ustedes) según la norma del dialecto indicado en CONTEXT.
+      - Léxico cotidiano, instituciones, comidas, transporte y realia coherentes con la región (p. ej. auto/coche/carro, departamento/piso, celular/móvil, documento de identidad local).
+      - Nombres propios, topónimos y referencias verosímiles para la región.`;
+
   const jsonStructure = `
   {
     "title": "String",
@@ -873,6 +899,7 @@ export const generateLessonPlan = async (
   CONTEXT: ${profileInstruction}
   RULES: ${constraint}
   REGISTER: ${registerInstruction}
+  LOCALIZE: ${localizationInstruction}
   SPEAKERS: ${speakerEmphasis}
   EXERCISES: ${exerciseLogic}
   LENGTH: STICK TO ${length}.
