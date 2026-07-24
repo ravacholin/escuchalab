@@ -55,6 +55,20 @@ function writeString(view: DataView, offset: number, string: string) {
 
 const SPEEDS = [0.8, 1.0, 1.1, 1.25, 1.4, 1.5];
 
+// --- Mix calibration -------------------------------------------------------
+// The synthetic layers are authored at tiny amplitudes (0.001–0.1). These
+// makeup gains lift them to a clearly audible level BEFORE the user-volume
+// stage; a brickwall limiter downstream absorbs the resulting peaks so pushing
+// these up can never clip. Events and continuous "bed" textures get separate
+// makeup so discrete life (footsteps, clinks, doors…) isn't buried under the
+// continuous air. Tune here — everything scales from these two numbers.
+const EVENT_MAKEUP = 42;   // discrete one-shots (footsteps, clinks, honks, chirps…)
+const BED_MAKEUP = 7;      // continuous synthetic textures (rumble, air, hum, crowd…)
+const REAL_BED_GAIN = 0.7; // bundled recorded/rendered loop level (post-makeup)
+
+const DEFAULT_AMBIENCE_VOLUME = 0.6;
+const DEFAULT_AMBIENCE_INTENSITY = 0.6;
+
 function clamp01(value: number) {
   return Math.max(0, Math.min(1, value));
 }
@@ -181,14 +195,20 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   // Channels: Synthetic Ambience (Web Audio API)
   const syntheticCtxRef = useRef<AudioContext | null>(null);
-  const syntheticGainRef = useRef<GainNode | null>(null);
-  const syntheticDuckGainRef = useRef<GainNode | null>(null);
+  const syntheticGainRef = useRef<GainNode | null>(null); // user volume
+  const syntheticLimiterRef = useRef<DynamicsCompressorNode | null>(null); // brickwall safety
+  const syntheticDuckGainRef = useRef<GainNode | null>(null); // ducking under speech
   const syntheticNodesRef = useRef<AudioNode[]>([]);
   const syntheticTimersRef = useRef<number[]>([]);
   const duckingRafRef = useRef<number | null>(null);
   const speechAnalyserRef = useRef<AnalyserNode | null>(null);
   const speechSourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const ambienceGenerationRef = useRef(0);
+  // Web Audio availability is probed once, lazily, on first user gesture.
+  // `null` = not yet probed, true/false = result. When false we degrade to a
+  // plain <audio> element (speech still plays; no ambience) — never a crash.
+  const webAudioSupportedRef = useRef<boolean | null>(null);
+  const isPlayingRef = useRef(false);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasRealBed, setHasRealBed] = useState(false);
@@ -199,8 +219,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [playbackRate, setPlaybackRate] = useState(recommendedSpeed);
 
   // Settings
-  const [ambienceVolume, setAmbienceVolume] = useState(0.35);
-  const [ambienceIntensity, setAmbienceIntensity] = useState(0.65);
+  const [ambienceVolume, setAmbienceVolume] = useState(DEFAULT_AMBIENCE_VOLUME);
+  const [ambienceIntensity, setAmbienceIntensity] = useState(DEFAULT_AMBIENCE_INTENSITY);
   const [ambienceDucking, setAmbienceDucking] = useState(0.65);
 
   const ambienceVolumeRef = useRef(ambienceVolume);
@@ -213,6 +233,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   useEffect(() => {
     ambienceDuckingRef.current = ambienceDucking;
   }, [ambienceDucking]);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
 
   const keywords = ambientKeywords ?? explicitQuery;
   const ambiencePreset = useMemo(() => {
@@ -273,6 +297,63 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const env: EnvironmentProfile = ambiencePreset.profile;
   const envTags: AmbienceTag[] = ambiencePreset.tags;
 
+  // --- AUDIO GRAPH LIFECYCLE ---
+  // Lazily create (on the first user gesture, so it's never born "suspended")
+  // the single, persistent output chain shared by speech + ambience:
+  //   [sources] -> userGain (volume) -> limiter (brickwall) -> duckGain -> out
+  // Returns the live AudioContext, or null if Web Audio isn't available (in
+  // which case speech falls back to the plain <audio> element).
+  const ensureAudioGraph = (): AudioContext | null => {
+    if (webAudioSupportedRef.current === false) return null;
+    try {
+      if (!syntheticCtxRef.current) {
+        const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) { webAudioSupportedRef.current = false; return null; }
+        const ctx: AudioContext = new AudioContextClass();
+        syntheticCtxRef.current = ctx;
+        webAudioSupportedRef.current = true;
+
+        const userGain = ctx.createGain();
+        userGain.gain.value = ambienceVolumeRef.current;
+
+        // Brickwall-ish limiter: lets us drive the makeup gains hard without
+        // ever clipping the mix.
+        const limiter = ctx.createDynamicsCompressor();
+        limiter.threshold.setValueAtTime(-6, ctx.currentTime);
+        limiter.knee.setValueAtTime(0, ctx.currentTime);
+        limiter.ratio.setValueAtTime(20, ctx.currentTime);
+        limiter.attack.setValueAtTime(0.003, ctx.currentTime);
+        limiter.release.setValueAtTime(0.25, ctx.currentTime);
+
+        const duckGain = ctx.createGain();
+        duckGain.gain.value = 1;
+
+        userGain.connect(limiter);
+        limiter.connect(duckGain);
+        duckGain.connect(ctx.destination);
+
+        syntheticGainRef.current = userGain;
+        syntheticLimiterRef.current = limiter;
+        syntheticDuckGainRef.current = duckGain;
+
+        // Self-heal: some browsers re-suspend the context (tab hidden, audio
+        // focus lost). Resume automatically whenever we're meant to be playing.
+        ctx.onstatechange = () => {
+          if (ctx.state === 'suspended' && isPlayingRef.current) {
+            ctx.resume().catch(() => {});
+          }
+        };
+      }
+      const ctx = syntheticCtxRef.current;
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      return ctx;
+    } catch (e) {
+      console.warn('[Ambience] Web Audio unavailable; speech-only fallback.', e);
+      webAudioSupportedRef.current = false;
+      return null;
+    }
+  };
+
   // --- SYNTHETIC AMBIENCE GENERATOR ---
   const initSyntheticAmbience = () => {
     try {
@@ -280,33 +361,33 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       const myGeneration = ++ambienceGenerationRef.current;
       setHasRealBed(false);
 
-      if (!syntheticCtxRef.current) {
-        const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
-        syntheticCtxRef.current = new AudioContextClass();
-        syntheticGainRef.current = syntheticCtxRef.current!.createGain();
-        syntheticDuckGainRef.current = syntheticCtxRef.current!.createGain();
-        syntheticGainRef.current!.connect(syntheticDuckGainRef.current!);
-        syntheticDuckGainRef.current!.connect(syntheticCtxRef.current!.destination);
-      }
+      const ctx = ensureAudioGraph();
+      if (!ctx || !syntheticGainRef.current || !syntheticDuckGainRef.current) return;
 
-      if (!syntheticGainRef.current || !syntheticDuckGainRef.current) {
-        syntheticGainRef.current = syntheticCtxRef.current.createGain();
-        syntheticDuckGainRef.current = syntheticCtxRef.current.createGain();
-        syntheticGainRef.current.connect(syntheticDuckGainRef.current);
-        syntheticDuckGainRef.current.connect(syntheticCtxRef.current.destination);
-      }
-
-      const ctx = syntheticCtxRef.current!;
-      if (ctx.state === 'suspended') ctx.resume();
-
-      const masterGain = syntheticGainRef.current!; // user volume
+      const userGain = syntheticGainRef.current!; // user volume (persistent)
       const duckGain = syntheticDuckGainRef.current!; // ducking against speech
-      const nodes: AudioNode[] = [];
+
+      // Per-scene makeup buses so we can rebalance discrete events vs. the
+      // continuous bed independently. Both feed the persistent user-volume node.
+      const eventBus = ctx.createGain();
+      eventBus.gain.value = EVENT_MAKEUP;
+      const bedBus = ctx.createGain();
+      bedBus.gain.value = BED_MAKEUP;
+      eventBus.connect(userGain);
+      bedBus.connect(userGain);
+
+      // Events keep connecting to `masterGain`; continuous layers use `bedBus`.
+      const masterGain = eventBus;
+      const nodes: AudioNode[] = [eventBus, bedBus];
       const keywords = ambientKeywords ?? explicitQuery;
       const profile: EnvironmentProfile = env;
       const tags: AmbienceTag[] = envTags;
       const effectiveIntensity = clamp01(ambienceIntensity + (ambiencePreset.intensityBias ?? 0));
-      const seed = hashStringToSeed(`${profile}|${tags.join(',')}|${topic || ''}|${keywords || ''}`);
+      // Scenario identity keeps the character consistent, but a per-play salt
+      // reseeds the RNG on every playback so the timing/pitch/pan of events
+      // (and the bed's entry point below) never repeat identically.
+      const playSalt = Math.floor(Math.random() * 0xffffffff);
+      const seed = hashStringToSeed(`${profile}|${tags.join(',')}|${topic || ''}|${keywords || ''}|${playSalt}`);
       const rng = mulberry32(seed);
 
       duckGain.gain.setValueAtTime(1, ctx.currentTime);
@@ -326,11 +407,11 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       baseLow.type = 'lowpass';
       baseLow.frequency.value = profile === 'CITY' ? 260 : 170;
       const baseLowGain = ctx.createGain();
-      // Keep the "bed" subtle; detail should come from events.
+      // Continuous "air" bed (lifted by BED_MAKEUP downstream). Detail still
+      // comes from the discrete events, but this now carries real presence.
       baseLowGain.gain.value = 0.05 + effectiveIntensity * 0.10;
       baseLow.connect(baseLowGain);
-      baseLowGain.connect(masterGain);
-      baseLowGain.connect(convolver);
+      baseLowGain.connect(bedBus);
       nodes.push(baseLow, baseLowGain);
 
       const baseAir = ctx.createBiquadFilter();
@@ -340,8 +421,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       const baseAirGain = ctx.createGain();
       baseAirGain.gain.value = 0.012 + effectiveIntensity * 0.04;
       baseAir.connect(baseAirGain);
-      baseAirGain.connect(masterGain);
-      baseAirGain.connect(convolver);
+      baseAirGain.connect(bedBus);
       nodes.push(baseAir, baseAirGain);
 
       const brownSource = ctx.createBufferSource();
@@ -381,8 +461,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       humOsc.frequency.value = profile === 'OFFICE' ? 60 : 90;
       humOsc.connect(humFilter);
       humFilter.connect(humGain);
-      humGain.connect(masterGain);
-      humGain.connect(convolver);
+      humGain.connect(bedBus);
       humOsc.start();
       nodes.push(humOsc, humGain, humFilter);
 
@@ -495,8 +574,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         const out = ctx.createGain();
         out.gain.value = 0.010 + effectiveIntensity * 0.020;
         bus.connect(out);
-        out.connect(masterGain);
-        out.connect(convolver);
+        out.connect(bedBus);
+        // A light reverb send gives the crowd hall depth (event-scaled bus).
+        const crowdSend = ctx.createGain();
+        crowdSend.gain.value = 0.25;
+        out.connect(crowdSend);
+        crowdSend.connect(convolver);
+        nodes.push(crowdSend);
 
         for (let i = 0; i < voices; i++) {
           const formant = ctx.createBiquadFilter();
@@ -854,8 +938,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         c.connect(lp);
         lp.connect(hp);
         hp.connect(g);
-        g.connect(masterGain);
-        g.connect(convolver);
+        g.connect(bedBus);
         a.start();
         b.start();
         c.start();
@@ -897,8 +980,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           sheet.connect(hp);
           hp.connect(lp);
           lp.connect(g);
-          g.connect(masterGain);
-          g.connect(convolver);
+          g.connect(bedBus);
           sheet.start();
           nodes.push(sheet, hp, lp, g);
         }
@@ -936,8 +1018,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         engineGain.gain.value = 0.003 + effectiveIntensity * 0.007;
         engine.connect(engineLp);
         engineLp.connect(engineGain);
-        engineGain.connect(masterGain);
-        engineGain.connect(convolver);
+        engineGain.connect(bedBus);
         engine.start();
         nodes.push(engine, engineLp, engineGain);
 
@@ -1142,17 +1223,26 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         const bedSource = ctx.createBufferSource();
         bedSource.buffer = buffer;
         bedSource.loop = true;
+        // Per-play variety: enter the loop at a random point and detune a hair,
+        // so the same bundled asset never sounds identical twice.
+        const startOffset = rng() * buffer.duration;
+        bedSource.playbackRate.value = 0.97 + rng() * 0.06;
 
         const bedGain = ctx.createGain();
         bedGain.gain.setValueAtTime(0, ctx.currentTime);
-        bedGain.gain.linearRampToValueAtTime(0.85, ctx.currentTime + 2.5);
+        bedGain.gain.linearRampToValueAtTime(REAL_BED_GAIN, ctx.currentTime + 2.5);
 
+        // Bypass the makeup buses: the recorded bed is already full-level, so it
+        // sits directly on the user-volume node at a controlled gain.
         bedSource.connect(bedGain);
-        bedGain.connect(masterGain);
-        bedGain.connect(convolver);
-        bedSource.start();
+        bedGain.connect(userGain);
+        const bedSend = ctx.createGain();
+        bedSend.gain.value = profile === 'CAFE' ? 0.12 : 0.08;
+        bedGain.connect(bedSend);
+        bedSend.connect(convolver);
+        bedSource.start(ctx.currentTime, startOffset);
 
-        nodes.push(bedSource, bedGain);
+        nodes.push(bedSource, bedGain, bedSend);
 
         // A real texture is now carrying the "room" character — pull the
         // purely-synthetic continuous layers back so they add cohesion
@@ -1180,9 +1270,12 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       schedule(evolve, 8000);
 
       syntheticNodesRef.current = nodes;
-      masterGain.gain.setValueAtTime(0, ctx.currentTime);
-      masterGain.gain.linearRampToValueAtTime(ambienceVolume, ctx.currentTime + 3);
-    } catch (e) { console.error(e); }
+      // Fade the whole ambience mix in via the user-volume node (the makeup
+      // buses stay fixed). setTargetAtTime keeps re-inits from hard-cutting.
+      userGain.gain.cancelScheduledValues(ctx.currentTime);
+      userGain.gain.setValueAtTime(Math.min(userGain.gain.value, 0.0001), ctx.currentTime);
+      userGain.gain.linearRampToValueAtTime(ambienceVolumeRef.current, ctx.currentTime + 3);
+    } catch (e) { console.warn('[Ambience] init failed; continuing without ambience.', e); }
   };
 
   const stopSyntheticAmbience = () => {
@@ -1237,13 +1330,14 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   };
 
   // --- DIALOGUE SPATIALIZATION ---
+  // Routes the speech element through the (already-created) AudioContext for
+  // compression + contextual reverb, and taps an analyser for ducking. Only
+  // ever called after ensureAudioGraph() has succeeded on a user gesture, so
+  // it never creates a suspended context that would mute the <audio> element.
   const setupSpeechProcessing = (audioElement: HTMLAudioElement) => {
     try {
-      if (!syntheticCtxRef.current) {
-        const AudioContextClass = (window as any).AudioContext || (window as any).webkitAudioContext;
-        syntheticCtxRef.current = new AudioContextClass();
-      }
-      const ctx = syntheticCtxRef.current!;
+      const ctx = syntheticCtxRef.current;
+      if (!ctx) return null; // Web Audio unavailable — element plays natively.
 
       if (speechSourceNodeRef.current) {
         return { source: speechSourceNodeRef.current };
@@ -1289,8 +1383,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     if (speechRef.current) {
       setDuration(speechRef.current.duration);
       speechRef.current.playbackRate = playbackRate;
-      setupSpeechProcessing(speechRef.current);
-      startDuckingLoop();
+      // Speech routing + context creation are deferred to the first play
+      // gesture (togglePlay) so the AudioContext is never born "suspended".
     }
   };
   const onEnded = () => { setIsPlaying(false); setCurrentTime(0); fadeOut(); };
@@ -1309,14 +1403,22 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   };
 
+  const startPlayback = () => {
+    if (!speechRef.current) return;
+    // Resume/create the graph on this gesture, wire speech through it (if Web
+    // Audio is available), then start speech + ambience together.
+    const ctx = ensureAudioGraph();
+    if (ctx) setupSpeechProcessing(speechRef.current);
+    const p = speechRef.current.play();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+    initSyntheticAmbience();
+    startDuckingLoop();
+  };
+
   const togglePlay = () => {
     if (!speechRef.current) return;
     if (isPlaying) { speechRef.current.pause(); fadeOut(); }
-    else {
-      speechRef.current.play();
-      initSyntheticAmbience();
-      startDuckingLoop();
-    }
+    else { startPlayback(); }
     setIsPlaying(!isPlaying);
   };
 
@@ -1331,7 +1433,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const reset = () => {
     if (!speechRef.current) return;
     speechRef.current.currentTime = 0; setCurrentTime(0);
-    speechRef.current.play(); stopSyntheticAmbience(); initSyntheticAmbience(); startDuckingLoop();
+    stopSyntheticAmbience();
+    startPlayback();
     setIsPlaying(true);
   };
 
