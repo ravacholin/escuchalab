@@ -1018,6 +1018,13 @@ const ENGINES: Record<EngineId, Engine> = {
 // Composición final de la lección
 // ---------------------------------------------------------------------------
 
+/** Origen final de cada slot del blueprint, para poder informarlo en la UI. */
+export interface SlotReport {
+  slotId: string;
+  source: 'model' | 'engine' | 'empty';
+  reason?: string;
+}
+
 /**
  * Empareja los ejercicios verificados con los slots del blueprint y rellena con
  * motores los que quedaron vacíos. El resultado sale ordenado por etapa de
@@ -1026,7 +1033,8 @@ const ENGINES: Record<EngineId, Engine> = {
 export function fillMissingSlots(
   verified: Exercise[],
   blueprint: ExerciseSlot[],
-  dialogue: DialogueLine[]
+  dialogue: DialogueLine[],
+  onSlot?: (report: SlotReport) => void
 ): Exercise[] {
   const index = buildTranscriptIndex(dialogue);
   const pool = [...verified];
@@ -1046,29 +1054,46 @@ export function fillMissingSlots(
         stage: slot.stage,
         skill: slot.skill
       });
+      onSlot?.({ slotId: slot.slotId, source: 'model' });
       return;
     }
 
     const engine = slot.engineFallback ? ENGINES[slot.engineFallback] : undefined;
     if (!engine) {
       console.warn(`[ejercicios] slot "${slot.slotId}" sin cubrir y sin motor de respaldo`);
+      onSlot?.({ slotId: slot.slotId, source: 'empty', reason: 'sin motor de respaldo' });
       return;
     }
 
     let built: Exercise | null = null;
+    let engineError: string | null = null;
     try {
       built = engine(dialogue, slot, index);
     } catch (error) {
       console.warn(`[ejercicios] el motor "${slot.engineFallback}" falló:`, error);
+      engineError = error instanceof Error ? error.message : String(error);
     }
-    if (!built) return;
+    if (!built) {
+      onSlot?.({
+        slotId: slot.slotId,
+        source: 'empty',
+        reason: engineError || `el motor "${slot.engineFallback}" no encontró material en el audio`
+      });
+      return;
+    }
 
     // Lo generado aquí pasa por el mismo control que lo generado por el modelo.
     const check = verifyExercise(built, index);
     if (!check.ok || !check.exercise) {
       console.warn(`[ejercicios] motor "${slot.engineFallback}" descartado: ${check.reason}`);
+      onSlot?.({
+        slotId: slot.slotId,
+        source: 'empty',
+        reason: `motor descartado: ${check.reason || 'sin motivo'}`
+      });
       return;
     }
+    onSlot?.({ slotId: slot.slotId, source: 'engine' });
 
     result.push({
       ...check.exercise,

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode } from './types';
 import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
 import { generateLessonPlan, generateAudio } from './services/geminiService';
+import { ProgressSnapshot } from './services/generationProgress';
 import AudioPlayer from './components/AudioPlayer';
 import ExerciseCard from './components/ExerciseCard';
 import LoadingScreen from './components/LoadingScreen';
@@ -132,6 +133,16 @@ const App: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'exercises' | 'transcript'>('exercises');
     const [audioError, setAudioError] = useState<string | null>(null);
 
+    // Progreso medido de la generación (lo reportan los propios servicios).
+    const [progress, setProgress] = useState<ProgressSnapshot | null>(null);
+
+    // Una instantánea rezagada de la fase anterior no debe pisar a la actual:
+    // los reportes van con un pequeño throttling y el guion termina justo
+    // cuando el audio empieza.
+    const trackProgress = useCallback((snapshot: ProgressSnapshot) => {
+        setProgress(prev => (prev?.phase === 'audio' && snapshot.phase === 'plan' ? prev : snapshot));
+    }, []);
+
     /**
      * Ejercicios agrupados por etapa de escucha, en el orden metodológico
      * (anticipación → global → selectiva → intensiva → reflexión). Los que
@@ -198,6 +209,7 @@ const App: React.FC = () => {
     const handleGenerate = async () => {
         setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null }));
         setAudioError(null);
+        setProgress(null);
 
         let finalTopic = "";
 
@@ -231,7 +243,8 @@ const App: React.FC = () => {
                 state.config.length,
                 state.config.textType,
                 state.config.accent,
-                state.config.mode
+                state.config.mode,
+                trackProgress
             );
 
             setState(prev => ({
@@ -242,7 +255,12 @@ const App: React.FC = () => {
             }));
 
             try {
-                const audioUrl = await generateAudio(plan.dialogue, plan.characters, state.config.accent);
+                const audioUrl = await generateAudio(
+                    plan.dialogue,
+                    plan.characters,
+                    state.config.accent,
+                    trackProgress
+                );
                 setState(prev => ({
                     ...prev,
                     audioBlob: audioUrl,
@@ -297,7 +315,7 @@ const App: React.FC = () => {
 
     // --- SCREEN: LOADING ---
     if (state.status === 'generating_plan' || state.status === 'generating_audio') {
-        return <LoadingScreen status={state.status} />;
+        return <LoadingScreen status={state.status} progress={progress} />;
     }
 
     // --- SCREEN: ERROR ---
