@@ -7,7 +7,7 @@ import {
   TRUE_FALSE_COLUMNS,
   TRUE_FALSE_NOTGIVEN_COLUMNS
 } from '../data/listeningSyllabus';
-import { Check, X, ArrowUp, ArrowDown, GripVertical, AlertCircle, Quote } from 'lucide-react';
+import { Check, X, ArrowUp, ArrowDown, GripVertical, AlertCircle, Quote, MousePointerClick } from 'lucide-react';
 
 interface ExerciseCardProps {
   exercise: Exercise;
@@ -245,9 +245,31 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
 
   // --- RENDERERS ---
 
+  /**
+   * Barra de modo de selección. Antes, una pregunta de respuesta única y otra de
+   * respuesta múltiple se veían exactamente igual: el alumno no sabía si podía
+   * marcar varias ni que volver a tocar desmarca. Se dice explícitamente, y se
+   * lleva la cuenta de lo marcado para que el estado nunca sea una adivinanza.
+   */
+  const renderSelectionHint = (count: number, isMultiSelect: boolean) => (
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-6 pt-6 font-mono text-[10px] uppercase tracking-widest">
+        <span className="flex items-center gap-2 text-zinc-500">
+            <MousePointerClick size={12} className="flex-shrink-0" />
+            {isMultiSelect
+                ? 'Respuesta múltiple · tocá para marcar, tocá otra vez para desmarcar'
+                : 'Respuesta única · tocá una opción'}
+        </span>
+        {isMultiSelect && (
+            <span className={count > 0 ? 'text-white' : 'text-zinc-600'}>
+                {count} marcada{count === 1 ? '' : 's'}
+            </span>
+        )}
+    </div>
+  );
+
   const renderMultipleChoice = () => {
     const isMultiSelect = Array.isArray(safeExercise.correctAnswer);
-    
+
     // Auto-detect if "Word Hunt" / "Grid" layout is suitable
     // Criteria: > 4 options AND options are short (likely single words)
     const options = safeExercise.options || [];
@@ -256,7 +278,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
     const toggleSelection = (id: string) => {
         if (isSubmitted) return;
         if (isMultiSelect) {
-            setSelectedOptions(prev => 
+            setSelectedOptions(prev =>
                 prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
             );
         } else {
@@ -265,10 +287,12 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
     };
 
     return (
-        <div className={`p-6 ${isGridSuitable ? 'grid grid-cols-2 sm:grid-cols-3 gap-3' : 'flex flex-col gap-2'}`}>
+        <>
+            {renderSelectionHint(selectedOptions.length, isMultiSelect)}
+            <div className={`p-6 ${isGridSuitable ? 'grid grid-cols-2 sm:grid-cols-3 gap-3' : 'flex flex-col gap-2'}`}>
             {options.map((opt: any) => {
                 const isSelected = selectedOptions.includes(opt.id);
-                
+
                 // Determine if this specific option is correct
                 let isActuallyCorrect = false;
                 if (Array.isArray(safeExercise.correctAnswer)) {
@@ -276,21 +300,31 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
                 } else {
                     isActuallyCorrect = (safeExercise.correctAnswer as string) === opt.id;
                 }
+                // Clave que el alumno no marcó: ni acierto ni error de marcado.
+                const isMissedKey = isSubmitted && isMultiSelect && isActuallyCorrect && !isSelected;
 
                 let containerClass = "relative p-4 border transition-all duration-200 cursor-pointer flex items-center gap-4 group";
                 // Adjust styling for Grid mode
-                if (isGridSuitable) containerClass = "relative h-24 border transition-all duration-200 cursor-pointer flex flex-col items-center justify-center gap-2 group text-center";
+                if (isGridSuitable) containerClass = "relative h-24 border transition-all duration-200 cursor-pointer flex flex-col items-center justify-center gap-2 pt-8 px-3 group text-center";
 
-                let indicatorClass = "w-5 h-5 border flex items-center justify-center transition-all duration-200 flex-shrink-0";
+                // Casilla (múltiple) vs. redondel (única): la forma sola ya dice
+                // cuántas respuestas admite el ejercicio.
+                let indicatorClass = `w-5 h-5 border flex items-center justify-center transition-all duration-200 flex-shrink-0 ${isMultiSelect ? 'rounded-[2px]' : 'rounded-full'}`;
+                let indicatorGlyph: React.ReactNode = null;
 
                 if (isSubmitted) {
-                    if (isActuallyCorrect) {
+                    if (isMissedKey) {
+                        containerClass += " border-amber-500 bg-amber-500/10";
+                        indicatorClass += " border-amber-500 text-amber-500";
+                    } else if (isActuallyCorrect) {
                         containerClass += " border-green-500 bg-green-500/10";
                         indicatorClass += " border-green-500 bg-green-500 text-black";
+                        indicatorGlyph = <Check size={12} strokeWidth={3} />;
                     } else if (isSelected) {
                         // Selected but wrong
                         containerClass += " border-red-500 bg-red-500/10";
                         indicatorClass += " border-red-500 bg-red-500 text-white";
+                        indicatorGlyph = <X size={12} strokeWidth={3} />;
                     } else {
                         // Not selected, not correct
                         containerClass += " border-zinc-800 opacity-50";
@@ -299,7 +333,12 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
                 } else {
                     if (isSelected) {
                         containerClass += " border-white bg-white";
-                        indicatorClass += " border-black bg-black";
+                        indicatorClass += " border-black bg-black text-white";
+                        // Marca visible dentro de la casilla: el estado no depende
+                        // de recordar que la tarjeta invertida significa "elegida".
+                        indicatorGlyph = isMultiSelect
+                            ? <Check size={12} strokeWidth={3} />
+                            : <span className="w-2 h-2 rounded-full bg-white" />;
                     } else {
                         containerClass += " border-zinc-800 hover:border-zinc-500 bg-zinc-900/50";
                         indicatorClass += " border-zinc-600 group-hover:border-zinc-400";
@@ -307,35 +346,52 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
                 }
 
                 return (
-                    <button 
-                        key={opt.id} 
-                        onClick={() => toggleSelection(opt.id)} 
-                        disabled={isSubmitted} 
+                    <button
+                        key={opt.id}
+                        onClick={() => toggleSelection(opt.id)}
+                        disabled={isSubmitted}
+                        role={isMultiSelect ? 'checkbox' : 'radio'}
+                        aria-checked={isSelected}
                         className={containerClass}
                     >
-                        {/* Only show circle indicator in list mode, grid mode uses whole card state mostly */}
-                        {!isGridSuitable && (
-                            <div className={indicatorClass}>
-                                {isSubmitted && isActuallyCorrect && <Check size={12} />}
-                                {isSubmitted && isSelected && !isActuallyCorrect && <X size={12} />}
-                            </div>
-                        )}
-                        
+                        {/* La casilla se muestra en las dos disposiciones: en la
+                            rejilla era el único formato sin indicador propio. */}
+                        <div className={isGridSuitable ? 'absolute top-2 left-2' : ''}>
+                            <div className={indicatorClass}>{indicatorGlyph}</div>
+                        </div>
+
                         <span className={`text-sm font-sans leading-snug ${isSelected && !isSubmitted ? 'text-black font-medium' : 'text-zinc-300'} ${isGridSuitable ? 'font-display uppercase tracking-wider font-bold text-base' : 'text-left'}`}>
                             {opt.text}
                         </span>
 
-                        {/* Grid Mode Icons */}
+                        {/* Estado en la rejilla: se marca también lo que se dejó pasar. */}
                         {isGridSuitable && isSubmitted && (
                             <div className="absolute top-2 right-2">
-                                {isActuallyCorrect && <Check size={14} className="text-green-500" />}
-                                {isSelected && !isActuallyCorrect && <X size={14} className="text-red-500" />}
+                                {isMissedKey
+                                    ? <AlertCircle size={14} className="text-amber-500" />
+                                    : isActuallyCorrect
+                                        ? <Check size={14} className="text-green-500" />
+                                        : isSelected && <X size={14} className="text-red-500" />}
                             </div>
+                        )}
+
+                        {!isGridSuitable && isMissedKey && (
+                            <span className="ml-auto font-mono text-[10px] uppercase tracking-widest text-amber-500 flex-shrink-0">
+                                se te pasó
+                            </span>
                         )}
                     </button>
                 );
             })}
-        </div>
+            </div>
+            {isSubmitted && isMultiSelect && (
+                <p className="px-6 pb-6 -mt-2 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                    <span className="text-green-500">verde</span> = la marcaste y va ·{' '}
+                    <span className="text-amber-500">ámbar</span> = va y no la marcaste ·{' '}
+                    <span className="text-red-500">roja</span> = la marcaste y no va
+                </p>
+            )}
+        </>
     );
   };
 
@@ -848,9 +904,15 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
 
     return (
         <div className="p-8 bg-zinc-950">
-            <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 mb-4">
-                Tocá las palabras que no se dicen
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 mb-4 font-mono text-[10px] uppercase tracking-widest">
+                <span className="flex items-center gap-2 text-zinc-500">
+                    <MousePointerClick size={12} className="flex-shrink-0" />
+                    Tocá las palabras que no se dicen · tocá otra vez para desmarcar
+                </span>
+                <span className={selectedOptions.length > 0 ? 'text-white' : 'text-zinc-600'}>
+                    {selectedOptions.length} marcada{selectedOptions.length === 1 ? '' : 's'}
+                </span>
+            </div>
             <div className="flex flex-wrap gap-x-1 gap-y-2 font-serif text-lg leading-loose">
                 {tokens.map((token: any) => {
                     const isSelected = selectedOptions.includes(token.id);
@@ -863,9 +925,11 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
                         else if (isSelected) tokenClass += ' border-red-500 text-red-400 bg-red-500/10 line-through';
                         else tokenClass += ' border-transparent text-zinc-500';
                     } else if (isSelected) {
-                        tokenClass += ' border-white bg-white/10 text-white';
+                        // Inversión completa: en un párrafo corrido, un fondo al 10%
+                        // no se distinguía de una palabra sin marcar.
+                        tokenClass += ' border-white bg-white text-black font-medium';
                     } else {
-                        tokenClass += ' border-transparent text-zinc-300 hover:border-zinc-600';
+                        tokenClass += ' border-transparent text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800/60';
                     }
 
                     return (
@@ -878,6 +942,8 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
                                 );
                             }}
                             disabled={isSubmitted}
+                            role="checkbox"
+                            aria-checked={isSelected}
                             className={tokenClass}
                         >
                             {token.text}
