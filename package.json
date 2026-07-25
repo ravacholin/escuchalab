@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "check:syllabus": "node scripts/check-syllabus.mjs",
     "check:exercises": "node scripts/check-exercises.mjs",
-    "test": "npm run typecheck && npm run check:syllabus && npm run check:exercises"
+    "check:audio": "node scripts/check-audio.mjs",
+    "test": "npm run typecheck && npm run check:syllabus && npm run check:exercises && npm run check:audio"
   },
   "dependencies": {
     "@google/genai": "^2.13.0",

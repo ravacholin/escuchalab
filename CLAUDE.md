@@ -86,9 +86,10 @@ Key implementation notes:
 ### Audio Generation
 - Uses `gemini-2.5-flash-preview-tts` model
 - Sanitizes text to remove stage directions (*, [], ()) before TTS
-- Multi-speaker config with voice assignment based on character gender
+- Multi-speaker config with voice assignment based on character gender, computed **once** over the whole dialogue and reused for every chunk
 - Returns base64-encoded audio data
 - Error handling for "non-audio response" rejections
+- **Chunked at turn boundaries** (`chunkDialogueLines`): the phonetic profile prepended to every request eats 2196-3407 of the 5000-character budget, and the old code just did `substring(0, 5000)` — a `Largo` dialogue in Buenos Aires or Lima silently lost its last turns mid-sentence while the exercises kept asking about them. `ttsDialogueBudget(accent)` computes what is actually left, and no turn is ever dropped. Chunks are also used for speed above `TURNS_BEFORE_SPLITTING` turns, generated with `TTS_CONCURRENCY = 2` (three in parallel gets 429/503 from the API) and concatenated with a 5 ms fade at each seam (`concatPcmChunks`). **Each chunk is one more request against the TTS quota**, so short lessons deliberately stay in a single call. The chunking is internal to `generateAudio()`: it still takes the same arguments, still reports through `ProgressReporter`, and still returns one base64 PCM track.
 
 ### Ambient Sound System
 A hybrid, fully self-contained system — no external API calls, no CORS/rate-limit/key-exposure risk in production:
@@ -150,13 +151,17 @@ measurement.
   denominator from the blueprint) → parse (turns, speakers) → verify (kept vs. discarded,
   with the verifier's reason per item) → assemble (slots covered by the model, by a
   deterministic engine, or left empty).
-- **Phase 2 (`generateAudio`)**: prepare (turns, chars, voice assignment) → synthesis
-  (bytes → seconds of PCM at 24 kHz/16-bit as chunks arrive) → encode (final length/size).
+- **Phase 2 (`generateAudio`)**: prepare (turns, chars, voice assignment, and how many TTS
+  requests the chunking is going to make) → synthesis (bytes → seconds of PCM at
+  24 kHz/16-bit as chunks arrive) → encode (final length/size).
 - **A step only has a percentage if a real denominator exists.** Where none does — the
   TTS never announces total duration, and A0 explicitly tells the model to ignore the
   turn count — the step is flagged `atomic: false` + no `ratio`, the UI shows `≥ N%` with
   an indeterminate marker and the note that the service doesn't report a total, and the
-  live counters carry the information instead. Never invent the number.
+  live counters carry the information instead. Never invent the number. The one exception
+  is a chunked dialogue: `chunkDialogueLines()` knows how many requests it will make, so
+  with more than one chunk `synthesis` reports `completed/total` requests as a genuine
+  ratio. A single-chunk lesson stays indeterminate, exactly as before.
 - `verifyExercises()` and `fillMissingSlots()` take optional reporting callbacks so
   discards and engine fallbacks surface on screen instead of only in `console.warn`.
 - The only clock-driven element left is the elapsed-time counter, because it is a clock.
@@ -190,6 +195,7 @@ The Intro (A0) level uses a unique "realistic immersion" approach:
 - Retry logic with exponential backoff (3 attempts, 1s → 2s delay)
 
 ### Persistence Strategy
+- Generated lessons are cached in **IndexedDB** (`services/lessonCache.ts`), keyed by `{mode, level, textType, accent, length, topic}`, LRU-capped at 20 entries. The dialogue is requested with `temperature: 0.0`, so repeating a configuration used to re-pay the whole pipeline for essentially the same lesson. Only *complete* lessons (plan **and** audio) are stored — a cached lesson without audio would have to go back to the TTS anyway. `AppMode.AccentChallenge` is **never** cached: it draws two random accents per run, so its key does not describe its contents. A «Regenerar» button in the header invalidates the entry and forces a fresh lesson. The PCM is stored as raw bytes and re-encoded to base64 on read, so the app boundary is unchanged.
 - API key stored in localStorage for session continuity
 - Lazy initialization in `useState` prevents auth screen flash
 - Storage event listener detects cross-tab key changes
@@ -244,6 +250,7 @@ Models defined as constants in `geminiService.ts`:
 
 Automated checks (no API key or network needed) — run all with `npm test`:
 - `npm run typecheck` — `tsc --noEmit`.
+- `npm run check:audio` — asserts the TTS chunking never exceeds the per-accent character budget, never loses a turn (the `substring(0, 5000)` bug), keeps short dialogues in a single request, splits an oversized single turn by sentence instead of truncating it, and that the PCM concatenation preserves every sample while fading only the seam.
 - `npm run check:syllabus` — walks `getBlueprint()` across the 42 valid level × text-type × mode combinations and asserts the pedagogical invariants: the per-level exercise budget, no format outside its level or text-type range, nothing presupposing two speakers in single-voice audio, A0 free of ordering/matching/scale/V-F-NG/spot-the-difference, C1 free of basic decoding formats, every lesson covering at least two stages and three distinct skills, stage order preserved, unique slot ids, existing engine fallbacks, and Vocabulary/text-type variants genuinely differing from one another.
 - `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text. It also pins the dictated-datum path: a phone said in words and a phone said as `654 32 18` must both yield one `Teléfono` field, and focused minimal pairs must contrast the digits rather than the greeting.
 
