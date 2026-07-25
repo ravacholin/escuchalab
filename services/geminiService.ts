@@ -1,10 +1,17 @@
 
-import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
+import { GoogleGenAI, GenerateContentParameters, Modality } from "@google/genai";
 import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from "../types";
 import { ExerciseSlot, FORMAT_RULES, getBlueprint, STAGE_META } from "../data/listeningSyllabus";
 import { DATA_POINTS, inferDataPoint } from "../data/dataPoints";
 import { fillMissingSlots } from "./exerciseEngines";
 import { verifyExercises } from "./exerciseVerification";
+import {
+  ProgressListener,
+  ProgressReporter,
+  formatBytes,
+  formatCount,
+  formatSeconds
+} from "./generationProgress";
 
 // Helper to get key from storage
 const getApiKey = (): string => {
@@ -28,15 +35,96 @@ const getAi = () => {
   return aiInstance;
 };
 
+// PCM crudo devuelto por el TTS: 24 kHz, 16 bits, mono. Sirve para convertir
+// bytes recibidos en segundos de audio reales mientras llega el stream.
+const TTS_SAMPLE_RATE = 24000;
+const TTS_BYTES_PER_SECOND = TTS_SAMPLE_RATE * 2;
+
 // --- HELPERS ---
-async function withRetry<T>(fn: () => Promise<T>, retries = 2, delay = 500): Promise<T> {
-  try {
-    return await fn();
-  } catch (error: any) {
-    if (retries <= 0) throw error;
-    await new Promise(resolve => setTimeout(resolve, delay));
-    return withRetry(fn, retries - 1, delay * 2);
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+/**
+ * Pide la respuesta en streaming para poder medir lo que va llegando.
+ *
+ * Antes esto era una llamada opaca envuelta en `withRetry`: la app no sabía
+ * nada entre el envío y la respuesta completa, así que la pantalla de carga no
+ * tenía más remedio que inventarse el avance. Con el stream, cada chunk es un
+ * hecho observable (caracteres, turnos, ejercicios) que se reporta tal cual.
+ *
+ * Se conservan los tres intentos con espera creciente del código anterior; el
+ * último cae a la llamada no-streaming para que un modelo o una red que no
+ * admitan streaming no rompan la generación.
+ */
+async function generateJsonWithProgress(
+  ai: GoogleGenAI,
+  params: GenerateContentParameters,
+  hooks: {
+    onText: (full: string) => void;
+    onRetry: (attempt: number, received: number, reason: string) => void;
+    onFallback: (reason: string) => void;
   }
+): Promise<string> {
+  const STREAM_ATTEMPTS = 2;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= STREAM_ATTEMPTS; attempt++) {
+    let accumulated = '';
+    try {
+      const stream = await ai.models.generateContentStream(params);
+      for await (const chunk of stream) {
+        const delta = chunk.text ?? '';
+        if (!delta) continue;
+        accumulated += delta;
+        hooks.onText(accumulated);
+      }
+      if (!accumulated.trim()) throw new Error('la API devolvió una respuesta vacía');
+      return accumulated;
+    } catch (error) {
+      lastError = error;
+      hooks.onRetry(attempt, accumulated.length, errorMessage(error));
+      await sleep(500 * attempt);
+    }
+  }
+
+  hooks.onFallback(errorMessage(lastError));
+  const response = await ai.models.generateContent(params);
+  const text = response.text;
+  if (!text || !text.trim()) {
+    throw lastError instanceof Error ? lastError : new Error('la API devolvió una respuesta vacía');
+  }
+  hooks.onText(text);
+  return text;
+}
+
+// --- BASE64 <-> BYTES (audio en streaming) ---
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  // Por trozos: `String.fromCharCode(...bytes)` revienta la pila con audio largo.
+  const CHUNK = 0x8000;
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+function concatBytes(chunks: Uint8Array[], total: number): Uint8Array {
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
 }
 
 function cleanJsonString(str: string): string {
@@ -665,6 +753,51 @@ const getRegisterInstruction = (textType: TextType): string => {
   }
 };
 
+// --- PROGRESO MEDIBLE DE LA FASE 1 ---
+
+/**
+ * Pasos reportados durante la generación del guion. Los pesos son la cuota de
+ * la fase que representa cada paso; lo que hace avanzar la barra dentro de cada
+ * uno es SIEMPRE una medida (turnos, ejercicios, descartes), nunca un temporizador.
+ */
+const PLAN_STEPS = [
+  { id: 'blueprint', label: 'Plan pedagógico', weight: 3, atomic: true },
+  { id: 'prompt', label: 'Composición del prompt', weight: 2, atomic: true },
+  { id: 'dialogue', label: 'Recepción del guion', weight: 35 },
+  { id: 'exercises', label: 'Recepción de los ejercicios', weight: 45 },
+  { id: 'parse', label: 'Validación de la estructura', weight: 3, atomic: true },
+  { id: 'verify', label: 'Verificación de claves', weight: 6, atomic: true },
+  { id: 'assemble', label: 'Montaje de la lección', weight: 6, atomic: true }
+];
+
+/**
+ * Turnos que el prompt le pide al modelo en cada duración. Es el único
+ * denominador real que existe para el guion, y solo se usa donde se pide de
+ * verdad: en A0 el prompt le dice explícitamente al modelo que lo ignore, así
+ * que ahí ese paso se declara no medible en vez de fingir un porcentaje.
+ */
+const REQUESTED_TURNS: Record<Length, number> = {
+  [Length.Short]: 6,
+  [Length.Medium]: 12,
+  [Length.Long]: 14
+};
+
+const SPEAKER_KEY = /"speaker"\s*:/;
+const SLOT_KEY = /"slotId"\s*:/;
+const QUESTION_KEY = /"question"\s*:/;
+const EXERCISES_KEY = /"exercises"\s*:/;
+const TITLE_VALUE = /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/;
+
+const countMatches = (text: string, pattern: RegExp): number => {
+  const re = new RegExp(pattern.source, 'g');
+  let count = 0;
+  while (re.exec(text) !== null) count++;
+  return count;
+};
+
+const plural = (n: number, singular: string, pluralForm: string) =>
+  `${formatCount(n)} ${n === 1 ? singular : pluralForm}`;
+
 // --- MAIN GENERATOR ---
 
 export const generateLessonPlan = async (
@@ -673,8 +806,12 @@ export const generateLessonPlan = async (
   length: Length,
   textType: TextType,
   accent: Accent,
-  mode: AppMode
+  mode: AppMode,
+  onProgress?: ProgressListener
 ): Promise<LessonPlan> => {
+
+  const reporter = new ProgressReporter('plan', PLAN_STEPS, onProgress);
+  reporter.start('blueprint');
 
   // DYNAMIC INSTANTIATION WITH STORED KEY
   const ai = getAi();
@@ -739,6 +876,17 @@ export const generateLessonPlan = async (
   const exerciseLogic = buildExercisePrompt(blueprint);
   const registerInstruction = getRegisterInstruction(textType);
 
+  const stageCount = new Set(blueprint.map(slot => slot.stage)).size;
+  reporter.finish(
+    'blueprint',
+    `${plural(blueprint.length, 'ejercicio previsto', 'ejercicios previstos')} · ${plural(stageCount, 'etapa', 'etapas')}` +
+      (dataPoint ? ` · dato obligatorio: ${DATA_POINTS[dataPoint].fieldLabel}` : '')
+  );
+  reporter.log(
+    `Blueprint ${level} / ${textType}: ${blueprint.map(slot => slot.format).join(', ')}`,
+    'info'
+  );
+
   // LOCALIZACIÓN: el contenido de los escenarios es neutro/panhispánico; aquí se adapta
   // TODO (moneda, tratamiento, léxico, realia) a la variante regional elegida, sin mezclar.
   const localizationInstruction = (mode === AppMode.AccentChallenge)
@@ -770,9 +918,14 @@ export const generateLessonPlan = async (
     ? "LENGTH: natural y fluida; ignora el límite estricto de turnos si corta la naturalidad."
     : `LENGTH: STICK TO ${length}.`;
 
+  // Denominador real de turnos: solo existe donde el prompt lo exige.
+  const requestedTurns = level === Level.Intro ? null : REQUESTED_TURNS[length];
+
   // Auto-retry loop for multi-speaker validation
   const MAX_SPEAKER_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_SPEAKER_RETRIES; attempt++) {
+    if (attempt > 1) reporter.reset(['dialogue', 'exercises', 'parse']);
+    reporter.start('prompt');
     // Strengthen constraint on retry attempts
     const speakerEmphasis = attempt > 1
       ? `⚠️ REINTENTO ${attempt}/${MAX_SPEAKER_RETRIES}: DETECCIÓN PREVIA DE MÁS DE 2 PERSONAJES. ESTO ES ABSOLUTAMENTE CRÍTICO - USA SOLO ${numSpeakers} ${numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES'}. NO AGREGUES PERSONAJES SECUNDARIOS, MESEROS, RECEPCIONISTAS, ETC.`
@@ -793,19 +946,105 @@ export const generateLessonPlan = async (
   Structure: ${jsonStructure}
   `;
 
-    try {
-      const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-        model: GENERATION_MODEL,
-        contents: prompt,
-        config: {
-          systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
-          responseMimeType: "application/json",
-          temperature: 0.0,
-        },
-      }));
+    reporter.finish(
+      'prompt',
+      `${formatCount(prompt.length)} caracteres enviados · modelo ${GENERATION_MODEL}` +
+        (attempt > 1 ? ` · intento ${attempt}/${MAX_SPEAKER_RETRIES}` : '')
+    );
 
-      if (!response.text) throw new Error("API devolvió vacío");
-      const jsonStr = cleanJsonString(response.text);
+    try {
+      // Lo que llega del stream se cuenta tal cual: cada actualización de la
+      // pantalla corresponde a texto que el modelo ya ha emitido.
+      let exercisesStarted = false;
+      let titleLogged = false;
+      let turnsSeen = 0;
+      let exercisesSeen = 0;
+
+      reporter.start('dialogue');
+
+      const rawResponse = await generateJsonWithProgress(
+        ai,
+        {
+          model: GENERATION_MODEL,
+          contents: prompt,
+          config: {
+            systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
+            responseMimeType: "application/json",
+            temperature: 0.0,
+          },
+        },
+        {
+          onText: (full) => {
+            turnsSeen = countMatches(full, SPEAKER_KEY);
+            exercisesSeen = Math.max(countMatches(full, SLOT_KEY), countMatches(full, QUESTION_KEY));
+
+            if (!titleLogged) {
+              const match = TITLE_VALUE.exec(full);
+              if (match) {
+                titleLogged = true;
+                reporter.log(`Título recibido: «${match[1]}»`, 'ok');
+              }
+            }
+
+            if (!exercisesStarted && EXERCISES_KEY.test(full)) {
+              exercisesStarted = true;
+              reporter.finish('dialogue', plural(turnsSeen, 'turno recibido', 'turnos recibidos'));
+              reporter.start('exercises');
+            }
+
+            if (!exercisesStarted) {
+              reporter.update('dialogue', {
+                // Sin denominador en A0: el paso queda declarado no medible.
+                ratio: requestedTurns ? Math.min(turnsSeen / requestedTurns, 1) : undefined,
+                detail: requestedTurns
+                  ? `${formatCount(turnsSeen)} de ${requestedTurns} turnos solicitados`
+                  : plural(turnsSeen, 'turno recibido', 'turnos recibidos'),
+                counters: [
+                  { label: 'Turnos', value: formatCount(turnsSeen) },
+                  { label: 'Caracteres', value: formatCount(full.length) }
+                ],
+                metrics: { turns: turnsSeen, chars: full.length }
+              });
+            } else {
+              reporter.update('exercises', {
+                ratio: Math.min(exercisesSeen / blueprint.length, 1),
+                detail: `${formatCount(Math.min(exercisesSeen, blueprint.length))} de ${blueprint.length} ejercicios recibidos`,
+                counters: [
+                  { label: 'Ejercicios', value: `${Math.min(exercisesSeen, blueprint.length)}/${blueprint.length}` },
+                  { label: 'Caracteres', value: formatCount(full.length) }
+                ],
+                metrics: { exercises: exercisesSeen, chars: full.length }
+              });
+            }
+          },
+          onRetry: (streamAttempt, received, reason) => {
+            reporter.log(
+              `Stream interrumpido tras ${formatCount(received)} caracteres (intento ${streamAttempt}): ${reason}`,
+              'warn'
+            );
+            exercisesStarted = false;
+            titleLogged = false;
+            reporter.reset(['dialogue', 'exercises']);
+            reporter.start('dialogue');
+          },
+          onFallback: (reason) => {
+            reporter.log(`Streaming no disponible (${reason}); se pide la respuesta completa`, 'warn');
+          }
+        }
+      );
+
+      if (!exercisesStarted) {
+        reporter.finish('dialogue', plural(turnsSeen, 'turno recibido', 'turnos recibidos'), 'warning');
+        reporter.start('exercises');
+      }
+      reporter.finish(
+        'exercises',
+        `${formatCount(exercisesSeen)} de ${blueprint.length} ejercicios recibidos`,
+        exercisesSeen >= blueprint.length ? 'done' : 'warning'
+      );
+
+      reporter.start('parse');
+      const jsonStr = cleanJsonString(rawResponse);
       const plan = JSON.parse(jsonStr) as LessonPlan;
 
       if (!plan.dialogue) plan.dialogue = [];
@@ -815,6 +1054,11 @@ export const generateLessonPlan = async (
       const uniqueSpeakers = new Set(plan.dialogue.map(d => d.speaker?.trim()).filter(Boolean));
       if (uniqueSpeakers.size > 2) {
         console.warn(`[Attempt ${attempt}/${MAX_SPEAKER_RETRIES}] Detected ${uniqueSpeakers.size} speakers: ${Array.from(uniqueSpeakers).join(', ')}. Retrying...`);
+        reporter.fail('parse', `${uniqueSpeakers.size} hablantes: ${Array.from(uniqueSpeakers).join(', ')}`);
+        reporter.log(
+          `Descartado: el guion trae ${uniqueSpeakers.size} hablantes y el TTS admite 2. Reintento ${attempt + 1}/${MAX_SPEAKER_RETRIES}`,
+          'warn'
+        );
 
         // If this was the last attempt, throw error
         if (attempt === MAX_SPEAKER_RETRIES) {
@@ -829,20 +1073,61 @@ export const generateLessonPlan = async (
         console.log(`[Success] Generated valid dialogue on attempt ${attempt}/${MAX_SPEAKER_RETRIES}`);
       }
 
+      reporter.finish(
+        'parse',
+        `${plural(plan.dialogue.length, 'turno', 'turnos')} · ${plural(uniqueSpeakers.size, 'hablante', 'hablantes')} · ${plural(rawExercises.length, 'ejercicio en bruto', 'ejercicios en bruto')}`
+      );
+
       // Se descarta todo ejercicio cuya clave no se sostenga contra la
       // transcripción y se rellenan los slots que queden vacíos con motores
       // deterministas: mejor un ejercicio menos que uno con la respuesta mal.
-      plan.exercises = fillMissingSlots(
-        verifyExercises(rawExercises, plan.dialogue),
-        blueprint,
-        plan.dialogue
+      reporter.start('verify');
+      let discarded = 0;
+      const verified = verifyExercises(rawExercises, plan.dialogue, ({ slot, reason }) => {
+        discarded++;
+        reporter.log(`Ejercicio descartado (${slot}): ${reason}`, 'warn');
+      });
+      reporter.finish(
+        'verify',
+        `${verified.length} de ${rawExercises.length} superan la verificación` +
+          (discarded > 0 ? ` · ${discarded} descartados` : ''),
+        discarded > 0 ? 'warning' : 'done'
       );
+
+      reporter.start('assemble');
+      let fromEngine = 0;
+      let uncovered = 0;
+      plan.exercises = fillMissingSlots(
+        verified,
+        blueprint,
+        plan.dialogue,
+        ({ slotId, source, reason }) => {
+          if (source === 'engine') {
+            fromEngine++;
+            reporter.log(`Slot "${slotId}" reconstruido por motor determinista`, 'info');
+          } else if (source === 'empty') {
+            uncovered++;
+            reporter.log(`Slot "${slotId}" sin cubrir: ${reason}`, 'warn');
+          }
+        }
+      );
+      reporter.finish(
+        'assemble',
+        `${plan.exercises.length} de ${blueprint.length} slots listos` +
+          (fromEngine > 0 ? ` · ${fromEngine} por motor` : '') +
+          (uncovered > 0 ? ` · ${uncovered} sin cubrir` : ''),
+        uncovered > 0 ? 'warning' : 'done'
+      );
+      reporter.flush();
 
       return plan;
     } catch (error: any) {
       // If it's a non-speaker-related error or last attempt, throw immediately
       if (!error.message?.includes('personajes') || attempt === MAX_SPEAKER_RETRIES) {
         console.error("Error generando plan:", error);
+        const active = reporter.snapshot().activeStepId;
+        if (active) reporter.fail(active, errorMessage(error));
+        reporter.log(`Fallo en la generación del guion: ${errorMessage(error)}`, 'error');
         throw new Error(`Error GenAI: ${error.message}`);
       }
       // Otherwise, this catch is just for unexpected errors during generation, continue retry loop
@@ -853,11 +1138,77 @@ export const generateLessonPlan = async (
   throw new Error("Error inesperado en generación de lección");
 };
 
+// --- PROGRESO MEDIBLE DE LA FASE 2 ---
+
+/**
+ * El TTS no anuncia cuánto audio va a devolver, así que el paso de síntesis se
+ * declara NO MEDIBLE: la UI muestra lo que de verdad ha llegado (segundos de
+ * audio, datos, fragmentos) en lugar de un porcentaje inventado.
+ */
+const AUDIO_STEPS = [
+  { id: 'prepare', label: 'Preparación del texto', weight: 6, atomic: true },
+  { id: 'synthesis', label: 'Síntesis de voz', weight: 84 },
+  { id: 'encode', label: 'Ensamblado de la pista', weight: 10, atomic: true }
+];
+
+/** Recibe el audio en streaming para poder contar bytes según llegan. */
+async function synthesizeWithProgress(
+  ai: GoogleGenAI,
+  params: GenerateContentParameters,
+  hooks: {
+    onAudio: (totalBytes: number, chunkCount: number) => void;
+    onRetry: (attempt: number, received: number, reason: string) => void;
+    onFallback: (reason: string) => void;
+  }
+): Promise<Uint8Array> {
+  const STREAM_ATTEMPTS = 2;
+  let lastError: unknown = null;
+
+  for (let attempt = 1; attempt <= STREAM_ATTEMPTS; attempt++) {
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    try {
+      const stream = await ai.models.generateContentStream(params);
+      for await (const chunk of stream) {
+        for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
+          const data = part.inlineData?.data;
+          if (!data) continue;
+          const bytes = base64ToBytes(data);
+          chunks.push(bytes);
+          total += bytes.length;
+          hooks.onAudio(total, chunks.length);
+        }
+      }
+      if (total === 0) throw new Error('el modelo no devolvió datos de audio');
+      return concatBytes(chunks, total);
+    } catch (error) {
+      lastError = error;
+      hooks.onRetry(attempt, total, errorMessage(error));
+      await sleep(500 * attempt);
+    }
+  }
+
+  hooks.onFallback(errorMessage(lastError));
+  const response = await ai.models.generateContent(params);
+  const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  if (!audioData) {
+    console.error('[TTS] No audio data in response. Response structure:', JSON.stringify(response, null, 2));
+    throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
+  }
+  const bytes = base64ToBytes(audioData);
+  hooks.onAudio(bytes.length, 1);
+  return bytes;
+}
+
 export const generateAudio = async (
   dialogue: LessonPlan['dialogue'],
   characters: Character[],
-  accent: Accent
+  accent: Accent,
+  onProgress?: ProgressListener
 ): Promise<string> => {
+  const reporter = new ProgressReporter('audio', AUDIO_STEPS, onProgress);
+  reporter.start('prepare');
+
   // DYNAMIC INSTANTIATION WITH STORED KEY
   const ai = getAi();
 
@@ -874,6 +1225,7 @@ export const generateAudio = async (
   const isMultiSpeaker = sortedSpeakers.length >= 2;
   let speechConfig;
   let textPrompt = "";
+  const assignedVoices: string[] = [];
 
   if (isMultiSpeaker) {
     const s1 = sortedSpeakers[0];
@@ -884,6 +1236,10 @@ export const generateAudio = async (
       return char?.gender === 'Female' ? 'Kore' : (char?.gender === 'Male' ? 'Fenrir' : defaultVoice);
     };
 
+    const voice1 = getVoice(s1, 'Fenrir');
+    const voice2 = getVoice(s2, 'Kore');
+    assignedVoices.push(`${s1}→${voice1}`, `${s2}→${voice2}`);
+
     // Use actual speaker names directly (not internal mapping)
     speechConfig = {
       multiSpeakerVoiceConfig: {
@@ -891,13 +1247,13 @@ export const generateAudio = async (
           {
             speaker: s1,
             voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: getVoice(s1, 'Fenrir') }
+              prebuiltVoiceConfig: { voiceName: voice1 }
             }
           },
           {
             speaker: s2,
             voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: getVoice(s2, 'Kore') }
+              prebuiltVoiceConfig: { voiceName: voice2 }
             }
           }
         ]
@@ -918,11 +1274,13 @@ export const generateAudio = async (
     // Single Speaker Logic
     const s1 = sortedSpeakers[0];
     const char = characters.find(c => c.name === s1 || s1.includes(c.name));
+    const voice = char?.gender === 'Female' ? 'Kore' : 'Puck';
+    assignedVoices.push(`${s1}→${voice}`);
 
     speechConfig = {
       voiceConfig: {
         prebuiltVoiceConfig: {
-          voiceName: char?.gender === 'Female' ? 'Kore' : 'Puck'
+          voiceName: voice
         }
       }
     };
@@ -938,6 +1296,9 @@ export const generateAudio = async (
     throw new Error("No hay texto válido para generar audio.");
   }
 
+  // Caracteres de habla real (sin la directiva fonética que se antepone luego).
+  const spokenChars = textPrompt.length;
+
   // --- CRITICAL: INJECT PHONETIC PRONUNCIATION INSTRUCTIONS ---
   // This is the "bulletproof" accent system - we prepend pronunciation rules
   // so the TTS model knows exactly how to pronounce each dialect
@@ -948,31 +1309,85 @@ export const generateAudio = async (
   }
 
   // Ensure we don't exceed TTS limits (accounting for the added instructions)
+  const untruncatedLength = textPrompt.length;
   if (textPrompt.length > 5000) textPrompt = textPrompt.substring(0, 5000);
+  if (untruncatedLength > 5000) {
+    reporter.log(
+      `Texto recortado al límite del TTS: ${formatCount(untruncatedLength)} → 5.000 caracteres`,
+      'warn'
+    );
+  }
+
+  reporter.finish(
+    'prepare',
+    `${plural(dialogue.length, 'turno', 'turnos')} · ${formatCount(spokenChars)} caracteres de habla · ` +
+      `${isMultiSpeaker ? 'dos voces' : 'una voz'} (${assignedVoices.join(', ')})`
+  );
+  reporter.log(`Modelo TTS: ${AUDIO_MODEL} · PCM ${TTS_SAMPLE_RATE / 1000} kHz 16 bits mono`, 'info');
 
   try {
     console.log(`[TTS] Generating audio with ${isMultiSpeaker ? 'multi-speaker' : 'single-speaker'} config...`);
-    const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: AUDIO_MODEL,
-      contents: [{ parts: [{ text: textPrompt }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: speechConfig
+    reporter.start('synthesis');
+
+    const audioBytes = await synthesizeWithProgress(
+      ai,
+      {
+        model: AUDIO_MODEL,
+        contents: [{ parts: [{ text: textPrompt }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: speechConfig
+        }
+      },
+      {
+        onAudio: (totalBytes, chunkCount) => {
+          const seconds = totalBytes / TTS_BYTES_PER_SECOND;
+          reporter.update('synthesis', {
+            // Sin ratio a propósito: el servicio no informa de la duración
+            // total, así que se muestra lo recibido y no un porcentaje falso.
+            detail: `${formatSeconds(seconds)} de audio recibidos`,
+            counters: [
+              { label: 'Audio recibido', value: formatSeconds(seconds) },
+              { label: 'Datos', value: formatBytes(totalBytes) },
+              { label: 'Fragmentos', value: formatCount(chunkCount) }
+            ],
+            metrics: { audioBytes: totalBytes, audioSeconds: seconds, chunks: chunkCount }
+          });
+        },
+        onRetry: (attempt, received, reason) => {
+          reporter.log(
+            `Síntesis interrumpida tras ${formatBytes(received)} (intento ${attempt}): ${reason}`,
+            'warn'
+          );
+        },
+        onFallback: (reason) => {
+          reporter.log(`Streaming de audio no disponible (${reason}); se pide la pista completa`, 'warn');
+        }
       }
-    }));
+    );
 
     console.log('[TTS] Response received, checking for audio data...');
 
-    // Check if we actually got audio data
-    const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!audioData) {
-      console.error('[TTS] No audio data in response. Response structure:', JSON.stringify(response, null, 2));
-      throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
-    }
+    const totalSeconds = audioBytes.length / TTS_BYTES_PER_SECOND;
+    reporter.finish(
+      'synthesis',
+      `${formatSeconds(totalSeconds)} de audio · ${formatBytes(audioBytes.length)}`
+    );
+
+    reporter.start('encode');
+    const audioData = bytesToBase64(audioBytes);
+    reporter.finish(
+      'encode',
+      `Pista lista: ${formatSeconds(totalSeconds)} · ${formatBytes(audioBytes.length)} PCM`
+    );
+    reporter.flush();
 
     console.log('[TTS] Audio generation successful');
     return audioData;
   } catch (error: any) {
+    const active = reporter.snapshot().activeStepId;
+    if (active) reporter.fail(active, errorMessage(error));
+    reporter.log(`Fallo en la síntesis: ${errorMessage(error)}`, 'error');
     console.error("Audio Gen Error:", error);
     console.error("Error details:", {
       message: error.message,

@@ -130,13 +130,44 @@ At A0 and A1-A2 the topic decides which concrete datum the dialogue *must* conta
 
 **Never** show learners the normalised form of a word: `normalizeText()` in `services/textUtils.ts` is for comparison only. Display always keeps real orthography, accents and capitals included.
 
+### Progress Reporting (loading screens)
+
+The loading screens used to animate an invented script with `setTimeout`: the bar
+advanced on a clock rather than on work done, and the log narrated stages that do
+not exist ("Procesando fonemas y prosodia…"). Now every figure on screen is a
+measurement.
+
+- `services/generationProgress.ts`: `ProgressReporter` + `ProgressSnapshot`. Services
+  report **facts** (`start`/`update`/`finish`/`fail`/`log`) and the UI renders them.
+  Emissions are throttled to ~90 ms with a trailing flush, so no measurement is lost.
+- **Both Gemini calls are streamed** (`generateContentStream`), which is what makes
+  measurement possible at all: a single opaque request has nothing to report between
+  send and response. Two streaming attempts with exponential backoff, then a
+  non-streaming attempt as a fail-safe — if the model or the network can't stream,
+  generation still succeeds and the log says so.
+- **Phase 1 (`generateLessonPlan`)**: blueprint (slots planned) → prompt (chars sent) →
+  dialogue (turns counted in the incoming JSON) → exercises (received / expected, a real
+  denominator from the blueprint) → parse (turns, speakers) → verify (kept vs. discarded,
+  with the verifier's reason per item) → assemble (slots covered by the model, by a
+  deterministic engine, or left empty).
+- **Phase 2 (`generateAudio`)**: prepare (turns, chars, voice assignment) → synthesis
+  (bytes → seconds of PCM at 24 kHz/16-bit as chunks arrive) → encode (final length/size).
+- **A step only has a percentage if a real denominator exists.** Where none does — the
+  TTS never announces total duration, and A0 explicitly tells the model to ignore the
+  turn count — the step is flagged `atomic: false` + no `ratio`, the UI shows `≥ N%` with
+  an indeterminate marker and the note that the service doesn't report a total, and the
+  live counters carry the information instead. Never invent the number.
+- `verifyExercises()` and `fillMissingSlots()` take optional reporting callbacks so
+  discards and engine fallbacks surface on screen instead of only in `console.warn`.
+- The only clock-driven element left is the elapsed-time counter, because it is a clock.
+
 ### Component Structure
 - `App.tsx`: Main orchestrator (580 lines) - handles all state and screen rendering
 - `AudioPlayer.tsx`: Integrated audio playback with bundled ambient bed + synthetic event mixing (see Ambient Sound System above)
 - `ExerciseCard.tsx`: Polymorphic renderer for the 12 formats; shows the skill badge, and on submit reveals the `sourceTurns` lines as proof of the key
 - `MatrixSelector.tsx`: Locus × Modus grid interface for Standard mode
 - `AuthScreen.tsx`: API key entry with localStorage persistence
-- `LoadingScreen.tsx`: Status-aware loading states
+- `LoadingScreen.tsx`: Measured progress of the generation (see Progress Reporting below) — it only renders what the services actually reported
 - `SelectInput.tsx`: Styled select dropdown component
 
 ## Key Implementation Details

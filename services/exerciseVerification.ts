@@ -423,8 +423,23 @@ export function verifyExercise(raw: unknown, index: TranscriptIndex): Verificati
   }
 }
 
-/** Filtra una tanda de ejercicios y deja traza de lo descartado. */
-export function verifyExercises(raw: unknown[], dialogue: DialogueLine[]): Exercise[] {
+/** Motivo por el que un ejercicio no llega al alumno. */
+export interface RejectionReport {
+  slot: string;
+  reason: string;
+}
+
+/**
+ * Filtra una tanda de ejercicios y deja traza de lo descartado.
+ *
+ * `onReject` permite que la pantalla de carga informe de descartes reales
+ * ("2 de 9 ejercicios descartados") en vez de un mensaje decorativo.
+ */
+export function verifyExercises(
+  raw: unknown[],
+  dialogue: DialogueLine[],
+  onReject?: (report: RejectionReport) => void
+): Exercise[] {
   const index = buildTranscriptIndex(dialogue);
   const kept: Exercise[] = [];
 
@@ -434,7 +449,9 @@ export function verifyExercises(raw: unknown[], dialogue: DialogueLine[]): Exerc
       kept.push(result.exercise);
     } else {
       const slot = (candidate as Exercise)?.slotId || (candidate as Exercise)?.type || '?';
-      console.warn(`[ejercicios] descartado "${slot}": ${result.reason}`);
+      const reason = result.reason || 'motivo desconocido';
+      console.warn(`[ejercicios] descartado "${slot}": ${reason}`);
+      onReject?.({ slot, reason });
     }
   }
 
