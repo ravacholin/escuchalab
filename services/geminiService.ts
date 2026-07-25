@@ -1,8 +1,9 @@
 
 import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
 import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from "../types";
-import { augmentLessonPlanExercises } from "./exerciseEngines";
-import { normalizeExerciseAnswers } from "./exerciseNormalization";
+import { ExerciseSlot, FORMAT_RULES, getBlueprint, STAGE_META } from "../data/listeningSyllabus";
+import { fillMissingSlots } from "./exerciseEngines";
+import { verifyExercises } from "./exerciseVerification";
 
 // Helper to get key from storage
 const getApiKey = (): string => {
@@ -53,35 +54,6 @@ function sanitizeForTTS(text: string): string {
     .replace(/\s+/g, ' ')         // Normalize whitespace
     .trim();
 }
-
-// --- VALIDATION HELPER ---
-const isValidExercise = (ex: any): boolean => {
-  if (!ex || !ex.type || !ex.question) return false;
-
-  switch (ex.type) {
-    case 'multiple_choice':
-      return Array.isArray(ex.options) && ex.options.length >= 2 && !!ex.correctAnswer;
-    case 'ordering':
-      return Array.isArray(ex.options) && ex.options.length >= 2 && Array.isArray(ex.correctAnswer);
-    case 'classification':
-      return Array.isArray(ex.rows) && ex.rows.length > 0 &&
-        Array.isArray(ex.columns) && ex.columns.length > 0 &&
-        typeof ex.correctAnswer === 'object';
-    case 'cloze':
-      return !!ex.textWithGaps &&
-        typeof ex.gapOptions === 'object' &&
-        Object.keys(ex.gapOptions).length > 0 &&
-        typeof ex.correctAnswer === 'object' &&
-        !!ex.correctAnswer;
-    case 'true_false':
-      if (ex.rows) {
-        return Array.isArray(ex.rows) && ex.rows.length > 0 && typeof ex.correctAnswer === 'object' && !!ex.correctAnswer;
-      }
-      return typeof ex.correctAnswer === 'string' && (String(ex.correctAnswer).toLowerCase() === 'true' || String(ex.correctAnswer).toLowerCase() === 'false');
-    default:
-      return false;
-  }
-};
 
 // --- CONFIGURATION: PERFILES FONÉTICOS TTS (PRONUNCIACIÓN) ---
 // Estos perfiles se inyectan como INSTRUCCIÓN al TTS para forzar pronunciación correcta
@@ -631,123 +603,51 @@ const DIALECT_PROFILES: Record<Accent, string> = {
   `
 };
 
-const getExerciseInstructions = (level: Level, mode: AppMode): string => {
-  if (mode === AppMode.AccentChallenge) {
-    return `MODO: ADIVINA EL ACENTO (SIN PRODUCCIÓN).
+/**
+ * Construye el bloque EXERCISES del prompt a partir del syllabus.
+ *
+ * Antes esto era prosa escrita a mano por nivel, que ignoraba por completo el
+ * tipo de audio (a un boletín de radio de un solo hablante se le pedía "¿quién
+ * lo dice: hablante A o B?") y despachaba el modo antes que el nivel (un A0 y un
+ * C1 en modo Vocabulario recibían exactamente los mismos ejercicios).
+ *
+ * Ahora cada slot del blueprint aporta su etapa, su habilidad, su brief y la
+ * forma JSON exacta de su formato, y el `slotId` viaja en la respuesta para
+ * poder saber después qué slots quedaron sin cubrir.
+ */
+const buildExercisePrompt = (slots: ExerciseSlot[]): string => {
+  const formatsUsed = [...new Set(slots.map(s => s.format))];
 
-REGLAS:
-- PROHIBIDO: preguntas abiertas, escribir/redactar, hablar, completar libremente.
-- PERMITIDO: elegir opciones, V/F, ordenar, clasificar, cloze con desplegable.
+  const formatBlock = formatsUsed
+    .map(format => {
+      const rule = FORMAT_RULES[format];
+      return `  · ${format}\n    JSON: ${rule.jsonShape}\n    REGLAS: ${rule.guidance}`;
+    })
+    .join('\n');
 
-Genera:
-- 1 ejercicio de COMPRENSIÓN (multiple_choice): "¿De dónde es el hablante A?" (opciones = países/ciudades, 4 opciones).
-- 1 ejercicio de COMPRENSIÓN (multiple_choice): "¿De dónde es el hablante B?" (4 opciones).
-- 1 ejercicio de VOCABULARIO (classification): filas = 6 palabras/expresiones dialectales del audio; columnas = 2 países/regiones (A y B); correctAnswer usa IDs de columnas.
-`;
-  }
-  if (mode === AppMode.Vocabulary) {
-    return `MODO: VOCABULARIO INTENSIVO (SIN PRODUCCIÓN).
+  const slotBlock = slots
+    .map((slot, i) => {
+      const stage = STAGE_META[slot.stage].label;
+      return `  ${i + 1}. slotId="${slot.slotId}" | etapa="${slot.stage}" (${stage}) | habilidad="${slot.skill}" | type="${slot.format}" | ${slot.items} ítems\n     ${slot.brief}`;
+    })
+    .join('\n');
 
-OBJETIVO: variedad de dinámicas (NO solo multiple_choice) y alta densidad léxica, SIEMPRE anclada al audio.
-REGLAS:
-- PROHIBIDO: escribir/redactar respuestas, producción oral.
-- PERMITIDO: seleccionar, clasificar, ordenar, V/F, cloze con desplegable.
-- IDs: TODAS las opciones/filas/columnas tienen "id". correctAnswer SIEMPRE referencia IDs (no textos).
+  return `SIN PRODUCCIÓN: el alumno NUNCA escribe ni habla. Todo se resuelve seleccionando, ordenando, clasificando o eligiendo en un desplegable. Prohibidas las preguntas abiertas, los resúmenes y las opiniones libres.
 
-Genera exactamente:
-- COMPRENSIÓN (2 ejercicios):
-  1) true_false (con rows): 4 afirmaciones sobre detalles del audio (2 V, 2 F).
-  2) ordering: 4 eventos/acciones del audio.
+PRINCIPIOS INNEGOCIABLES:
+- Todo ejercicio se responde ESCUCHANDO. Si se puede acertar leyendo las opciones, razonando por plausibilidad temática o descartando lo absurdo, el ejercicio está mal hecho.
+- Todo lo que presentes como dicho en el audio debe estar dicho en el audio, con su ortografía real (tildes y mayúsculas incluidas).
+- Cada ejercicio incluye "sourceTurns": el array de índices (base 0) de los turnos del diálogo en los que se apoya.
+- Todas las opciones, filas, columnas y campos llevan "id" único, y "correctAnswer" SIEMPRE referencia esos ids, nunca textos.
+- Redacta enunciados y opciones en español, adaptados a la variante regional indicada.
 
-- VOCABULARIO (4 ejercicios):
-  1) multiple_choice: palabra/expresión del audio → significado (4 opciones).
-  2) classification: filas = 6 palabras/expresiones del audio; columnas = 2 categorías ("literal" vs "figurado" o "formal" vs "informal" según proceda).
-  3) cloze: frase del audio con 2 huecos (2 gaps), opciones plausibles.
-  4) classification: colocaciones (fila = verbo; columnas = 3 complementos posibles; 1 correcto por fila, basados en lo oído).
-`;
-  }
+FORMATOS QUE DEBES USAR:
+${formatBlock}
 
-  if (level === Level.Intro) {
-    return `NIVEL A0 (REALISTA - ESCUCHA SELECTIVA / KEYWORD SPOTTING). SIN PRODUCCIÓN.
+GENERA EXACTAMENTE ESTOS ${slots.length} EJERCICIOS, EN ESTE ORDEN, cada uno con su "slotId", "stage" y "skill" copiados tal cual:
+${slotBlock}
 
-PRINCIPIOS PEDAGÓGICOS:
-- El audio es rápido/natural: el alumno entrena DISCRIMINACIÓN (números, letras, horas) y reconocimiento de palabras clave.
-- Evita inferencias complejas: el foco es CAPTAR el dato literal.
-
-REGLAS:
-- PROHIBIDO: preguntas abiertas, pedir que escriban, dictados, resumen, opinión.
-- PERMITIDO: elegir, V/F, ordenar, clasificar, cloze con desplegable.
-- IDs: correctAnswer referencia IDs.
-
-Genera exactamente:
-- COMPRENSIÓN (4 ejercicios, VARIADOS):
-  1) multiple_choice: pregunta EXACTA sobre el dato obligatorio (distractores muy parecidos).
-  2) cloze: una frase del audio con 1 hueco para el número/hora/letra/palabra clave (gapOptions).
-  3) true_false (con rows): 4 ítems de "¿se menciona X?" (2 V, 2 F).
-  4) ordering: 4 enunciados cortos del audio en orden.
-
-- VOCABULARIO (3 ejercicios, VARIADOS):
-  1) multiple_choice: palabra muy frecuente del audio → significado sencillo.
-  2) classification: filas = 6 palabras/expresiones del audio; columnas = 2 categorías ("en el audio" vs "no en el audio") o ("saludo" vs "despedida" si aplica).
-  3) cloze: frase corta del audio con 1 hueco (opciones = 4).
-`;
-  }
-
-  if (level.includes('Principiante')) {
-    return `NIVEL A1-A2 (COMPRENSIÓN + LÉXICO EN CONTEXTO). SIN PRODUCCIÓN.
-
-Genera exactamente:
-- COMPRENSIÓN (4 ejercicios, NO homogéneos):
-  1) ordering: secuencia de 4 acciones del audio.
-  2) true_false (con rows): 4 afirmaciones (2 V, 2 F) sobre detalles literales.
-  3) classification: "¿Quién lo dice?" (filas = 4 frases del audio; columnas = hablante A/B).
-  4) multiple_choice: idea principal o intención (4 opciones).
-
-- VOCABULARIO (4 ejercicios, variados):
-  1) multiple_choice: palabra/expresión del audio → significado.
-  2) cloze: frase del audio con 2 huecos.
-  3) classification: filas = 6 palabras; columnas = 2 categorías ("formal" vs "informal" o "servicio" vs "cliente" según el caso).
-  4) multiple_choice: colocación correcta (elige la combinación natural, basada en el audio).
-`;
-  }
-
-  if (level.includes('Intermedio')) {
-    return `NIVEL B1-B2 (INFERENCIA LIGERA + PRECISIÓN LÉXICA). SIN PRODUCCIÓN.
-
-Genera exactamente:
-- COMPRENSIÓN (5 ejercicios, variados):
-  1) true_false (con rows): 4 afirmaciones (incluye 2 de inferencia sencilla).
-  2) classification: "Problema → Solución" (filas = 4 problemas; columnas = 4 soluciones; correctAnswer por fila).
-  3) ordering: 4 eventos o pasos.
-  4) multiple_choice: implicatura/intención.
-  5) classification: "Actitud" (filas = 4 frases; columnas = 3 actitudes: amable/neutral/molesto).
-
-- VOCABULARIO (5 ejercicios, variados):
-  1) classification: sinónimos aproximados (filas = 6 palabras del audio; columnas = 3 opciones).
-  2) multiple_choice: palabra del audio en contexto → significado.
-  3) cloze: precisión (2 gaps) con opciones cercanas.
-  4) classification: registro (formal/neutro/coloquial) con ejemplos del audio.
-  5) multiple_choice: falso amigo / matiz (elige la opción que NO encaja en el audio).
-`;
-  }
-
-  return `NIVEL C1 (MATICES, PRAGMÁTICA Y REGISTRO). SIN PRODUCCIÓN.
-
-Genera exactamente:
-- COMPRENSIÓN (5 ejercicios, variados):
-  1) multiple_choice: intención real (subtexto).
-  2) true_false (con rows): 4 afirmaciones (incluye ironía/implicatura).
-  3) classification: "¿Quién lo dice?" o "Postura" por hablante.
-  4) ordering: organización retórica (qué aparece antes/después).
-  5) classification: "Qué se acepta / qué se rechaza" (filas = 6 ítems mencionados; columnas = aceptar/rechazar).
-
-- VOCABULARIO (5 ejercicios, variados):
-  1) classification: registro/tono (formal/neutro/coloquial) con 6 ejemplos del audio.
-  2) cloze: colocaciones o locuciones del audio (2 gaps).
-  3) multiple_choice: matiz entre sinónimos (elige el que mejor encaja).
-  4) classification: connotación (positiva/neutral/negativa) para 6 palabras.
-  5) multiple_choice: palabra dialectal/jerga (si aplica) → significado.
-`;
+Devuélvelos en el array "exercises" en ese mismo orden.`;
 };
 
 const getRegisterInstruction = (textType: TextType): string => {
@@ -849,7 +749,8 @@ export const generateLessonPlan = async (
     profileInstruction = `${baseProfile}. CONSISTENCIA: AMBOS HABLANTES SON NATIVOS DE ESTA REGIÓN. Prohibido mezclar con neutro.`;
   }
 
-  const exerciseLogic = getExerciseInstructions(level, mode);
+  const blueprint = getBlueprint(level, textType, mode);
+  const exerciseLogic = buildExercisePrompt(blueprint);
   const registerInstruction = getRegisterInstruction(textType);
 
   // LOCALIZACIÓN: el contenido de los escenarios es neutro/panhispánico; aquí se adapta
@@ -870,20 +771,18 @@ export const generateLessonPlan = async (
     "ambientKeywords": "String",
     "characters": [{ "name": "String", "gender": "Male" | "Female" }],
     "dialogue": [{ "speaker": "String", "text": "String", "emotion": "String" }],
-    "exercises": {
-      "comprehension": [
-        { "id": "ex_c1", "type": "multiple_choice", "question": "...", "options": [{ "id": "o1", "text": "..." }], "correctAnswer": "o1", "explanation": "..." },
-        { "id": "ex_c2", "type": "true_false", "question": "...", "rows": [{ "id": "r1", "text": "..." }], "correctAnswer": { "r1": "true" }, "explanation": "..." },
-        { "id": "ex_c3", "type": "ordering", "question": "...", "options": [{ "id": "s1", "text": "..." }], "correctAnswer": ["s1"], "explanation": "..." },
-        { "id": "ex_c4", "type": "classification", "question": "...", "rows": [{ "id": "r1", "text": "..." }], "columns": [{ "id": "c1", "text": "..." }], "correctAnswer": { "r1": "c1" }, "explanation": "..." },
-        { "id": "ex_c5", "type": "cloze", "question": "...", "textWithGaps": "... {{gap1}} ...", "gapOptions": { "gap1": [{ "id": "g1o1", "text": "..." }] }, "correctAnswer": { "gap1": "g1o1" }, "explanation": "..." }
-      ],
-      "vocabulary": []
-    }
+    "exercises": [
+      { "id": "ex1", "slotId": "...", "stage": "...", "skill": "...", "type": "...", "question": "...", "explanation": "...", "sourceTurns": [0], "correctAnswer": "..." }
+    ]
   }
+  La forma concreta de cada ejercicio depende de su "type": usa exactamente el JSON indicado para ese formato en EXERCISES.
   `;
 
-  const lengthInstruction = (level === Level.Intro) ? "Longitud: Natural y fluida, ignorando límites estrictos de turnos si corta la naturalidad." : `Longitud: ${length}.`;
+  // A0 prioriza la naturalidad del habla por encima del recuento de turnos: el
+  // objetivo del nivel es captar un dato dentro de habla nativa real.
+  const lengthInstruction = (level === Level.Intro)
+    ? "LENGTH: natural y fluida; ignora el límite estricto de turnos si corta la naturalidad."
+    : `LENGTH: STICK TO ${length}.`;
 
   // Auto-retry loop for multi-speaker validation
   const MAX_SPEAKER_RETRIES = 3;
@@ -902,7 +801,7 @@ export const generateLessonPlan = async (
   LOCALIZE: ${localizationInstruction}
   SPEAKERS: ${speakerEmphasis}
   EXERCISES: ${exerciseLogic}
-  LENGTH: STICK TO ${length}.
+  ${lengthInstruction}
   AMBIENT: Generate "ambientKeywords" (3 keywords).
 
   Structure: ${jsonStructure}
@@ -924,7 +823,7 @@ export const generateLessonPlan = async (
       const plan = JSON.parse(jsonStr) as LessonPlan;
 
       if (!plan.dialogue) plan.dialogue = [];
-      if (!plan.exercises) plan.exercises = { comprehension: [], vocabulary: [] };
+      const rawExercises: unknown[] = Array.isArray(plan.exercises) ? plan.exercises : [];
 
       // Validate speaker count
       const uniqueSpeakers = new Set(plan.dialogue.map(d => d.speaker?.trim()).filter(Boolean));
@@ -940,23 +839,20 @@ export const generateLessonPlan = async (
         continue;
       }
 
-      // Success! Validate exercises and return
-      if (plan.exercises.comprehension) {
-        plan.exercises.comprehension = plan.exercises.comprehension
-          .filter(isValidExercise)
-          .map(normalizeExerciseAnswers);
-      }
-      if (plan.exercises.vocabulary) {
-        plan.exercises.vocabulary = plan.exercises.vocabulary
-          .filter(isValidExercise)
-          .map(normalizeExerciseAnswers);
-      }
-
       if (attempt > 1) {
         console.log(`[Success] Generated valid dialogue on attempt ${attempt}/${MAX_SPEAKER_RETRIES}`);
       }
 
-      return augmentLessonPlanExercises(plan, { level, mode });
+      // Se descarta todo ejercicio cuya clave no se sostenga contra la
+      // transcripción y se rellenan los slots que queden vacíos con motores
+      // deterministas: mejor un ejercicio menos que uno con la respuesta mal.
+      plan.exercises = fillMissingSlots(
+        verifyExercises(rawExercises, plan.dialogue),
+        blueprint,
+        plan.dialogue
+      );
+
+      return plan;
     } catch (error: any) {
       // If it's a non-speaker-related error or last attempt, throw immediately
       if (!error.message?.includes('personajes') || attempt === MAX_SPEAKER_RETRIES) {

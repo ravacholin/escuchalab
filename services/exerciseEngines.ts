@@ -1,547 +1,765 @@
-import { AppMode, Exercise, ExerciseOption, LessonPlan, Level } from '@/types';
+import { compareByStage, EngineId, ExerciseSlot } from '@/data/listeningSyllabus';
+import { DialogueLine, Exercise, ExerciseField, ExerciseOption } from '@/types';
+import { verifyExercise } from './exerciseVerification';
+import {
+  buildTranscriptIndex,
+  clampText,
+  isHeard,
+  normalizeText,
+  shuffle,
+  splitSentences,
+  splitTokens,
+  STOPWORDS,
+  TranscriptIndex
+} from './textUtils';
 
-type AugmentConfig = {
-  level: Level;
-  mode: AppMode;
-};
+/**
+ * ============================================================================
+ *  MOTORES DETERMINISTAS
+ * ============================================================================
+ *
+ * Plan B cuando el modelo no cubre un slot del syllabus o cuando el ejercicio
+ * que devolvió no supera la verificación de claves.
+ *
+ * La política cambió respecto de la versión anterior. Antes esta capa
+ * garantizaba "al menos un ejercicio de cada widget", sin mirar el nivel ni el
+ * tipo de audio, ANTEPONÍA sus ejercicios y luego recortaba la lista por el
+ * principio, de modo que los ejercicios buenos del modelo eran justamente los
+ * que se perdían. Ahora rellena huecos concretos del blueprint, en la posición
+ * del hueco, y todo lo que produce pasa por el mismo verificador que lo del
+ * modelo.
+ *
+ * También se eliminaron los motores cuyas claves eran falsas o triviales:
+ *
+ *  - la clasificación de registro por palabras sueltas, que daba "gracias" y
+ *    "por favor" como marcas de formalidad (no lo son: son neutras) y mezclaba
+ *    marcas dialectales como "che" o "po" con el registro;
+ *  - el ordenamiento de los cuatro primeros turnos contiguos, reconstruible
+ *    leyendo por adyacencia;
+ *  - los distractores tomados de una lista fija ajena al tema ("tornillo",
+ *    "enchufe"), que se descartan por plausibilidad temática sin escuchar.
+ *
+ * Y se corrigió el fallo que rompía los cloze: el objetivo se buscaba en forma
+ * normalizada (`\btelefono\b`) dentro del texto original, así que con cualquier
+ * palabra acentuada el reemplazo fallaba en silencio; y cuando funcionaba, al
+ * alumno se le mostraba la opción sin tildes y en minúscula. Aquí siempre se
+ * opera con el token ORIGINAL y se muestra su ortografía real.
+ */
 
-const STOPWORDS = new Set([
-  'a', 'al', 'algo', 'así', 'aquí', 'bien', 'con', 'como', 'cómo', 'cuando', 'cuándo', 'de', 'del',
-  'donde', 'dónde', 'el', 'ella', 'ellas', 'ellos', 'en', 'es', 'esa', 'ese', 'eso', 'esta', 'este',
-  'esto', 'está', 'están', 'estoy', 'fue', 'ha', 'han', 'hay', 'la', 'las', 'le', 'les', 'lo', 'los',
-  'me', 'mi', 'mis', 'mucho', 'muy', 'no', 'o', 'para', 'pero', 'por', 'porque', 'que', 'qué', 'se',
-  'si', 'sí', 'sin', 'su', 'sus', 'te', 'tú', 'tu', 'un', 'una', 'uno', 'unas', 'unos', 'usted', 'ustedes',
-  'ya', 'y', 'yo'
-]);
+// ---------------------------------------------------------------------------
+// Pares mínimos reales del español
+// ---------------------------------------------------------------------------
+// Se excluyen a propósito los contrastes que están neutralizados en la mayoría
+// de las variantes y que, por tanto, serían indistinguibles al oído:
+// b/v (vaca~baca), ll/y (pollo~poyo), h muda (hola~ola) y, en zonas de seseo,
+// c/z frente a s (casa~caza). Un "par mínimo" que suena igual no discrimina
+// nada: solo penaliza al alumno.
 
-function normalizeText(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
+const MINIMAL_PAIR_BANK: [string, string][] = [
+  // vibrante simple / múltiple
+  ['pero', 'perro'], ['caro', 'carro'], ['cero', 'cerro'], ['coro', 'corro'],
+  ['para', 'parra'], ['ahora', 'ahorra'], ['moro', 'morro'], ['foro', 'forro'],
+  ['careta', 'carreta'], ['pera', 'perra'],
+  // sordas / sonoras
+  ['pata', 'bata'], ['peso', 'beso'], ['pala', 'bala'], ['pote', 'bote'],
+  ['cana', 'gana'], ['cama', 'gama'], ['coma', 'goma'], ['col', 'gol'],
+  ['casa', 'gasa'], ['tos', 'dos'], ['tía', 'día'], ['tomo', 'domo'],
+  // acento de palabra (presente / pasado)
+  ['hablo', 'habló'], ['tomo', 'tomó'], ['canto', 'cantó'], ['llamo', 'llamó'],
+  ['cambio', 'cambió'], ['trabajo', 'trabajó'], ['termino', 'terminó'],
+  ['paso', 'pasó'], ['llego', 'llegó'], ['compro', 'compró'], ['pago', 'pagó'],
+  ['esta', 'está'], ['este', 'esté'], ['papa', 'papá'], ['mama', 'mamá'],
+  ['numero', 'número'], ['publico', 'público'], ['animo', 'ánimo'],
+  // monosílabos con tilde diacrítica
+  ['el', 'él'], ['tu', 'tú'], ['mi', 'mí'], ['si', 'sí'], ['mas', 'más'],
+  ['se', 'sé'], ['de', 'dé'], ['te', 'té'], ['aun', 'aún'],
+  // vocales próximas
+  ['mesa', 'misa'], ['peso', 'piso'], ['cara', 'cera'], ['mano', 'mono'],
+  ['pan', 'pon'], ['ven', 'van'], ['sal', 'sol'], ['gato', 'gata'],
+  ['libro', 'libre'], ['sala', 'sola'], ['cuenta', 'cuento'], ['puerta', 'puerto'],
+  ['banco', 'blanco'], ['carta', 'cuarta'], ['pierna', 'prensa']
+];
 
-function shuffle<T>(items: T[]): T[] {
-  const copy = [...items];
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
+/** Índice palabra normalizada → posibles pares mínimos (con su ortografía real). */
+const PAIR_INDEX: Map<string, string[]> = (() => {
+  const map = new Map<string, string[]>();
+  const add = (key: string, value: string) => {
+    const k = normalizeText(key);
+    if (!k) return;
+    const list = map.get(k) || [];
+    if (!list.includes(value)) list.push(value);
+    map.set(k, list);
+  };
+  for (const [a, b] of MINIMAL_PAIR_BANK) {
+    add(a, b);
+    add(b, a);
   }
-  return copy;
-}
+  return map;
+})();
 
-function clampText(text: string, max = 140): string {
-  const t = (text || '').trim();
-  if (t.length <= max) return t;
-  return `${t.slice(0, max - 1)}…`;
-}
+/**
+ * Vecinos fonéticos generados cuando la palabra no está en el banco. Solo se
+ * aplican transformaciones que producen un contraste audible en español.
+ */
+function generatedNeighbours(word: string, preserveNumber = false): string[] {
+  const out: string[] = [];
+  const push = (candidate: string) => {
+    if (candidate && candidate !== word && !out.includes(candidate)) out.push(candidate);
+  };
 
-function uniqueByNormalized(options: ExerciseOption[]): ExerciseOption[] {
-  const seen = new Set<string>();
-  const out: ExerciseOption[] = [];
-  for (const opt of options) {
-    const key = normalizeText(opt.text);
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(opt);
+  // Cambio de la vocal final (género y persona verbal).
+  const last = word.slice(-1).toLowerCase();
+  if (last === 'a') push(`${word.slice(0, -1)}o`);
+  if (last === 'o') push(`${word.slice(0, -1)}a`);
+  if (last === 'e') push(`${word.slice(0, -1)}a`);
+
+  // Número. Se omite cuando el distractor tiene que encajar dentro de una frase:
+  // cambiar el número rompe la concordancia y delata la opción sin escucharla.
+  if (!preserveNumber) {
+    if (last === 's') push(word.slice(0, -1));
+    else if ('aeiou'.includes(last)) push(`${word}s`);
   }
+
+  // Vibrante simple / múltiple.
+  if (/[aeiou]r[aeiou]/i.test(word)) push(word.replace(/([aeiou])r([aeiou])/i, '$1rr$2'));
+  if (/rr/i.test(word)) push(word.replace(/rr/i, 'r'));
+
   return out;
 }
 
-function getSpeakers(dialogue: LessonPlan['dialogue']): string[] {
-  const speakers: string[] = [];
-  const seen = new Set<string>();
-  for (const line of dialogue || []) {
-    const s = (line.speaker || '').trim();
-    if (!s) continue;
-    if (seen.has(s)) continue;
-    seen.add(s);
-    speakers.push(s);
+/** Distractor que suena parecido a `word` y que NO se dice en el audio. */
+function phoneticDistractor(
+  word: string,
+  index: TranscriptIndex,
+  used: Set<string>,
+  preserveNumber = false
+): string | null {
+  const banked = (PAIR_INDEX.get(normalizeText(word)) || []).filter(candidate => {
+    if (!preserveNumber) return true;
+    // Dentro de una frase, el par solo sirve si mantiene el número.
+    return candidate.endsWith('s') === word.endsWith('s');
+  });
+  const candidates = [...banked, ...generatedNeighbours(word, preserveNumber)];
+  for (const candidate of candidates) {
+    const key = normalizeText(candidate);
+    if (!key || used.has(key)) continue;
+    if (isHeard(index, candidate)) continue;
+    used.add(key);
+    return candidate;
   }
-  return speakers;
+  return null;
 }
 
-function detectRegisterToken(text: string): 'formal' | 'informal' | 'neutral' {
-  const t = normalizeText(text);
-  if (!t) return 'neutral';
+// ---------------------------------------------------------------------------
+// Extracción de material del audio
+// ---------------------------------------------------------------------------
 
-  const formalSignals = ['usted', 'disculpe', 'buenos dias', 'buenas tardes', 'por favor', 'gracias', 'permiso'];
-  const informalSignals = ['tio', 'tía', 'che', 'vale', 'oye', 'pana', 'vos', 'cachai', 'po'];
-
-  if (formalSignals.some(s => t.includes(s))) return 'formal';
-  if (informalSignals.some(s => t.includes(s))) return 'informal';
-  return 'neutral';
+interface WordRef {
+  /** Ortografía real, tal como se le mostrará al alumno. */
+  original: string;
+  normalized: string;
+  lineIndex: number;
 }
 
-function detectSpeechAct(text: string): 'request' | 'offer' | 'confirm' | 'apology' | 'thanks' | 'rejection' | null {
-  const t = normalizeText(text);
-  if (!t) return null;
+const EDGE_PUNCTUATION = /^[¡¿"'“”«»(\[]+|[.,;:!?"'“”«»)\]…]+$/g;
 
-  if (t.includes('perdon') || t.includes('disculp')) return 'apology';
-  if (t.includes('gracias')) return 'thanks';
-  if (t.includes('no puedo') || t.includes('no, ') || t.startsWith('no ') || t.includes('lo siento, no')) return 'rejection';
-  if (t.includes('vale') || t.includes('de acuerdo') || t.includes('perfecto') || t.includes('ok') || t.includes('entendido')) return 'confirm';
+function stripEdges(token: string): string {
+  return token.replace(EDGE_PUNCTUATION, '');
+}
 
-  const requestSignals = ['podria', 'puede', 'me puedes', 'me puede', 'quisiera', 'quiero', 'me gustaria', 'necesito', 'me das', 'me da', 'me trae'];
-  if (requestSignals.some(s => t.includes(s))) return 'request';
+/** Palabras con carga semántica del audio, conservando su forma original. */
+function collectContentWords(dialogue: DialogueLine[]): WordRef[] {
+  const out: WordRef[] = [];
+  const seen = new Set<string>();
 
-  const offerSignals = ['te ofrezco', 'le ofrezco', 'te puedo', 'le puedo', 'si quieres', 'si quiere', 'puedo darte', 'puedo darle', 'te traigo', 'le traigo'];
-  if (offerSignals.some(s => t.includes(s))) return 'offer';
+  (dialogue || []).forEach((line, lineIndex) => {
+    for (const token of splitTokens(line.text || '')) {
+      const original = stripEdges(token);
+      const normalized = normalizeText(original);
+      if (normalized.length < 4) continue;
+      if (STOPWORDS.has(normalized)) continue;
+      if (/\d/.test(original)) continue;
+      if (seen.has(normalized)) continue;
+      seen.add(normalized);
+      out.push({ original, normalized, lineIndex });
+    }
+  });
+
+  return out;
+}
+
+/** Turnos suficientemente largos para servir de base a un ejercicio. */
+function usableSentences(dialogue: DialogueLine[], minWords: number, maxWords = 40) {
+  const out: { text: string; lineIndex: number; speaker: string }[] = [];
+  (dialogue || []).forEach((line, lineIndex) => {
+    for (const sentence of splitSentences(line.text || '')) {
+      const words = splitTokens(sentence).length;
+      if (words < minWords || words > maxWords) continue;
+      out.push({ text: sentence, lineIndex, speaker: (line.speaker || '').trim() });
+    }
+  });
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Motores
+// ---------------------------------------------------------------------------
+
+type Engine = (dialogue: DialogueLine[], slot: ExerciseSlot, index: TranscriptIndex) => Exercise | null;
+
+/**
+ * Caza de palabras: se muestran palabras del audio junto a otras que suenan
+ * parecido pero no se dicen. El contraste es fonético, no temático, para que no
+ * se pueda acertar por plausibilidad.
+ */
+const selectAllHeard: Engine = (dialogue, slot, index) => {
+  const target = Math.max(2, Math.floor(slot.items / 2));
+  const words = shuffle(collectContentWords(dialogue)).slice(0, 30);
+  if (words.length < target) return null;
+
+  const used = new Set<string>();
+  const heard: ExerciseOption[] = [];
+  const unheard: ExerciseOption[] = [];
+
+  for (const word of words) {
+    if (heard.length >= target) break;
+    const distractor = phoneticDistractor(word.original, index, used);
+    if (!distractor) continue;
+    used.add(word.normalized);
+    heard.push({ id: `eng_sa_h${heard.length}`, text: word.original });
+    unheard.push({ id: `eng_sa_x${unheard.length}`, text: distractor });
+  }
+
+  if (heard.length < 2) return null;
+
+  const options = shuffle([...heard, ...unheard]);
+  return {
+    id: 'eng_select_all_heard',
+    type: 'multiple_choice',
+    question: 'Marcá TODAS las palabras que se dicen en el audio.',
+    options,
+    correctAnswer: heard.map(o => o.id),
+    explanation:
+      'Cada palabra tiene al lado otra que suena casi igual pero no se dice. La diferencia está en un solo sonido: hay que volver a escuchar ese tramo, no razonar por el tema.'
+  };
+};
+
+/** La misma discriminación fonética, planteada como juicio ítem a ítem. */
+const mentionTrueFalse: Engine = (dialogue, slot, index) => {
+  const built = selectAllHeard(dialogue, slot, index);
+  if (!built || !built.options) return null;
+
+  const correct = new Set(built.correctAnswer as string[]);
+  const rows = built.options.map((opt, i) => ({ id: `eng_tf_r${i}`, text: opt.text }));
+  const answer: Record<string, string> = {};
+  built.options.forEach((opt, i) => {
+    answer[`eng_tf_r${i}`] = correct.has(opt.id) ? 'true' : 'false';
+  });
+
+  return {
+    id: 'eng_mention_true_false',
+    type: 'true_false',
+    question: '¿Se dice esta palabra en el audio?',
+    rows,
+    correctAnswer: answer,
+    explanation:
+      'Marcá VERDADERO solo si la palabra suena tal cual. Las falsas se parecen mucho a otras que sí aparecen.'
+  };
+};
+
+/** Discriminación fónica pura: la palabra del audio frente a su par mínimo. */
+const minimalPairs: Engine = (dialogue, slot, index) => {
+  const words = collectContentWords(dialogue);
+  const fields: ExerciseField[] = [];
+  const answer: Record<string, string> = {};
+  const used = new Set<string>();
+
+  for (const word of words) {
+    if (fields.length >= slot.items) break;
+
+    // Se prefiere el banco de pares reales; los vecinos generados son el respaldo.
+    const banked = (PAIR_INDEX.get(word.normalized) || []).find(
+      candidate => !isHeard(index, candidate) && !used.has(normalizeText(candidate))
+    );
+    const distractor = banked || phoneticDistractor(word.original, index, used);
+    if (!distractor) continue;
+
+    used.add(word.normalized);
+    used.add(normalizeText(distractor));
+
+    const fieldId = `eng_mp_${fields.length}`;
+    const correctId = `${fieldId}_ok`;
+    fields.push({
+      id: fieldId,
+      label: String(fields.length + 1),
+      options: shuffle([
+        { id: correctId, text: word.original },
+        { id: `${fieldId}_x`, text: distractor }
+      ])
+    });
+    answer[fieldId] = correctId;
+  }
+
+  if (fields.length < 3) return null;
+
+  return {
+    id: 'eng_minimal_pairs',
+    type: 'minimal_pairs',
+    question: '¿Qué oíste? Elegí la forma que suena en el audio.',
+    fields,
+    correctAnswer: answer,
+    explanation:
+      'Las dos formas se diferencian en un solo sonido o en la sílaba acentuada. Es discriminación pura: hay que fiarse del oído, no del sentido.'
+  };
+};
+
+// --- Ficha de datos ------------------------------------------------------
+
+const DIGIT_LITERAL = /\b\d{1,4}(?:[.,:]\d{1,2})?\b|\b\d{5,}\b/g;
+
+function labelFor(literal: string): string {
+  if (literal.includes(':')) return 'Hora';
+  if (/[.,]\d{2}$/.test(literal)) return 'Precio';
+  if (literal.replace(/\D/g, '').length >= 6) return 'Teléfono';
+  return 'Número';
+}
+
+/** Alternativas casi idénticas: se cambia un solo elemento del dato. */
+function nearMisses(literal: string): string[] {
+  const out: string[] = [];
+  const push = (candidate: string) => {
+    if (candidate && candidate !== literal && !out.includes(candidate)) out.push(candidate);
+  };
+
+  if (literal.includes(':')) {
+    const [h, m = '00'] = literal.split(':');
+    push(`${h}:${m.split('').reverse().join('')}`);
+    push(`${Number(h) + 1}:${m}`);
+    push(`${h}:${m === '30' ? '13' : '30'}`);
+  } else if (/[.,]/.test(literal)) {
+    const sep = literal.includes(',') ? ',' : '.';
+    const [whole, dec] = literal.split(sep);
+    push(`${whole.split('').reverse().join('')}${sep}${dec}`);
+    push(`${whole}${sep}${dec.split('').reverse().join('')}`);
+    push(`${Number(whole) + 1}${sep}${dec}`);
+  } else if (literal.length >= 5) {
+    const digits = literal.split('');
+    const mid = Math.floor(digits.length / 2);
+    const swapped = [...digits];
+    [swapped[mid], swapped[mid - 1]] = [swapped[mid - 1], swapped[mid]];
+    push(swapped.join(''));
+    push(`${digits.slice(0, -1).join('')}${(Number(digits[digits.length - 1]) + 1) % 10}`);
+  } else {
+    const n = Number(literal);
+    if (Number.isFinite(n)) {
+      push(String(n + 10));
+      push(String(n + 1));
+      if (n > 1) push(String(n - 1));
+    }
+  }
+
+  return out;
+}
+
+const dataCapture: Engine = (dialogue, slot) => {
+  const literals: { value: string; lineIndex: number }[] = [];
+  const seen = new Set<string>();
+
+  (dialogue || []).forEach((line, lineIndex) => {
+    for (const match of (line.text || '').match(DIGIT_LITERAL) || []) {
+      if (seen.has(match)) continue;
+      seen.add(match);
+      literals.push({ value: match, lineIndex });
+    }
+  });
+
+  const fields: ExerciseField[] = [];
+  const answer: Record<string, string> = {};
+  const sourceTurns: number[] = [];
+
+  for (const literal of literals) {
+    if (fields.length >= slot.items) break;
+    const misses = nearMisses(literal.value).slice(0, 2);
+    if (misses.length < 2) continue;
+
+    const fieldId = `eng_dc_${fields.length}`;
+    const correctId = `${fieldId}_ok`;
+    // Dos horas o dos precios en la misma ficha se numeran: una etiqueta
+    // repetida no le dice al alumno cuál de los dos datos tiene que anotar.
+    const baseLabel = labelFor(literal.value);
+    const repeats = fields.filter(f => f.label === baseLabel || f.label.startsWith(`${baseLabel} `)).length;
+    fields.push({
+      id: fieldId,
+      label: repeats === 0 ? baseLabel : `${baseLabel} ${repeats + 1}`,
+      options: shuffle([
+        { id: correctId, text: literal.value },
+        ...misses.map((text, i) => ({ id: `${fieldId}_x${i}`, text }))
+      ])
+    });
+    answer[fieldId] = correctId;
+    if (!sourceTurns.includes(literal.lineIndex)) sourceTurns.push(literal.lineIndex);
+  }
+
+  if (fields.length < 2) return null;
+
+  return {
+    id: 'eng_data_capture',
+    type: 'data_capture',
+    question: 'Completá la ficha con los datos que se dicen en el audio.',
+    fields,
+    correctAnswer: answer,
+    sourceTurns,
+    explanation:
+      'Las alternativas se diferencian en una sola cifra. Es exactamente lo que hay que resolver en la vida real al anotar un precio o una hora al vuelo.'
+  };
+};
+
+// --- Cloze ---------------------------------------------------------------
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Sustituye una palabra por su hueco respetando los límites de palabra también
+ * con tildes y eñes, que es donde fallaba la implementación anterior.
+ */
+function replaceWord(text: string, word: string, marker: string): string | null {
+  const pattern = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(word)}(?![\\p{L}\\p{N}])`, 'u');
+  if (!pattern.test(text)) return null;
+  return text.replace(pattern, marker);
+}
+
+function buildCloze(dialogue: DialogueLine[], index: TranscriptIndex, gaps: number): Exercise | null {
+  const sentences = usableSentences(dialogue, gaps === 2 ? 8 : 5);
+  const used = new Set<string>();
+
+  for (const sentence of sentences) {
+    const tokens = splitTokens(sentence.text).map(stripEdges);
+    const candidates = tokens
+      // Se descarta la primera palabra: suele ser un saludo o un conector y su
+      // hueco se completa por rutina, sin escuchar.
+      .slice(1)
+      .filter(word => {
+        const norm = normalizeText(word);
+        return norm.length >= 5 && !STOPWORDS.has(norm) && !/\d/.test(word);
+      })
+      // Las palabras largas son las que llevan la carga informativa.
+      .sort((a, b) => b.length - a.length);
+    if (candidates.length < gaps) continue;
+
+    const targets = candidates.slice(0, gaps);
+    if (new Set(targets.map(normalizeText)).size !== targets.length) continue;
+
+    let textWithGaps: string | null = sentence.text;
+    const gapOptions: Record<string, ExerciseOption[]> = {};
+    const answer: Record<string, string> = {};
+    let ok = true;
+
+    targets.forEach((target, i) => {
+      if (!ok || !textWithGaps) return;
+      const gapId = `gap${i + 1}`;
+      const replaced = replaceWord(textWithGaps, target, `{{${gapId}}}`);
+      if (!replaced) {
+        ok = false;
+        return;
+      }
+      textWithGaps = replaced;
+
+      // Los distractores suenan parecido al objetivo: la elección se resuelve
+      // discriminando, no descartando por gramática.
+      const distractors: string[] = [];
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const candidate = phoneticDistractor(target, index, used, true);
+        if (candidate) distractors.push(candidate);
+      }
+      if (distractors.length < 1) {
+        ok = false;
+        return;
+      }
+
+      const correctId = `${gapId}_ok`;
+      gapOptions[gapId] = shuffle([
+        { id: correctId, text: target },
+        ...distractors.map((text, d) => ({ id: `${gapId}_x${d}`, text }))
+      ]);
+      answer[gapId] = correctId;
+    });
+
+    if (!ok || !textWithGaps) continue;
+
+    return {
+      id: gaps === 2 ? 'eng_two_gap_cloze' : 'eng_listening_cloze',
+      type: 'cloze',
+      question: sentence.speaker
+        ? `Completá lo que dice ${sentence.speaker}.`
+        : 'Completá la frase tal como suena en el audio.',
+      textWithGaps,
+      gapOptions,
+      correctAnswer: answer,
+      sourceTurns: [sentence.lineIndex],
+      explanation:
+        'Las opciones se diferencian en un solo sonido o en la sílaba acentuada, así que las dos encajan en la frase: la única forma de decidir es volver a escuchar.'
+    };
+  }
 
   return null;
 }
 
-function extractKeywordCandidates(dialogue: LessonPlan['dialogue']): string[] {
-  const tokens: string[] = [];
-  for (const line of dialogue || []) {
-    const clean = normalizeText(line.text || '');
-    if (!clean) continue;
-    for (const token of clean.split(' ')) {
-      if (!token) continue;
-      if (token.length < 4) continue;
-      if (STOPWORDS.has(token)) continue;
-      tokens.push(token);
-    }
+const listeningCloze: Engine = (dialogue, _slot, index) => buildCloze(dialogue, index, 1);
+const twoGapCloze: Engine = (dialogue, _slot, index) => buildCloze(dialogue, index, 2) || buildCloze(dialogue, index, 1);
+
+// --- Caza el cambio ------------------------------------------------------
+
+/**
+ * Alteraciones que mantienen la frase gramatical y verosímil. Si el cambio
+ * produjera algo agramatical, se detectaría leyendo y el ejercicio dejaría de
+ * medir comprensión auditiva.
+ */
+const SWAPS: [string, string][] = [
+  // Preposiciones y conjunciones: no tocan la concordancia.
+  ['a', 'de'], ['en', 'con'], ['por', 'para'], ['desde', 'hasta'], ['sobre', 'bajo'],
+  ['pero', 'porque'], ['cuando', 'donde'],
+  // Adverbios y cuantificadores invariables en esta forma.
+  ['muy', 'tan'], ['también', 'tampoco'], ['siempre', 'nunca'],
+  ['aquí', 'allí'], ['ahora', 'luego'], ['mucho', 'poco'], ['más', 'menos'],
+  ['algo', 'nada'], ['alguien', 'nadie'],
+  // Posesivos y demostrativos que conservan género y número.
+  ['mi', 'su'], ['tu', 'su'], ['este', 'ese'], ['esta', 'esa'],
+  // Clíticos que no arrastran concordancia con un sustantivo contiguo.
+  ['me', 'te'], ['le', 'les']
+];
+
+// NO se incluyen aquí los cambios de género o número en determinantes y
+// clíticos (el/la, un/una, los/las, lo/la). Rompen la concordancia con el
+// sustantivo siguiente y producen frases agramaticales como "por lo tos", que
+// se detectan leyendo y por tanto dejan de medir comprensión auditiva.
+
+const SWAP_INDEX: Map<string, string> = (() => {
+  const map = new Map<string, string>();
+  for (const [a, b] of SWAPS) {
+    map.set(normalizeText(a), b);
+    map.set(normalizeText(b), a);
   }
-  return tokens;
+  return map;
+})();
+
+/** Cambio de tiempo verbal en formas regulares muy frecuentes. */
+function tenseSwap(word: string): string | null {
+  if (/ó$/.test(word)) return `${word.slice(0, -1)}a`;
+  if (/aba$/.test(word)) return `${word.slice(0, -3)}ó`;
+  if (/amos$/.test(word)) return `${word.slice(0, -4)}aban`;
+  return null;
 }
 
-function findDigitLiterals(dialogue: LessonPlan['dialogue']): string[] {
-  const found: string[] = [];
-  const rx = /\b\d{1,4}(?:[\.,:]\d{1,2})?\b/g;
-  for (const line of dialogue || []) {
-    const matches = (line.text || '').match(rx);
-    if (!matches) continue;
-    for (const m of matches) found.push(m);
+function matchCase(source: string, replacement: string): string {
+  if (!source || !replacement) return replacement;
+  if (source[0] === source[0].toUpperCase() && source[0] !== source[0].toLowerCase()) {
+    return replacement[0].toUpperCase() + replacement.slice(1);
   }
-  return found;
+  return replacement;
 }
 
-function buildOrderingFromDialogue(dialogue: LessonPlan['dialogue']): Exercise | null {
-  const usable = (dialogue || [])
-    .filter(d => (d.text || '').trim().length >= 12)
-    .slice(0, 10);
-  if (usable.length < 4) return null;
+const spotTheDifference: Engine = (dialogue, slot) => {
+  const sentences = usableSentences(dialogue, 10, 28);
+  let best: Exercise | null = null;
+  let bestCount = 0;
 
-  const picked = usable.slice(0, 4);
-  const options: ExerciseOption[] = picked.map((line, idx) => ({
-    id: `auto_ord_opt_${idx}`,
-    text: `${line.speaker}: ${line.text}`
-  }));
+  for (const sentence of sentences) {
+    const rawTokens = splitTokens(sentence.text);
+    const sentenceWords = new Set(rawTokens.map(t => normalizeText(stripEdges(t))).filter(Boolean));
 
-  return {
-    id: 'auto_comp_ordering_1',
-    type: 'ordering',
-    question: 'Ordena los enunciados según aparecen en el audio (de primero a último).',
-    options,
-    correctAnswer: options.map(o => o.id),
-    explanation: 'Escucha la progresión: qué se pide primero, qué se confirma después y cómo termina el intercambio.'
-  };
-}
+    const tokens: { id: string; text: string }[] = [];
+    const altered: string[] = [];
 
-function buildWhoSaidItClassification(dialogue: LessonPlan['dialogue']): Exercise | null {
-  const speakers = getSpeakers(dialogue);
-  if (speakers.length < 2) return null;
+    rawTokens.forEach((raw, i) => {
+      const id = `t${i}`;
+      const bare = stripEdges(raw);
+      const trailing = raw.slice(bare.length ? raw.indexOf(bare) + bare.length : raw.length);
+      const leading = raw.slice(0, raw.indexOf(bare) === -1 ? 0 : raw.indexOf(bare));
 
-  const usable = (dialogue || [])
-    .filter(d => (d.text || '').trim().length >= 10 && (d.speaker || '').trim())
-    .slice(0, 12);
-  if (usable.length < 4) return null;
+      if (altered.length < slot.items && bare) {
+        const norm = normalizeText(bare);
+        const candidate = SWAP_INDEX.get(norm) || tenseSwap(bare);
+        // La palabra alterada no puede existir ya en la frase: si existe, el
+        // alumno no tendría forma de saber cuál de las dos es la intrusa.
+        if (candidate && !sentenceWords.has(normalizeText(candidate))) {
+          tokens.push({ id, text: `${leading}${matchCase(bare, candidate)}${trailing}` });
+          altered.push(id);
+          return;
+        }
+      }
 
-  const picked = usable.slice(0, 4);
-  const columns: ExerciseOption[] = speakers.slice(0, 2).map(s => ({ id: s, text: s }));
-  const rows: ExerciseOption[] = picked.map((line, idx) => ({
-    id: `auto_who_row_${idx}`,
-    text: `“${line.text}”`
-  }));
-  const correctAnswer: Record<string, string> = {};
-  picked.forEach((line, idx) => {
-    correctAnswer[`auto_who_row_${idx}`] = (line.speaker || '').trim();
-  });
+      tokens.push({ id, text: raw });
+    });
 
-  return {
-    id: 'auto_comp_who_1',
-    type: 'classification',
-    question: '¿Quién lo dice? Asigna cada frase al hablante correcto.',
-    rows,
-    columns,
-    correctAnswer,
-    explanation: 'Fíjate en las intenciones (pedir, negar, confirmar) y en el turno de palabra: quién responde y quién inicia.'
-  };
-}
-
-function buildSelectAllHeard(dialogue: LessonPlan['dialogue']): Exercise | null {
-  const normalizedFull = normalizeText((dialogue || []).map(d => d.text || '').join(' '));
-  if (!normalizedFull) return null;
-
-  const keywordCandidates = extractKeywordCandidates(dialogue);
-  const present = uniqueByNormalized(
-    shuffle(keywordCandidates)
-      .slice(0, 40)
-      .map((t, idx) => ({ id: `auto_sa_p_${idx}`, text: t }))
-  )
-    .filter(o => normalizedFull.includes(normalizeText(o.text)))
-    .slice(0, 3);
-
-  const distractorPool = [
-    'pasaporte', 'contrasena', 'paraguas', 'entrega', 'garantia', 'camarote', 'recargo', 'reembolso', 'tornillo', 'enchufe'
-  ];
-  const absent = uniqueByNormalized(
-    shuffle(distractorPool).map((t, idx) => ({ id: `auto_sa_a_${idx}`, text: t }))
-  )
-    .filter(o => !normalizedFull.includes(normalizeText(o.text)))
-    .slice(0, 3);
-
-  if (present.length < 2 || absent.length < 2) return null;
-
-  const options = shuffle([...present, ...absent]).slice(0, 6);
-  const correctAnswer = options
-    .filter(o => present.some(p => normalizeText(p.text) === normalizeText(o.text)))
-    .map(o => o.id);
-
-  if (correctAnswer.length < 2) return null;
-
-  return {
-    id: 'auto_comp_select_all_1',
-    type: 'multiple_choice',
-    question: 'Selecciona TODAS las palabras que SÍ se escuchan en el audio.',
-    options,
-    correctAnswer,
-    explanation: 'Marca solo las que aparecen literalmente. Si dudas, vuelve a escuchar el tramo donde se mencionan los detalles.'
-  };
-}
-
-function buildSpeechActClassification(dialogue: LessonPlan['dialogue']): Exercise | null {
-  const usable = (dialogue || [])
-    .map(d => ({ speaker: (d.speaker || '').trim(), text: (d.text || '').trim(), act: detectSpeechAct(d.text || '') }))
-    .filter(d => d.speaker && d.text && d.act);
-
-  if (usable.length < 4) return null;
-
-  const picked = usable.slice(0, 4);
-  const columns: ExerciseOption[] = [
-    { id: 'request', text: 'Pedir / Solicitar' },
-    { id: 'offer', text: 'Ofrecer' },
-    { id: 'confirm', text: 'Confirmar / Aceptar' },
-    { id: 'rejection', text: 'Rechazar' },
-    { id: 'apology', text: 'Disculparse' },
-    { id: 'thanks', text: 'Agradecer' }
-  ];
-
-  const rows: ExerciseOption[] = picked.map((line, idx) => ({
-    id: `auto_act_row_${idx}`,
-    text: clampText(`“${line.text}”`, 120)
-  }));
-  const correctAnswer: Record<string, string> = {};
-  picked.forEach((line, idx) => {
-    correctAnswer[`auto_act_row_${idx}`] = line.act as string;
-  });
-
-  return {
-    id: 'auto_comp_act_1',
-    type: 'classification',
-    question: 'Identifica la intención (acto de habla) de cada frase.',
-    rows,
-    columns,
-    correctAnswer,
-    explanation: 'No es gramática: es intención. ¿Pide algo, ofrece algo, confirma, rechaza, se disculpa o agradece?'
-  };
-}
-
-function buildRegisterClassification(dialogue: LessonPlan['dialogue']): Exercise | null {
-  const usable = (dialogue || [])
-    .filter(d => (d.text || '').trim().length >= 10)
-    .map(d => ({ text: (d.text || '').trim(), reg: detectRegisterToken(d.text || '') }));
-
-  if (usable.length < 6) return null;
-
-  const picked = usable.slice(0, 6);
-  const columns: ExerciseOption[] = [
-    { id: 'formal', text: 'Formal' },
-    { id: 'neutral', text: 'Neutro' },
-    { id: 'informal', text: 'Informal' }
-  ];
-
-  const rows: ExerciseOption[] = picked.map((line, idx) => ({
-    id: `auto_reg_row_${idx}`,
-    text: clampText(`“${line.text}”`, 120)
-  }));
-  const correctAnswer: Record<string, string> = {};
-  picked.forEach((line, idx) => {
-    correctAnswer[`auto_reg_row_${idx}`] = line.reg;
-  });
-
-  return {
-    id: 'auto_vocab_register_1',
-    type: 'classification',
-    question: 'Clasifica el registro de cada frase (según lo que se escucha).',
-    rows,
-    columns,
-    correctAnswer,
-    explanation: 'Busca marcas como “usted/por favor” (formal) o muletillas y cercanía (informal).'
-  };
-}
-
-function buildTwoGapCloze(dialogue: LessonPlan['dialogue']): Exercise | null {
-  const usable = (dialogue || [])
-    .filter(d => (d.text || '').trim().length >= 28)
-    .slice(0, 16);
-  if (usable.length === 0) return null;
-
-  const line = usable[0];
-  const clean = normalizeText(line.text || '');
-  const candidates = clean
-    .split(' ')
-    .filter(t => t.length >= 4 && !STOPWORDS.has(t));
-  if (candidates.length < 2) return null;
-
-  const target1 = candidates[0];
-  const target2 = candidates[candidates.length - 1];
-  if (normalizeText(target1) === normalizeText(target2)) return null;
-
-  let textWithGaps = line.text || '';
-  textWithGaps = textWithGaps.replace(new RegExp(`\\b${target1}\\b`, 'i'), '{{gap1}}');
-  textWithGaps = textWithGaps.replace(new RegExp(`\\b${target2}\\b`, 'i'), '{{gap2}}');
-  if (!textWithGaps.includes('{{gap1}}') || !textWithGaps.includes('{{gap2}}')) return null;
-
-  const keywordCandidates = extractKeywordCandidates(dialogue);
-  const distractorPool = shuffle(keywordCandidates)
-    .map(t => normalizeText(t))
-    .filter(t => t && t !== normalizeText(target1) && t !== normalizeText(target2));
-
-  const gap1Options: ExerciseOption[] = uniqueByNormalized([
-    { id: 'auto_gap1_correct', text: target1 },
-    ...distractorPool.slice(0, 3).map((t, idx) => ({ id: `auto_gap1_d_${idx}`, text: t }))
-  ]);
-  const gap2Options: ExerciseOption[] = uniqueByNormalized([
-    { id: 'auto_gap2_correct', text: target2 },
-    ...distractorPool.slice(3, 6).map((t, idx) => ({ id: `auto_gap2_d_${idx}`, text: t }))
-  ]);
-
-  if (gap1Options.length < 3 || gap2Options.length < 3) return null;
-
-  return {
-    id: 'auto_vocab_cloze_2g_1',
-    type: 'cloze',
-    question: 'Completa la frase exacta (2 huecos).',
-    textWithGaps: `${line.speaker}: ${textWithGaps}`,
-    gapOptions: { gap1: shuffle(gap1Options), gap2: shuffle(gap2Options) },
-    correctAnswer: { gap1: 'auto_gap1_correct', gap2: 'auto_gap2_correct' },
-    explanation: 'Las dos opciones correctas son las que aparecen literalmente en ese turno del audio.'
-  };
-}
-
-function buildMentionTrueFalse(dialogue: LessonPlan['dialogue']): Exercise | null {
-  const normalizedFull = normalizeText((dialogue || []).map(d => d.text || '').join(' '));
-  if (!normalizedFull) return null;
-
-  const keywordCandidates = extractKeywordCandidates(dialogue);
-  const present = uniqueByNormalized(
-    shuffle(keywordCandidates)
-      .slice(0, 20)
-      .map((t, idx) => ({ id: `auto_tf_p_${idx}`, text: t }))
-  )
-    .slice(0, 2)
-    .filter(o => normalizedFull.includes(normalizeText(o.text)));
-
-  const distractorPool = [
-    'piscina', 'bicicleta', 'receta', 'aduana', 'museo', 'farmacia', 'ascensor', 'contraseña', 'estacionamiento',
-    'maleta', 'abrigo', 'callejon', 'propina'
-  ];
-  const absent = uniqueByNormalized(
-    shuffle(distractorPool)
-      .map((t, idx) => ({ id: `auto_tf_a_${idx}`, text: t }))
-  )
-    .filter(o => !normalizedFull.includes(normalizeText(o.text)))
-    .slice(0, 2);
-
-  if (present.length < 2 || absent.length < 2) return null;
-
-  const rows = shuffle([
-    ...present.map((o, idx) => ({ id: `auto_tf_row_p_${idx}`, text: o.text })),
-    ...absent.map((o, idx) => ({ id: `auto_tf_row_a_${idx}`, text: o.text }))
-  ]);
-  const correctAnswer: Record<string, string> = {};
-  for (const row of rows) {
-    correctAnswer[row.id] = normalizedFull.includes(normalizeText(row.text)) ? 'true' : 'false';
-  }
-
-  return {
-    id: 'auto_comp_tf_1',
-    type: 'true_false',
-    question: 'Según el audio: ¿se menciona (literalmente) cada palabra?',
-    rows,
-    correctAnswer,
-    explanation: 'Marca VERDADERO solo si la palabra aparece en el audio; FALSO si no se menciona.'
-  };
-}
-
-function buildListeningCloze(dialogue: LessonPlan['dialogue']): Exercise | null {
-  const usable = (dialogue || [])
-    .filter(d => (d.text || '').trim().length >= 18)
-    .slice(0, 12);
-  if (usable.length === 0) return null;
-
-  const line = usable[0];
-  const clean = normalizeText(line.text || '');
-  const candidates = clean
-    .split(' ')
-    .filter(t => t.length >= 4 && !STOPWORDS.has(t));
-  if (candidates.length === 0) return null;
-
-  const target = candidates[Math.floor(Math.random() * candidates.length)];
-  const rx = new RegExp(`\\b${target}\\b`, 'i');
-  const textWithGaps = (line.text || '').replace(rx, '{{gap1}}');
-  if (textWithGaps === line.text) return null;
-
-  const keywordCandidates = extractKeywordCandidates(dialogue);
-  const distractors = shuffle(keywordCandidates)
-    .map(t => normalizeText(t))
-    .filter(t => t && t !== normalizeText(target))
-    .slice(0, 3);
-  const optionTexts = uniqueByNormalized([
-    { id: 'auto_gap1_correct', text: target },
-    ...distractors.map((t, idx) => ({ id: `auto_gap1_d_${idx}`, text: t }))
-  ]);
-
-  if (optionTexts.length < 3) return null;
-
-  return {
-    id: 'auto_vocab_cloze_1',
-    type: 'cloze',
-    question: 'Completa la frase exacta (elige la palabra que se escucha).',
-    textWithGaps: `${line.speaker}: ${textWithGaps}`,
-    gapOptions: { gap1: shuffle(optionTexts) },
-    correctAnswer: { gap1: 'auto_gap1_correct' },
-    explanation: 'La opción correcta es la palabra que aparece literalmente en ese turno del audio.'
-  };
-}
-
-function ensureAtLeastOneType(
-  exercises: Exercise[],
-  type: Exercise['type'],
-  build: () => Exercise | null
-): Exercise[] {
-  if (exercises.some(ex => ex.type === type)) return exercises;
-  const created = build();
-  if (!created) return exercises;
-  return [created, ...exercises];
-}
-
-function ensureAtLeastNByType(
-  exercises: Exercise[],
-  type: Exercise['type'],
-  minimum: number,
-  build: () => Exercise | null
-): Exercise[] {
-  const count = exercises.filter(ex => ex.type === type).length;
-  if (count >= minimum) return exercises;
-  const created = build();
-  if (!created) return exercises;
-  return [created, ...exercises];
-}
-
-export function augmentLessonPlanExercises(plan: LessonPlan, cfg: AugmentConfig): LessonPlan {
-  const dialogue = plan.dialogue || [];
-
-  const isIntro = cfg.level === Level.Intro;
-
-  const minComprehension = (() => {
-    if (cfg.mode === AppMode.AccentChallenge) return 2;
-    if (isIntro) return 4;
-    if (cfg.level === Level.Intermediate) return 5;
-    if (cfg.level === Level.Advanced) return 5;
-    return 4;
-  })();
-
-  const minVocabulary = (() => {
-    if (cfg.mode === AppMode.AccentChallenge) return 1;
-    if (cfg.mode === AppMode.Vocabulary) return 4;
-    if (isIntro) return 3;
-    return 3;
-  })();
-
-  const comprehension = [...(plan.exercises?.comprehension || [])];
-  const vocabulary = [...(plan.exercises?.vocabulary || [])];
-
-  let nextComprehension = comprehension;
-  if (cfg.mode === AppMode.Standard || cfg.mode === AppMode.Vocabulary) {
-    nextComprehension = ensureAtLeastOneType(nextComprehension, 'ordering', () => buildOrderingFromDialogue(dialogue));
-    nextComprehension = ensureAtLeastOneType(nextComprehension, 'classification', () => buildWhoSaidItClassification(dialogue));
-    nextComprehension = ensureAtLeastOneType(nextComprehension, 'true_false', () => buildMentionTrueFalse(dialogue));
-    nextComprehension = ensureAtLeastNByType(nextComprehension, 'multiple_choice', 1, () => buildSelectAllHeard(dialogue));
-
-    if (!isIntro) {
-      nextComprehension = ensureAtLeastNByType(nextComprehension, 'classification', 2, () => buildSpeechActClassification(dialogue));
+    // Se queda con la oración que admite MÁS cambios: dos alteraciones en una
+    // frase larga se cazan por casualidad; cuatro obligan a recorrerla entera.
+    if (altered.length >= 2 && tokens.length >= 6 && altered.length > bestCount) {
+      bestCount = altered.length;
+      best = {
+        id: 'eng_spot_the_difference',
+        type: 'spot_the_difference',
+        question: 'Se cambiaron algunas palabras. Marcá las que NO se dicen en el audio.',
+        tokens,
+        correctAnswer: altered,
+        sourceTurns: [sentence.lineIndex],
+        explanation:
+          'Los cambios mantienen la frase perfectamente gramatical, así que leyéndola no se notan: hay que contrastarla palabra por palabra con lo que suena.'
+      };
+      if (bestCount >= slot.items) break;
     }
   }
 
-  let nextVocabulary = vocabulary;
-  if (cfg.mode === AppMode.Standard || cfg.mode === AppMode.Vocabulary) {
-    nextVocabulary = ensureAtLeastNByType(nextVocabulary, 'cloze', cfg.mode === AppMode.Vocabulary ? 2 : 1, () => buildListeningCloze(dialogue));
-    nextVocabulary = ensureAtLeastNByType(nextVocabulary, 'cloze', 2, () => buildTwoGapCloze(dialogue));
-    nextVocabulary = ensureAtLeastOneType(nextVocabulary, 'classification', () => buildRegisterClassification(dialogue));
-  }
+  return best;
+};
 
-  // A0: if we detected explicit digits, add an extra micro-listening exercise.
-  if (isIntro && cfg.mode !== AppMode.AccentChallenge) {
-    const digits = findDigitLiterals(dialogue);
-    const pick = digits.find(d => d.length >= 1);
-    if (pick) {
-      const baseNum = parseFloat(pick.replace(',', '.'));
-      const distractors = Number.isFinite(baseNum)
-        ? uniqueByNormalized([
-            { id: 'auto_num_correct', text: pick },
-            { id: 'auto_num_d1', text: String(baseNum + 10).replace('.', ',') },
-            { id: 'auto_num_d2', text: String(baseNum + 1).replace('.', ',') },
-            { id: 'auto_num_d3', text: String(Math.max(0, baseNum - 1)).replace('.', ',') }
-          ])
-        : uniqueByNormalized([
-            { id: 'auto_num_correct', text: pick },
-            { id: 'auto_num_d1', text: '10' },
-            { id: 'auto_num_d2', text: '12' },
-            { id: 'auto_num_d3', text: '15' }
-          ]);
+// --- Reconstruir la frase ------------------------------------------------
 
-      if (distractors.length >= 2) {
-        nextComprehension = [
-          {
-            id: 'auto_comp_number_1',
-            type: 'multiple_choice',
-            question: 'Escucha el dato: ¿qué número aparece en el audio?',
-            options: shuffle(distractors),
-            correctAnswer: 'auto_num_correct',
-            explanation: 'Los distractores son números parecidos: la clave es discriminar con precisión.'
-          },
-          ...nextComprehension
-        ];
+/**
+ * Palabras átonas que en el habla se apoyan en la siguiente: un grupo fónico
+ * empieza en ellas, nunca termina en ellas.
+ */
+const GROUP_STARTERS = new Set([
+  'a', 'ante', 'bajo', 'con', 'contra', 'de', 'desde', 'en', 'entre', 'hacia',
+  'hasta', 'para', 'por', 'segun', 'sin', 'sobre', 'tras',
+  'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas', 'lo', 'al', 'del',
+  'que', 'quien', 'cuando', 'donde', 'como', 'porque', 'pero', 'y', 'o', 'si',
+  'mi', 'tu', 'su', 'nuestro', 'este', 'esta', 'ese', 'esa', 'aquel'
+]);
+
+const chunkOrder: Engine = dialogue => {
+  const sentences = usableSentences(dialogue, 8, 18);
+
+  for (const sentence of sentences) {
+    const words = splitTokens(sentence.text);
+    if (words.length < 8) continue;
+
+    // Se corta donde cortaría la voz: antes de una preposición, un determinante
+    // o un relativo, y nunca dejando grupos de una sola palabra.
+    const target = Math.ceil(words.length / 4);
+    const options: ExerciseOption[] = [];
+    let current: string[] = [];
+
+    words.forEach((word, i) => {
+      const startsGroup = GROUP_STARTERS.has(normalizeText(stripEdges(word)));
+      const shouldBreak =
+        current.length >= 2 &&
+        i < words.length - 1 &&
+        (current.length >= target || startsGroup) &&
+        (startsGroup || current.length >= target + 1);
+
+      if (shouldBreak) {
+        options.push({ id: `k${options.length}`, text: current.join(' ') });
+        current = [];
+      }
+      current.push(word);
+    });
+    if (current.length > 0) {
+      if (current.length === 1 && options.length > 0) {
+        options[options.length - 1].text += ` ${current[0]}`;
+      } else {
+        options.push({ id: `k${options.length}`, text: current.join(' ') });
       }
     }
+
+    if (options.length < 3 || options.length > 6) continue;
+
+    return {
+      id: 'eng_chunk_order',
+      type: 'chunk_order',
+      question: 'Reconstruí la frase: ordená los grupos tal como se pronuncian.',
+      options: shuffle(options),
+      correctAnswer: options.map(o => o.id),
+      sourceTurns: [sentence.lineIndex],
+      explanation:
+        'En el habla real estos grupos se pronuncian de corrido, sin pausa entre las palabras. Reconstruirlos es entrenar la segmentación de la cadena hablada.'
+    };
   }
 
-  // Soft caps to keep the module usable.
-  const maxComprehension = cfg.mode === AppMode.Vocabulary ? 6 : 7;
-  const maxVocabulary = cfg.mode === AppMode.Vocabulary ? 7 : 6;
-  if (nextComprehension.length > Math.max(minComprehension, maxComprehension)) nextComprehension = nextComprehension.slice(0, Math.max(minComprehension, maxComprehension));
-  if (nextVocabulary.length > Math.max(minVocabulary, maxVocabulary)) nextVocabulary = nextVocabulary.slice(0, Math.max(minVocabulary, maxVocabulary));
+  return null;
+};
 
-  // If AI generated too few, we still try to backfill with what we can.
-  if (nextComprehension.length < minComprehension) {
-    nextComprehension = ensureAtLeastOneType(nextComprehension, 'cloze', () => buildListeningCloze(dialogue));
-  }
+const ENGINES: Record<EngineId, Engine> = {
+  select_all_heard: selectAllHeard,
+  mention_true_false: mentionTrueFalse,
+  listening_cloze: listeningCloze,
+  two_gap_cloze: twoGapCloze,
+  data_capture: dataCapture,
+  minimal_pairs: minimalPairs,
+  spot_the_difference: spotTheDifference,
+  chunk_order: chunkOrder
+};
 
-  if (nextVocabulary.length < minVocabulary) {
-    nextVocabulary = ensureAtLeastOneType(nextVocabulary, 'multiple_choice', () => buildSelectAllHeard(dialogue));
-  }
+// ---------------------------------------------------------------------------
+// Composición final de la lección
+// ---------------------------------------------------------------------------
 
-  return {
-    ...plan,
-    exercises: {
-      comprehension: nextComprehension,
-      vocabulary: nextVocabulary
+/**
+ * Empareja los ejercicios verificados con los slots del blueprint y rellena con
+ * motores los que quedaron vacíos. El resultado sale ordenado por etapa de
+ * escucha, que es el recorrido que después muestra la interfaz.
+ */
+export function fillMissingSlots(
+  verified: Exercise[],
+  blueprint: ExerciseSlot[],
+  dialogue: DialogueLine[]
+): Exercise[] {
+  const index = buildTranscriptIndex(dialogue);
+  const pool = [...verified];
+  const result: Exercise[] = [];
+
+  blueprint.forEach((slot, position) => {
+    // El modelo suele devolver el slotId; si no lo hace, se empareja por formato.
+    let i = pool.findIndex(ex => ex.slotId === slot.slotId);
+    if (i < 0) i = pool.findIndex(ex => ex.type === slot.format);
+
+    if (i >= 0) {
+      const [ex] = pool.splice(i, 1);
+      result.push({
+        ...ex,
+        id: ex.id || `${slot.slotId}_${position}`,
+        slotId: slot.slotId,
+        stage: slot.stage,
+        skill: slot.skill
+      });
+      return;
     }
-  };
+
+    const engine = slot.engineFallback ? ENGINES[slot.engineFallback] : undefined;
+    if (!engine) {
+      console.warn(`[ejercicios] slot "${slot.slotId}" sin cubrir y sin motor de respaldo`);
+      return;
+    }
+
+    let built: Exercise | null = null;
+    try {
+      built = engine(dialogue, slot, index);
+    } catch (error) {
+      console.warn(`[ejercicios] el motor "${slot.engineFallback}" falló:`, error);
+    }
+    if (!built) return;
+
+    // Lo generado aquí pasa por el mismo control que lo generado por el modelo.
+    const check = verifyExercise(built, index);
+    if (!check.ok || !check.exercise) {
+      console.warn(`[ejercicios] motor "${slot.engineFallback}" descartado: ${check.reason}`);
+      return;
+    }
+
+    result.push({
+      ...check.exercise,
+      id: `${slot.slotId}_auto`,
+      slotId: slot.slotId,
+      stage: slot.stage,
+      skill: slot.skill
+    });
+  });
+
+  // Ejercicios válidos que el modelo añadió de más: se conservan al final.
+  for (const leftover of pool) {
+    result.push({ ...leftover, question: clampText(leftover.question, 300) });
+  }
+
+  return result.sort(compareByStage);
 }

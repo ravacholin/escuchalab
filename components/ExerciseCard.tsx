@@ -1,13 +1,33 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Exercise } from '../types';
-import { Check, X, ArrowUp, ArrowDown, GripVertical, AlertCircle } from 'lucide-react';
+import { DialogueLine, Exercise } from '../types';
+import {
+  FORMAT_LABELS,
+  SKILL_LABELS,
+  STAGE_META,
+  TRUE_FALSE_COLUMNS,
+  TRUE_FALSE_NOTGIVEN_COLUMNS
+} from '../data/listeningSyllabus';
+import { Check, X, ArrowUp, ArrowDown, GripVertical, AlertCircle, Quote } from 'lucide-react';
 
 interface ExerciseCardProps {
   exercise: Exercise;
   index: number;
+  /** Turnos del audio, para poder citar la fuente de la respuesta al corregir. */
+  dialogue?: DialogueLine[];
 }
 
-const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index }) => {
+/** Formatos que se resuelven rellenando un mapa campo → opción. */
+const FIELD_TYPES = new Set(['data_capture', 'minimal_pairs']);
+/** Formatos que se resuelven rellenando un mapa fila → columna. */
+const TABLE_TYPES = new Set([
+  'classification',
+  'matching',
+  'scale',
+  'true_false',
+  'true_false_notgiven'
+]);
+
+const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }) => {
   // --- ROBUST DATA NORMALIZATION ---
   // This ensures that even if the AI returns malformed data (missing IDs), the UI won't break.
   const safeExercise = useMemo(() => {
@@ -31,7 +51,21 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index }) => {
     if (safe.options) safe.options = ensureIds(safe.options, `opt_${index}`);
     if (safe.rows) safe.rows = ensureIds(safe.rows, `row_${index}`);
     if (safe.columns) safe.columns = ensureIds(safe.columns, `col_${index}`);
-    
+    if (safe.tokens) safe.tokens = ensureIds(safe.tokens, `tok_${index}`);
+
+    // Ficha de datos / pares mínimos: cada campo lleva su propia lista.
+    if (Array.isArray(safe.fields)) {
+        safe.fields = safe.fields.map((field: any, idx: number) => ({
+            ...field,
+            id: (field?.id && String(field.id).trim()) ? field.id : `fld_${index}_${idx}`,
+            options: ensureIds(field?.options, `fld_${index}_${idx}_o`)
+        }));
+    }
+
+    // Los formatos de juicio traen las columnas implícitas.
+    if (safe.type === 'true_false_notgiven') safe.columns = [...TRUE_FALSE_NOTGIVEN_COLUMNS];
+    else if (safe.type === 'true_false' && safe.rows) safe.columns = [...TRUE_FALSE_COLUMNS];
+
     // Normalize Gap Options for Cloze
     if (safe.gapOptions) {
         const newGaps: Record<string, any[]> = {};
@@ -58,7 +92,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index }) => {
     setIsSubmitted(false);
     
     // Robust Ordering Initialization using safeExercise
-    if (safeExercise.type === 'ordering') {
+    if (safeExercise.type === 'ordering' || safeExercise.type === 'chunk_order') {
       if (safeExercise.options && safeExercise.options.length > 0) {
           // Shuffle options for the initial state
           const shuffled = [...safeExercise.options].sort(() => Math.random() - 0.5);
@@ -86,6 +120,8 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index }) => {
             const correctVal = correctMap[key];
             return correctVal && (val as string).toLowerCase() === correctVal.toLowerCase();
         });
+    } else if (FIELD_TYPES.has(safeExercise.type)) {
+        if (userKeys.length !== (safeExercise.fields?.length || 0)) return false;
     } else if (safeExercise.rows) {
         if (userKeys.length !== safeExercise.rows.length) return false;
     }
@@ -123,16 +159,40 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index }) => {
       return false;
   };
 
+  /**
+   * En el termómetro el eje es ORDINAL, así que fallar por un punto no es lo
+   * mismo que fallar por tres. Se mide la distancia máxima para poder decírselo
+   * al alumno en la corrección.
+   */
+  const scaleDistance = () => {
+      const points: string[] = (safeExercise.columns || []).map((c: any) => c.id);
+      const correctMap = (safeExercise.correctAnswer as Record<string, string>) || {};
+      let worst = 0;
+      for (const [rowId, correctId] of Object.entries(correctMap)) {
+          const given = answersMap[rowId];
+          if (!given) return Infinity;
+          worst = Math.max(worst, Math.abs(points.indexOf(given) - points.indexOf(correctId)));
+      }
+      return worst;
+  };
+
   const isCorrect = () => {
       switch (safeExercise.type) {
           case 'classification':
+          case 'matching':
+          case 'scale':
           case 'cloze':
+          case 'data_capture':
+          case 'minimal_pairs':
+          case 'true_false_notgiven':
               return isAnswerMapCorrect();
           case 'true_false':
               return safeExercise.rows ? isAnswerMapCorrect() : isSelectionCorrect();
           case 'ordering':
+          case 'chunk_order':
               return isOrderingCorrect();
           case 'multiple_choice':
+          case 'spot_the_difference':
               return isSelectionCorrect();
           default:
               return false;
@@ -143,20 +203,40 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index }) => {
       if (isSubmitted) return false;
       switch (safeExercise.type) {
           case 'multiple_choice':
+          case 'spot_the_difference':
               return selectedOptions.length > 0;
           case 'ordering':
-              return orderedList.length > 0; 
+          case 'chunk_order':
+              return orderedList.length > 0;
           case 'true_false':
               if (safeExercise.rows) return Object.keys(answersMap).length === safeExercise.rows.length;
               return selectedOptions.length > 0;
           case 'classification':
+          case 'matching':
+          case 'scale':
+          case 'true_false_notgiven':
                return Object.keys(answersMap).length === (safeExercise.rows?.length || 0);
+          case 'data_capture':
+          case 'minimal_pairs':
+               return Object.keys(answersMap).length === (safeExercise.fields?.length || 0);
           case 'cloze':
                return Object.keys(answersMap).length === Object.keys(safeExercise.gapOptions || {}).length;
           default:
               return false;
       }
   };
+
+  /**
+   * Turnos en los que se apoya la respuesta. Se revelan solo al corregir: es la
+   * prueba de la clave y le dice al alumno exactamente dónde volver a escuchar.
+   */
+  const sourceLines = useMemo(() => {
+      if (!dialogue || !Array.isArray(safeExercise.sourceTurns)) return [];
+      return safeExercise.sourceTurns
+          .map((i: number) => dialogue[i])
+          .filter(Boolean)
+          .slice(0, 3);
+  }, [dialogue, safeExercise]);
 
   const getStatusColor = () => {
       if (!isSubmitted) return 'border-zinc-800';
@@ -519,15 +599,319 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index }) => {
     );
   };
 
+  /**
+   * FICHA DE DATOS y PARES MÍNIMOS comparten estructura (campo → opción) pero se
+   * presentan distinto: la ficha imita un formulario real de la situación; los
+   * pares mínimos son una rejilla de contrastes para elegir al vuelo.
+   */
+  const renderFields = () => {
+    const fields = safeExercise.fields || [];
+    const correctMap = (safeExercise.correctAnswer as Record<string, string>) || {};
+    const isForm = safeExercise.type === 'data_capture';
+
+    if (fields.length === 0) {
+        return (
+            <div className="p-8 flex flex-col items-center justify-center text-zinc-500">
+                <AlertCircle size={32} className="mb-2" />
+                <p className="font-mono text-xs uppercase">Error de datos: no hay campos</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className={`p-6 gap-4 ${isForm ? 'flex flex-col' : 'grid grid-cols-1 sm:grid-cols-2 gap-4'}`}>
+            {fields.map((field: any) => {
+                const selected = answersMap[field.id] || '';
+                const correctId = correctMap[field.id];
+                const isFieldCorrect = isSubmitted && selected === correctId;
+
+                let frameClass = 'border-zinc-800 bg-zinc-900/40';
+                if (isSubmitted) {
+                    frameClass = isFieldCorrect
+                        ? 'border-green-500 bg-green-500/5'
+                        : 'border-red-500 bg-red-500/5';
+                }
+
+                return (
+                    <div key={field.id} className={`border ${frameClass} p-4 transition-colors duration-300`}>
+                        <div className="flex items-center justify-between mb-3">
+                            <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                                {field.label}
+                            </span>
+                            {isSubmitted && (
+                                isFieldCorrect
+                                    ? <Check size={14} className="text-green-500" />
+                                    : <X size={14} className="text-red-500" />
+                            )}
+                        </div>
+
+                        <div className={isForm ? '' : 'grid grid-cols-2 gap-2'}>
+                            {isForm ? (
+                                <select
+                                    value={selected}
+                                    onChange={(e) => setAnswersMap(prev => ({ ...prev, [field.id]: e.target.value }))}
+                                    disabled={isSubmitted}
+                                    className="w-full bg-black border border-zinc-700 text-white font-mono text-base px-3 py-2 outline-none focus:border-white disabled:opacity-70"
+                                >
+                                    <option value="" disabled>— elegí —</option>
+                                    {field.options.map((o: any) => (
+                                        <option key={o.id} value={o.id} className="bg-black">{o.text}</option>
+                                    ))}
+                                </select>
+                            ) : (
+                                field.options.map((o: any) => {
+                                    const isSelected = selected === o.id;
+                                    const isKey = isSubmitted && correctId === o.id;
+                                    let btnClass = 'py-3 px-2 border font-sans text-sm transition-all duration-200';
+                                    if (isSubmitted) {
+                                        if (isKey) btnClass += ' border-green-500 bg-green-500/10 text-green-400';
+                                        else if (isSelected) btnClass += ' border-red-500 bg-red-500/10 text-red-400';
+                                        else btnClass += ' border-zinc-800 text-zinc-600 opacity-50';
+                                    } else if (isSelected) {
+                                        btnClass += ' border-white bg-white text-black font-medium';
+                                    } else {
+                                        btnClass += ' border-zinc-700 text-zinc-300 hover:border-zinc-400';
+                                    }
+                                    return (
+                                        <button
+                                            key={o.id}
+                                            onClick={() => !isSubmitted && setAnswersMap(prev => ({ ...prev, [field.id]: o.id }))}
+                                            disabled={isSubmitted}
+                                            className={btnClass}
+                                        >
+                                            {o.text}
+                                        </button>
+                                    );
+                                })
+                            )}
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+  };
+
+  /**
+   * EMPAREJAR. La biyección se impone en la propia interfaz: una opción ya usada
+   * queda deshabilitada en las demás filas. Así se evita la matriz de radios de
+   * N×N, que para 4 problemas y 4 soluciones era ilegible.
+   */
+  const renderMatching = () => {
+    const rows = safeExercise.rows || [];
+    const columns = safeExercise.columns || [];
+    const correctMap = (safeExercise.correctAnswer as Record<string, string>) || {};
+    // Qué fila reclamó cada opción, para deshabilitarla en el resto y forzar
+    // que el emparejamiento sea biyectivo.
+    const takenBy = new Map<string, string>();
+    Object.keys(answersMap).forEach(rowId => takenBy.set(answersMap[rowId], rowId));
+
+    return (
+        <div className="p-6 flex flex-col gap-3">
+            {rows.map((row: any) => {
+                const selected = answersMap[row.id] || '';
+                const isRowCorrect = isSubmitted && selected === correctMap[row.id];
+
+                let frameClass = 'border-zinc-800';
+                if (isSubmitted) frameClass = isRowCorrect ? 'border-green-500' : 'border-red-500';
+
+                return (
+                    <div key={row.id} className={`border ${frameClass} bg-zinc-900/30 p-4 flex flex-col md:flex-row md:items-center gap-3 transition-colors duration-300`}>
+                        <p className="flex-1 font-sans text-sm text-zinc-200 leading-relaxed">{row.text}</p>
+
+                        <div className="flex items-center gap-2 md:w-1/2">
+                            <span className="font-mono text-zinc-600 hidden md:inline">→</span>
+                            <select
+                                value={selected}
+                                onChange={(e) => setAnswersMap(prev => ({ ...prev, [row.id]: e.target.value }))}
+                                disabled={isSubmitted}
+                                className="flex-1 bg-black border border-zinc-700 text-white font-sans text-sm px-3 py-2 outline-none focus:border-white disabled:opacity-70"
+                            >
+                                <option value="" disabled>— emparejá —</option>
+                                {columns.map((col: any) => {
+                                    const owner = takenBy.get(col.id);
+                                    return (
+                                        <option
+                                            key={col.id}
+                                            value={col.id}
+                                            disabled={!!owner && owner !== row.id}
+                                            className="bg-black"
+                                        >
+                                            {col.text}
+                                        </option>
+                                    );
+                                })}
+                            </select>
+                            {isSubmitted && (
+                                isRowCorrect
+                                    ? <Check size={16} className="text-green-500 flex-shrink-0" />
+                                    : <X size={16} className="text-red-500 flex-shrink-0" />
+                            )}
+                        </div>
+
+                        {isSubmitted && !isRowCorrect && (
+                            <span className="font-mono text-[10px] uppercase text-zinc-500 md:w-40">
+                                era: {columns.find((c: any) => c.id === correctMap[row.id])?.text}
+                            </span>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+  };
+
+  /**
+   * TERMÓMETRO. Las columnas son puntos ordenados de un mismo eje, así que se
+   * dibujan como una escala continua y no como categorías sueltas.
+   */
+  const renderScale = () => {
+    const rows = safeExercise.rows || [];
+    const points = safeExercise.columns || [];
+    const correctMap = (safeExercise.correctAnswer as Record<string, string>) || {};
+
+    return (
+        <div className="p-6 flex flex-col gap-6">
+            <div className="flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                <span>{points[0]?.text}</span>
+                <div className="flex-1 h-px bg-gradient-to-r from-zinc-700 via-zinc-600 to-zinc-700 mx-2" />
+                <span className="text-right">{points[points.length - 1]?.text}</span>
+            </div>
+
+            {rows.map((row: any) => {
+                const selected = answersMap[row.id];
+                const correctId = correctMap[row.id];
+                const isRowCorrect = isSubmitted && selected === correctId;
+                const distance = isSubmitted && selected
+                    ? Math.abs(points.findIndex((p: any) => p.id === selected) - points.findIndex((p: any) => p.id === correctId))
+                    : 0;
+
+                return (
+                    <div key={row.id} className="flex flex-col gap-2">
+                        <p className="font-serif text-base text-zinc-200 italic">“{row.text}”</p>
+                        <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}>
+                            {points.map((point: any) => {
+                                const isSelected = selected === point.id;
+                                const isKey = isSubmitted && correctId === point.id;
+                                let cellClass = 'py-3 px-1 border text-center font-sans text-[11px] leading-tight transition-all duration-200';
+                                if (isSubmitted) {
+                                    if (isKey) cellClass += ' border-green-500 bg-green-500/15 text-green-400';
+                                    else if (isSelected) cellClass += ' border-red-500 bg-red-500/10 text-red-400';
+                                    else cellClass += ' border-zinc-800 text-zinc-600';
+                                } else if (isSelected) {
+                                    cellClass += ' border-white bg-white text-black font-medium';
+                                } else {
+                                    cellClass += ' border-zinc-800 text-zinc-400 hover:border-zinc-500';
+                                }
+                                return (
+                                    <button
+                                        key={point.id}
+                                        onClick={() => !isSubmitted && setAnswersMap(prev => ({ ...prev, [row.id]: point.id }))}
+                                        disabled={isSubmitted}
+                                        className={cellClass}
+                                    >
+                                        {point.text}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                        {isSubmitted && !isRowCorrect && distance === 1 && (
+                            <span className="font-mono text-[10px] uppercase text-amber-500">
+                                casi: te quedaste a un punto del matiz exacto
+                            </span>
+                        )}
+                    </div>
+                );
+            })}
+        </div>
+    );
+  };
+
+  /**
+   * CAZA EL CAMBIO. Dictado sin escribir: se muestra el fragmento con algunas
+   * palabras sustituidas y el alumno marca las que no oyó.
+   */
+  const renderSpotTheDifference = () => {
+    const tokens = safeExercise.tokens || [];
+    const altered: string[] = Array.isArray(safeExercise.correctAnswer)
+        ? (safeExercise.correctAnswer as string[])
+        : [];
+
+    if (tokens.length === 0) {
+        return (
+            <div className="p-8 flex flex-col items-center justify-center text-zinc-500">
+                <AlertCircle size={32} className="mb-2" />
+                <p className="font-mono text-xs uppercase">Error de datos: no hay fragmento</p>
+            </div>
+        );
+    }
+
+    return (
+        <div className="p-8 bg-zinc-950">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 mb-4">
+                Tocá las palabras que no se dicen
+            </p>
+            <div className="flex flex-wrap gap-x-1 gap-y-2 font-serif text-lg leading-loose">
+                {tokens.map((token: any) => {
+                    const isSelected = selectedOptions.includes(token.id);
+                    const isAltered = altered.includes(token.id);
+
+                    let tokenClass = 'px-1 py-0.5 border-b-2 transition-all duration-150 cursor-pointer';
+                    if (isSubmitted) {
+                        if (isAltered && isSelected) tokenClass += ' border-green-500 text-green-400 bg-green-500/10';
+                        else if (isAltered) tokenClass += ' border-amber-500 text-amber-400 bg-amber-500/10';
+                        else if (isSelected) tokenClass += ' border-red-500 text-red-400 bg-red-500/10 line-through';
+                        else tokenClass += ' border-transparent text-zinc-500';
+                    } else if (isSelected) {
+                        tokenClass += ' border-white bg-white/10 text-white';
+                    } else {
+                        tokenClass += ' border-transparent text-zinc-300 hover:border-zinc-600';
+                    }
+
+                    return (
+                        <button
+                            key={token.id}
+                            onClick={() => {
+                                if (isSubmitted) return;
+                                setSelectedOptions(prev =>
+                                    prev.includes(token.id) ? prev.filter(x => x !== token.id) : [...prev, token.id]
+                                );
+                            }}
+                            disabled={isSubmitted}
+                            className={tokenClass}
+                        >
+                            {token.text}
+                        </button>
+                    );
+                })}
+            </div>
+            {isSubmitted && (
+                <p className="mt-5 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                    <span className="text-green-500">verde</span> = la cazaste ·{' '}
+                    <span className="text-amber-500">ámbar</span> = cambiada y se te pasó ·{' '}
+                    <span className="text-red-500">roja</span> = sí se dice
+                </p>
+            )}
+        </div>
+    );
+  };
+
   // --- MAIN RENDER ---
-  
+
   const renderContent = () => {
       switch(safeExercise.type) {
           case 'multiple_choice': return renderMultipleChoice();
           case 'true_false': return renderTrueFalse();
+          case 'true_false_notgiven': return renderTable(safeExercise.columns || []);
           case 'classification': return renderTable(safeExercise.columns || []);
-          case 'ordering': return renderOrdering();
+          case 'matching': return renderMatching();
+          case 'scale': return renderScale();
+          case 'ordering':
+          case 'chunk_order': return renderOrdering();
           case 'cloze': return renderCloze();
+          case 'data_capture':
+          case 'minimal_pairs': return renderFields();
+          case 'spot_the_difference': return renderSpotTheDifference();
           default: return <div className="p-4 text-red-500 border border-red-900 bg-red-950/10 font-mono text-xs">ERR_UNKNOWN_TYPE: {safeExercise.type}</div>;
       }
   };
@@ -540,12 +924,19 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index }) => {
 
       {/* Header */}
       <div className="mb-6 md:ml-8">
-        <div className="flex items-center gap-3 mb-2">
+        <div className="flex items-center gap-3 mb-2 flex-wrap">
             <span className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest px-2 py-0.5 border border-zinc-800 bg-zinc-900/50">
                 0{index + 1}
             </span>
+            {/* Se nombra la habilidad que se entrena, no el widget: es lo que le
+                permite al alumno saber qué está practicando. */}
+            {safeExercise.skill && SKILL_LABELS[safeExercise.skill] && (
+                <span className="font-mono text-[10px] text-white uppercase tracking-widest px-2 py-0.5 border border-zinc-700">
+                    {SKILL_LABELS[safeExercise.skill]}
+                </span>
+            )}
             <span className="font-mono text-[10px] text-zinc-600 uppercase">
-                // {safeExercise.type.replace('_', ' ')}
+                // {FORMAT_LABELS[safeExercise.type] || safeExercise.type.replace(/_/g, ' ')}
             </span>
         </div>
         <h3 className="font-display font-medium text-xl md:text-2xl uppercase leading-tight text-white max-w-4xl">
@@ -584,6 +975,21 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index }) => {
                                 <p className="text-zinc-300 text-sm font-sans leading-relaxed border-l-2 border-zinc-800 pl-4">
                                     {safeExercise.explanation}
                                 </p>
+                                {sourceLines.length > 0 && (
+                                    <div className="pt-3 space-y-2">
+                                        <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 flex items-center gap-2">
+                                            <Quote size={11} /> En el audio
+                                        </span>
+                                        {sourceLines.map((line, i) => (
+                                            <p key={i} className="font-serif text-sm text-zinc-400 italic border-l-2 border-zinc-700 pl-4">
+                                                <span className="not-italic font-mono text-[10px] uppercase text-zinc-600 mr-2">
+                                                    {line.speaker}
+                                                </span>
+                                                {line.text}
+                                            </p>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     ) : (
