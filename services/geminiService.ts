@@ -40,6 +40,27 @@ const getAi = () => {
 const TTS_SAMPLE_RATE = 24000;
 const TTS_BYTES_PER_SECOND = TTS_SAMPLE_RATE * 2;
 
+/** Techo de caracteres que acepta una petición al modelo de voz. */
+const TTS_PROMPT_LIMIT = 5000;
+
+/**
+ * Peticiones de voz simultáneas. Con tres en paralelo la API empieza a
+ * devolver 429 y 503; con dos aguanta.
+ */
+const TTS_CONCURRENCY = 2;
+
+/**
+ * A partir de aquí se trocea también por velocidad, no solo porque el texto no
+ * quepa. Cada tramo es una petición más contra la cuota del modelo de voz, así
+ * que solo compensa en diálogos largos, donde una sola llamada tarda ~30 s.
+ * Los troceos que impone el presupuesto de caracteres ocurren igualmente: sin
+ * ellos el diálogo se cortaba a media frase.
+ */
+const TURNS_BEFORE_SPLITTING = 12;
+
+/** Fundido en cada unión entre tramos, para que no se oiga un clic. */
+const JOIN_FADE_MS = 5;
+
 // --- HELPERS ---
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -1151,6 +1172,148 @@ const AUDIO_STEPS = [
   { id: 'encode', label: 'Ensamblado de la pista', weight: 10, atomic: true }
 ];
 
+// --- TROCEADO DEL TEXTO PARA EL TTS ---
+
+/** Ejecuta `fn` sobre `items` con un tope de tareas simultáneas, conservando el orden. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker)
+  );
+  return results;
+}
+
+/** Parte una línea que por sí sola no cabe, primero por frases y luego por palabras. */
+function splitOversizedLine(line: string, limit: number): string[] {
+  if (line.length <= limit) return [line];
+
+  const pieces: string[] = [];
+  let current = "";
+  const units = line.match(/[^.!?…]+[.!?…]*\s*/g) ?? line.split(/(?<=\s)/);
+
+  for (const unit of units) {
+    if (current && current.length + unit.length > limit) {
+      pieces.push(current.trim());
+      current = "";
+    }
+    if (unit.length > limit) {
+      // Ni una frase suelta cabe: se corta por palabras.
+      for (const word of unit.split(/\s+/)) {
+        if (current && current.length + word.length + 1 > limit) {
+          pieces.push(current.trim());
+          current = "";
+        }
+        current += (current ? " " : "") + word;
+      }
+    } else {
+      current += unit;
+    }
+  }
+  if (current.trim()) pieces.push(current.trim());
+  return pieces.filter(Boolean);
+}
+
+/** Agrupa líneas en tramos sin pasar de `limit` caracteres, sin partir turnos. */
+function packLines(lines: string[], joiner: string, limit: number): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let size = 0;
+
+  for (const line of lines) {
+    const cost = line.length + (current.length ? joiner.length : 0);
+    if (current.length && size + cost > limit) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(line);
+    size += line.length + (current.length > 1 ? joiner.length : 0);
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+}
+
+/**
+ * Caracteres de diálogo que caben en una petición para ese acento, una vez
+ * descontado el perfil fonético (entre 2196 y 3407 caracteres según la
+ * variante) y un margen para el prefijo de continuación.
+ */
+export function ttsDialogueBudget(accent: Accent): number {
+  const profile = TTS_PHONETIC_PROFILES[accent] || "";
+  const headerLength = profile ? profile.length + "\n\n---BEGIN DIALOGUE---\n\n".length : 0;
+  return Math.max(600, TTS_PROMPT_LIMIT - headerLength - 200);
+}
+
+/**
+ * Trocea el diálogo en fronteras de turno.
+ *
+ * `hardLimit` es lo que deja libre el perfil fonético dentro del techo de la
+ * API. Antes esto se resolvía con un `substring(0, 5000)` a ciegas: con los
+ * perfiles largos (Buenos Aires ocupa 3407 caracteres) un diálogo `Largo`
+ * perdía el final a mitad de frase y el audio dejaba de cubrir los
+ * `sourceTurns` de los ejercicios.
+ */
+export function chunkDialogueLines(lines: string[], joiner: string, hardLimit: number): string[][] {
+  const safeLines = lines.flatMap(line => splitOversizedLine(line, hardLimit));
+
+  const byBudget = packLines(safeLines, joiner, hardLimit);
+  const desired = safeLines.length >= TURNS_BEFORE_SPLITTING ? 2 : 1;
+  const chunkCount = Math.max(byBudget.length, desired);
+  if (chunkCount <= 1) return [safeLines];
+
+  // Tramos de tamaño parecido: con dos peticiones en paralelo, el tiempo total
+  // lo marca la más larga.
+  const totalChars = safeLines.reduce((n, l) => n + l.length + joiner.length, 0);
+  const target = Math.max(
+    Math.ceil(totalChars / chunkCount),
+    ...safeLines.map(l => l.length)
+  );
+  return packLines(safeLines, joiner, Math.min(hardLimit, target));
+}
+
+/**
+ * Une los tramos de PCM aplicando un fundido corto en cada costura. Todos
+ * comparten formato (24 kHz, mono, 16 bits), así que basta concatenar.
+ */
+export function concatPcmChunks(chunks: Uint8Array[]): Uint8Array {
+  const usable = chunks.filter(c => c && c.length > 1);
+  if (usable.length === 0) return new Uint8Array(0);
+  if (usable.length === 1) return usable[0];
+
+  const total = usable.reduce((n, c) => n + c.length, 0);
+  const out = concatBytes(usable, total);
+
+  const samples = new Int16Array(out.buffer, out.byteOffset, Math.floor(out.length / 2));
+  const fade = Math.floor((TTS_SAMPLE_RATE * JOIN_FADE_MS) / 1000);
+  let boundary = 0;
+  for (let i = 0; i < usable.length - 1; i++) {
+    boundary += Math.floor(usable[i].length / 2);
+    for (let n = 0; n < fade; n++) {
+      const gain = n / fade;
+      const before = boundary - 1 - n;
+      const after = boundary + n;
+      if (before >= 0) samples[before] = Math.round(samples[before] * gain);
+      if (after < samples.length) samples[after] = Math.round(samples[after] * gain);
+    }
+  }
+
+  return out;
+}
+
 /** Recibe el audio en streaming para poder contar bytes según llegan. */
 async function synthesizeWithProgress(
   ai: GoogleGenAI,
@@ -1224,7 +1387,10 @@ export const generateAudio = async (
 
   const isMultiSpeaker = sortedSpeakers.length >= 2;
   let speechConfig;
-  let textPrompt = "";
+  // El diálogo viaja como lista de turnos: el troceado corta en fronteras de
+  // turno, nunca a mitad de frase.
+  let lines: string[] = [];
+  let joiner = '\n';
   const assignedVoices: string[] = [];
 
   if (isMultiSpeaker) {
@@ -1260,15 +1426,15 @@ export const generateAudio = async (
       }
     };
 
-    textPrompt = dialogue
+    joiner = '\n';
+    lines = dialogue
       .filter(d => d.speaker && (d.speaker.includes(s1) || d.speaker.includes(s2) || s1.includes(d.speaker) || s2.includes(d.speaker)))
       .map(d => {
         const cleanText = sanitizeForTTS(d.text);
         if (!cleanText) return null;
         return `${d.speaker}: ${cleanText}`;
       })
-      .filter(Boolean) // Remove nulls
-      .join('\n');
+      .filter((l): l is string => Boolean(l)); // Remove nulls
 
   } else {
     // Single Speaker Logic
@@ -1285,93 +1451,150 @@ export const generateAudio = async (
       }
     };
 
-    textPrompt = dialogue
+    joiner = '\n\n';
+    lines = dialogue
       .map(d => sanitizeForTTS(d.text))
-      .filter(t => t.length > 0)
-      .join('\n\n');
+      .filter(t => t.length > 0);
   }
 
   // Final validation before sending
-  if (textPrompt.length === 0) {
+  if (lines.length === 0) {
     throw new Error("No hay texto válido para generar audio.");
   }
 
   // Caracteres de habla real (sin la directiva fonética que se antepone luego).
-  const spokenChars = textPrompt.length;
+  const spokenChars = lines.join(joiner).length;
 
   // --- CRITICAL: INJECT PHONETIC PRONUNCIATION INSTRUCTIONS ---
   // This is the "bulletproof" accent system - we prepend pronunciation rules
   // so the TTS model knows exactly how to pronounce each dialect
-  const phoneticProfile = TTS_PHONETIC_PROFILES[accent];
-  if (phoneticProfile) {
-    // Prepend the pronunciation instructions as a system-level directive
-    textPrompt = `${phoneticProfile}\n\n---BEGIN DIALOGUE---\n\n${textPrompt}`;
-  }
+  const phoneticProfile = TTS_PHONETIC_PROFILES[accent] || "";
+  const header = phoneticProfile ? `${phoneticProfile}\n\n---BEGIN DIALOGUE---\n\n` : "";
 
-  // Ensure we don't exceed TTS limits (accounting for the added instructions)
-  const untruncatedLength = textPrompt.length;
-  if (textPrompt.length > 5000) textPrompt = textPrompt.substring(0, 5000);
-  if (untruncatedLength > 5000) {
-    reporter.log(
-      `Texto recortado al límite del TTS: ${formatCount(untruncatedLength)} → 5.000 caracteres`,
-      'warn'
-    );
-  }
+  // El perfil fonético se come entre 2196 y 3407 de los 5000 caracteres que
+  // acepta la API. Antes el texto se recortaba con `substring(0, 5000)` y un
+  // diálogo Largo perdía sus últimos turnos: el audio dejaba de decir lo que
+  // los ejercicios seguían preguntando. Aquí se reparte en peticiones.
+  const dialogueBudget = ttsDialogueBudget(accent);
+  const chunks = chunkDialogueLines(lines, joiner, dialogueBudget);
+  const totalChunks = chunks.length;
 
   reporter.finish(
     'prepare',
     `${plural(dialogue.length, 'turno', 'turnos')} · ${formatCount(spokenChars)} caracteres de habla · ` +
-      `${isMultiSpeaker ? 'dos voces' : 'una voz'} (${assignedVoices.join(', ')})`
+      `${isMultiSpeaker ? 'dos voces' : 'una voz'} (${assignedVoices.join(', ')})` +
+      (totalChunks > 1 ? ` · ${plural(totalChunks, 'petición', 'peticiones')}` : '')
   );
   reporter.log(`Modelo TTS: ${AUDIO_MODEL} · PCM ${TTS_SAMPLE_RATE / 1000} kHz 16 bits mono`, 'info');
+  if (totalChunks > 1) {
+    const motive = spokenChars > dialogueBudget
+      ? `no cabe en una petición (${formatCount(spokenChars)} caracteres de habla, presupuesto ` +
+        `${formatCount(dialogueBudget)} tras el perfil fonético)`
+      : `supera los ${TURNS_BEFORE_SPLITTING} turnos, así que se trocea también por velocidad`;
+    reporter.log(
+      `El diálogo ${motive}: ${totalChunks} tramos por frontera de turno, ${TTS_CONCURRENCY} en paralelo`,
+      'info'
+    );
+  }
 
   try {
-    console.log(`[TTS] Generating audio with ${isMultiSpeaker ? 'multi-speaker' : 'single-speaker'} config...`);
+    console.log(`[TTS] Generating audio with ${isMultiSpeaker ? 'multi-speaker' : 'single-speaker'} config in ${totalChunks} chunk(s)...`);
     reporter.start('synthesis');
 
-    const audioBytes = await synthesizeWithProgress(
-      ai,
-      {
-        model: AUDIO_MODEL,
-        contents: [{ parts: [{ text: textPrompt }] }],
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: speechConfig
-        }
-      },
-      {
-        onAudio: (totalBytes, chunkCount) => {
-          const seconds = totalBytes / TTS_BYTES_PER_SECOND;
-          reporter.update('synthesis', {
-            // Sin ratio a propósito: el servicio no informa de la duración
-            // total, así que se muestra lo recibido y no un porcentaje falso.
-            detail: `${formatSeconds(seconds)} de audio recibidos`,
-            counters: [
-              { label: 'Audio recibido', value: formatSeconds(seconds) },
-              { label: 'Datos', value: formatBytes(totalBytes) },
-              { label: 'Fragmentos', value: formatCount(chunkCount) }
-            ],
-            metrics: { audioBytes: totalBytes, audioSeconds: seconds, chunks: chunkCount }
-          });
-        },
-        onRetry: (attempt, received, reason) => {
-          reporter.log(
-            `Síntesis interrumpida tras ${formatBytes(received)} (intento ${attempt}): ${reason}`,
-            'warn'
-          );
-        },
-        onFallback: (reason) => {
-          reporter.log(`Streaming de audio no disponible (${reason}); se pide la pista completa`, 'warn');
-        }
+    // Los tramos llegan en paralelo: se acumula lo recibido por tramo y se
+    // reporta la suma. Con más de un tramo sí hay denominador real (peticiones
+    // completadas), así que ahí el paso deja de ser indeterminado.
+    const bytesPerChunk = new Array<number>(totalChunks).fill(0);
+    const streamPartsPerChunk = new Array<number>(totalChunks).fill(0);
+    let doneChunks = 0;
+
+    const publish = () => {
+      const totalBytes = bytesPerChunk.reduce((n, b) => n + b, 0);
+      const streamParts = streamPartsPerChunk.reduce((n, c) => n + c, 0);
+      const seconds = totalBytes / TTS_BYTES_PER_SECOND;
+      const counters = [
+        { label: 'Audio recibido', value: formatSeconds(seconds) },
+        { label: 'Datos', value: formatBytes(totalBytes) },
+        { label: 'Fragmentos', value: formatCount(streamParts) }
+      ];
+      if (totalChunks > 1) {
+        counters.push({ label: 'Tramos', value: `${formatCount(doneChunks)}/${formatCount(totalChunks)}` });
       }
-    );
+      reporter.update('synthesis', {
+        // Con un solo tramo no hay ratio a propósito: el servicio no informa de
+        // la duración total, así que se muestra lo recibido y no un porcentaje
+        // falso. Con varios, las peticiones terminadas sí son un denominador.
+        ratio: totalChunks > 1 ? doneChunks / totalChunks : undefined,
+        detail: totalChunks > 1
+          ? `${formatSeconds(seconds)} de audio recibidos · tramo ${Math.min(doneChunks + 1, totalChunks)} de ${totalChunks}`
+          : `${formatSeconds(seconds)} de audio recibidos`,
+        counters,
+        metrics: {
+          audioBytes: totalBytes,
+          audioSeconds: seconds,
+          chunks: streamParts,
+          ttsRequests: totalChunks,
+          ttsRequestsDone: doneChunks
+        }
+      });
+    };
+
+    const parts = await mapWithConcurrency(chunks, TTS_CONCURRENCY, async (chunkLines, index) => {
+      const continuation = index > 0
+        ? `(Continuación de la misma conversación; mantén exactamente las mismas voces, ritmo y acento.)\n\n`
+        : "";
+      const textPrompt = `${header}${continuation}${chunkLines.join(joiner)}`;
+
+      const bytes = await synthesizeWithProgress(
+        ai,
+        {
+          model: AUDIO_MODEL,
+          contents: [{ parts: [{ text: textPrompt }] }],
+          config: {
+            responseModalities: [Modality.AUDIO],
+            speechConfig: speechConfig
+          }
+        },
+        {
+          onAudio: (totalBytes, chunkCount) => {
+            bytesPerChunk[index] = totalBytes;
+            streamPartsPerChunk[index] = chunkCount;
+            publish();
+          },
+          onRetry: (attempt, received, reason) => {
+            reporter.log(
+              `Síntesis del tramo ${index + 1}/${totalChunks} interrumpida tras ${formatBytes(received)} ` +
+                `(intento ${attempt}): ${reason}`,
+              'warn'
+            );
+          },
+          onFallback: (reason) => {
+            reporter.log(
+              `Streaming de audio no disponible en el tramo ${index + 1}/${totalChunks} (${reason}); ` +
+                `se pide la pista completa`,
+              'warn'
+            );
+          }
+        }
+      );
+
+      doneChunks++;
+      publish();
+      return bytes;
+    });
 
     console.log('[TTS] Response received, checking for audio data...');
+
+    const audioBytes = concatPcmChunks(parts);
+    if (audioBytes.length === 0) {
+      throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
+    }
 
     const totalSeconds = audioBytes.length / TTS_BYTES_PER_SECOND;
     reporter.finish(
       'synthesis',
-      `${formatSeconds(totalSeconds)} de audio · ${formatBytes(audioBytes.length)}`
+      `${formatSeconds(totalSeconds)} de audio · ${formatBytes(audioBytes.length)}` +
+        (totalChunks > 1 ? ` · ${plural(totalChunks, 'tramo unido', 'tramos unidos')}` : '')
     );
 
     reporter.start('encode');

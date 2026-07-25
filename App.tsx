@@ -4,6 +4,7 @@ import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, Ap
 import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
 import { generateLessonPlan, generateAudio } from './services/geminiService';
 import { ProgressSnapshot } from './services/generationProgress';
+import { forgetLesson, isCacheable, lessonCacheKey, readLesson, writeLesson } from './services/lessonCache';
 import AudioPlayer from './components/AudioPlayer';
 import ExerciseCard from './components/ExerciseCard';
 import LoadingScreen from './components/LoadingScreen';
@@ -11,7 +12,7 @@ import AuthScreen from './components/AuthScreen';
 import SelectInput from './components/SelectInput';
 import MatrixSelector from './components/MatrixSelector';
 import { SCENARIO_DATABASE, ScenarioContext, ScenarioAction } from './data/scenarios';
-import { ArrowRight, AlertTriangle, BookOpen, Mic2, Layout, Search, Key } from 'lucide-react';
+import { ArrowRight, AlertTriangle, BookOpen, Mic2, Layout, Search, Key, RefreshCw } from 'lucide-react';
 
 const LEVELS = Object.values(Level);
 const LENGTHS = Object.values(Length);
@@ -132,6 +133,8 @@ const App: React.FC = () => {
     // en una de comprensión lectora.
     const [activeTab, setActiveTab] = useState<'exercises' | 'transcript'>('exercises');
     const [audioError, setAudioError] = useState<string | null>(null);
+    /** Clave de caché de la lección en pantalla (null si el modo no se cachea). */
+    const [currentCacheKey, setCurrentCacheKey] = useState<string | null>(null);
 
     // Progreso medido de la generación (lo reportan los propios servicios).
     const [progress, setProgress] = useState<ProgressSnapshot | null>(null);
@@ -206,7 +209,7 @@ const App: React.FC = () => {
         if (isCustomMode) setIsCustomMode(false);
     }, [state.config.level, state.config.textType, isCustomMode]);
 
-    const handleGenerate = async () => {
+    const handleGenerate = async (options?: { skipCache?: boolean }) => {
         setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null }));
         setAudioError(null);
         setProgress(null);
@@ -236,7 +239,35 @@ const App: React.FC = () => {
             return;
         }
 
+        const cacheParts = {
+            mode: state.config.mode,
+            level: state.config.level,
+            topic: finalTopic,
+            length: state.config.length,
+            textType: state.config.textType,
+            accent: state.config.accent
+        };
+        const cacheKey = lessonCacheKey(cacheParts);
+        const cacheable = isCacheable(cacheParts);
+        setCurrentCacheKey(cacheable ? cacheKey : null);
+
         try {
+            // Misma configuración = misma lección (el diálogo se pide con
+            // temperature 0). Si ya se generó, no se vuelve a pagar el pipeline.
+            if (cacheable && !options?.skipCache) {
+                const cached = await readLesson(cacheKey);
+                if (cached) {
+                    setState(prev => ({
+                        ...prev,
+                        config: { ...prev.config, topic: finalTopic },
+                        lessonPlan: cached.plan,
+                        audioBlob: cached.audio,
+                        status: 'ready'
+                    }));
+                    return;
+                }
+            }
+
             const plan = await generateLessonPlan(
                 state.config.level,
                 finalTopic,
@@ -266,6 +297,9 @@ const App: React.FC = () => {
                     audioBlob: audioUrl,
                     status: 'ready'
                 }));
+                // Solo se guarda la lección completa: una sin audio no ahorra
+                // nada al recuperarla, porque habría que volver al TTS igual.
+                if (cacheable) void writeLesson(cacheKey, plan, audioUrl);
             } catch (audioErr: any) {
                 console.warn("Audio generation failed:", audioErr);
                 setAudioError(audioErr.message || "Fallo en la generación de audio");
@@ -286,6 +320,12 @@ const App: React.FC = () => {
         }
     };
 
+    /** Descarta la versión cacheada y vuelve a generar la misma configuración. */
+    const handleRegenerate = async () => {
+        if (currentCacheKey) await forgetLesson(currentCacheKey);
+        void handleGenerate({ skipCache: true });
+    };
+
     const resetApp = () => {
         setState(prev => ({
             ...prev,
@@ -296,6 +336,7 @@ const App: React.FC = () => {
         }));
         setAudioError(null);
         setActiveTab('exercises');
+        setCurrentCacheKey(null);
     };
 
     const getAmbienceContext = () => {
@@ -489,7 +530,7 @@ const App: React.FC = () => {
                         </div>
 
                         <button
-                            onClick={handleGenerate}
+                            onClick={() => void handleGenerate()}
                             className="w-full py-8 bg-white text-black font-display text-2xl uppercase font-bold tracking-tight hover:bg-zinc-300 transition-colors flex items-center justify-center gap-4 group"
                         >
                             {state.config.mode === AppMode.AccentChallenge ? 'Iniciar Reto' : 'Generar Lección'}
@@ -510,7 +551,17 @@ const App: React.FC = () => {
                     <div className="w-2 h-2 bg-white"></div>
                     <span className="font-display font-bold uppercase tracking-tight text-2xl cursor-pointer" onClick={resetApp}>Escucha<span className="text-zinc-600">LAB</span></span>
                 </div>
-                <div className="flex gap-6 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                <div className="flex items-center gap-6 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                    {currentCacheKey && (
+                        <button
+                            onClick={() => void handleRegenerate()}
+                            title="Genera una lección nueva para esta misma configuración"
+                            className="flex items-center gap-2 border border-zinc-800 px-2 py-1 transition-colors hover:border-white hover:text-white"
+                        >
+                            <RefreshCw size={11} />
+                            <span className="hidden sm:inline">Regenerar</span>
+                        </button>
+                    )}
                     <span className="hidden sm:inline">NIV: {state.config.level.split(' ')[0]}</span>
                     {state.config.mode !== AppMode.AccentChallenge && (
                         <span className="hidden sm:inline">MOD: {state.config.accent.split(' ')[0]}</span>
