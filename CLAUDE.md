@@ -60,10 +60,11 @@ The app uses a single `AppState` object managed in `App.tsx` with the following 
 - **AccentChallenge**: Two speakers from random different regions; user guesses origins
 
 ### Level System (Level enum)
-- **Intro (A0)**: Uses "keyword spotting" approach - natural speed dialogue with mandatory data points (phone numbers, times, spelled names)
-- **Beginner (A1-A2)**: Simple recall and definition matching
-- **Intermediate (B1-B2)**: Inference and synonym exercises
-- **Advanced (C1)**: Nuance, irony, slang, and register exercises
+Levels differ in the *listening sub-skills* they train, not just in exercise difficulty. What each level can and cannot be asked is declared in `data/listeningSyllabus.ts` (see Exercise System below).
+- **Intro (A0)**: Natural-speed native audio; the learner decodes *data*, not clauses. Number/letter/time discrimination, minimal-pair contrasts, word spotting. No turn-ordering, no matching, no inference, no register judgements.
+- **Beginner (A1-A2)**: Topic and outcome of the exchange, sequence of actions, attribution to concrete *roles* (client/clerk — never abstract "formal/informal", which is B1+), frequent lexis and routine formulae.
+- **Intermediate (B1-B2)**: Bridging inference, fact vs. opinion, problem↔solution, graded attitude, lexical precision and collocation. Introduces V/F/NOT GIVEN to penalise over-inference.
+- **Advanced (C1)**: Implicature, irony, subtext, rhetorical organisation, hedging, diaphasic/diastratic variation.
 
 ### Scenario Database (`data/scenarios.ts`)
 - Hierarchical structure: `Level → ScenarioContext (Locus) → ScenarioAction (Modus)`
@@ -101,19 +102,34 @@ A hybrid, fully self-contained system — no external API calls, no CORS/rate-li
 - Real-time ducking (lowers ambience under speech) and light reverb/delay tied to the dialogue audio are also handled in `AudioPlayer.tsx`, via an `AnalyserNode` on the speech track and a `duckGain` node wrapping the whole ambience mix.
 
 ### Exercise System
-Five exercise types in `types.ts`:
-- **multiple_choice**: Standard MCQ with options array
-- **true_false**: Binary or list-based T/F statements
-- **ordering**: Sequence arrangement (correctAnswer is string[])
-- **classification**: Row-column matching (correctAnswer is Record<string, string>)
-- **cloze**: Fill-in-the-blank with gap options
 
-Validation logic in `geminiService.ts` ensures proper structure before rendering.
+The exercise system is organised around a **listening syllabus**, not around rendering widgets. The unit of design is the pair *(listening stage × listening skill)*; the format is only the mechanic used to answer. Hard rule everywhere: **no written or spoken production** — everything is resolved by selecting, ordering, classifying or picking from a dropdown.
+
+**Three axes (`types.ts`)**
+- `ListeningStage`: `anticipacion` → `global` → `selectiva` → `intensiva` → `reflexion`. This is the order the UI renders.
+- `ListeningSkill`: 14 sub-skills (`decodificacion`, `segmentacion`, `reconocimiento_lexico`, `dato_literal`, `idea_global`, `estructura`, `rol_fuente`, `inferencia`, `actitud_postura`, `pragmatica_registro`, `lexico_significado`, `colocacion_formula`, `variacion_dialectal`, `estrategia`).
+- `ExerciseType`: 12 formats — the original five (`multiple_choice`, `true_false`, `ordering`, `classification`, `cloze`) plus `true_false_notgiven`, `matching` (bijective), `scale` (ordinal axis), `data_capture` (form with near-identical dropdowns), `minimal_pairs`, `spot_the_difference` (dictation without typing) and `chunk_order` (rebuild one sentence from breath groups).
+
+`LessonPlan.exercises` is a **flat `Exercise[]`** ordered by stage. Each `Exercise` carries `stage`, `skill`, `slotId` and `sourceTurns` (dialogue indices, revealed in the feedback panel).
+
+**`data/listeningSyllabus.ts` — the pedagogical source of truth**
+- `FORMAT_RULES[format]`: allowed levels and text types, the exact JSON shape shown to the model, and the authoring rules. Level gating applies **only** to formats whose mechanic itself carries the cognitive load (`ordering`, `matching`, `scale`, `true_false_notgiven`, `spot_the_difference`, `chunk_order`). For the rest the widget is neutral and the difficulty lives entirely in the slot's `brief`.
+- `getBlueprint(level, textType, mode)`: composes level templates → resolves each `brief` for the text type → filters structurally. **`textType` genuinely matters**: a radio bulletin (one speaker) never gets "who says it", a monologue gets real-chronology vs. narration order, a podcast gets question↔answer matching, news gets inverted-pyramid ordering and source attribution.
+- Mode overrides: `Vocabulary` now scales by level (A0 sound recognition → C1 nuance and connotation); `AccentChallenge` teaches the cues (minimal pairs on the discriminating feature → lexis by speaker) before asking for the country.
+
+**Generation pipeline (`services/geminiService.ts`)**
+1. `buildExercisePrompt(blueprint)` generates the `EXERCISES:` block from the slots — there is no hand-written prose per level any more.
+2. `verifyExercises(raw, dialogue)` (`services/exerciseVerification.ts`) checks both internal coherence (keys point to existing ids, matchings are bijections, orderings are permutations, no degenerate items) **and fidelity to the audio** (cloze targets, chunk reconstructions and captured data must actually be said; tokens marked as altered must not appear in the source turn). Anything that fails is dropped — never shown with a false key.
+3. `fillMissingSlots(verified, blueprint, dialogue)` (`services/exerciseEngines.ts`) fills empty slots with deterministic engines, **in the slot's position**, and everything it builds goes through the same verifier.
+
+**Deterministic engines** exist only where a provably correct exercise can be derived from the transcript. There is deliberately **no `ordering` or `matching` engine**: both need paraphrase, and an automatic paraphrase cannot be verified. Distractors are **phonetic neighbours** of words that are actually said (see `MINIMAL_PAIR_BANK`), never topic-related words, which would be discardable by plausibility without listening. Contrasts neutralised in most varieties (b/v, ll/y, silent h, and c/z~s under seseo) are excluded on purpose.
+
+**Never** show learners the normalised form of a word: `normalizeText()` in `services/textUtils.ts` is for comparison only. Display always keeps real orthography, accents and capitals included.
 
 ### Component Structure
 - `App.tsx`: Main orchestrator (580 lines) - handles all state and screen rendering
 - `AudioPlayer.tsx`: Integrated audio playback with bundled ambient bed + synthetic event mixing (see Ambient Sound System above)
-- `ExerciseCard.tsx`: Polymorphic exercise renderer based on type
+- `ExerciseCard.tsx`: Polymorphic renderer for the 12 formats; shows the skill badge, and on submit reveals the `sourceTurns` lines as proof of the key
 - `MatrixSelector.tsx`: Locus × Modus grid interface for Standard mode
 - `AuthScreen.tsx`: API key entry with localStorage persistence
 - `LoadingScreen.tsx`: Status-aware loading states
@@ -158,11 +174,14 @@ The Intro (A0) level uses a unique "realistic immersion" approach:
 2. Create profile in `DIALECT_PROFILES` (geminiService.ts) with grammar/pragmatics/lexicon
 3. Update AudioPlayer topic mapping if region-specific ambient sounds needed
 
-### Adding a New Exercise Type
-1. Add type to `Exercise` interface in `types.ts`
-2. Implement validation in `isValidExercise()` (geminiService.ts)
-3. Add rendering logic in `ExerciseCard.tsx`
-4. Update exercise generation instructions in `getExerciseInstructions()`
+### Adding a New Exercise Format
+1. Add the value to `ExerciseType` in `types.ts` (plus any format-specific field).
+2. Add an entry to `FORMAT_RULES` in `data/listeningSyllabus.ts` with its allowed levels, allowed text types, exact `jsonShape` and authoring `guidance`. Gate by level only if the *mechanic* carries the cognitive load.
+3. Add a `verify…()` branch in `services/exerciseVerification.ts` — a format with no verification can reach the learner with a wrong key.
+4. Add id mapping in `services/exerciseNormalization.ts` (models return texts where the schema wants ids).
+5. Add the renderer plus the `isCorrect()`/`canSubmit()` branches in `components/ExerciseCard.tsx`, and a label in `FORMAT_LABELS`.
+6. Reference it from the level/mode blueprints, and optionally add a deterministic engine in `services/exerciseEngines.ts` — only if the exercise can be *proved* correct against the transcript.
+7. Run `npm test`.
 
 ### Modifying Scenario Database
 Edit `data/scenarios.ts`:
@@ -181,15 +200,22 @@ Models defined as constants in `geminiService.ts`:
 - **Audio Sanitization**: TTS will reject text with stage directions - always sanitize before sending
 - **Speaker Mapping**: TTS requires consistent internal speaker IDs; use "SpeakerA"/"SpeakerB" mapping for robustness
 - **Ambient Beds Are Bundled Assets**: `public/ambience/*.wav` ship with the app; there is no external ambient-audio API call, so there's nothing to rate-limit or fail at runtime. Regenerate/retune them with `node scripts/generate-ambience-beds.mjs`.
-- **Exercise Validation**: Always validate exercise structure before rendering to prevent UI crashes
+- **Answer keys are verified, not trusted**: every exercise (model-generated *and* engine-generated) goes through `verifyExercise()` before rendering. It checks internal coherence and fidelity to the transcript. Prefer shipping one exercise fewer over one that teaches something false.
+- **Never display normalised text**: accent-stripped, lowercased forms are for comparison only. Options shown to learners keep their real spelling.
+- **Distractors must require listening**: phonetic neighbours of words actually said, never topic-adjacent words (those get discarded by plausibility) and never options that are ungrammatical in context (those get discarded by reading).
 - **Accent Consistency**: In Standard/Vocabulary modes, both speakers use same accent; only AccentChallenge uses mixed accents
 
 ## Testing Approach
 
-No formal test suite currently exists. Manual testing checklist:
-1. Test all three modes (Standard, Vocabulary, AccentChallenge)
-2. Verify all levels (A0, A1-A2, B1-B2, C1) generate appropriate content
-3. Check audio generation with different accent/gender combinations
-4. Validate exercise rendering for all five types
-5. Test localStorage persistence across page refreshes
-6. Verify error handling for invalid API keys and generation failures
+Automated checks (no API key or network needed) — run all with `npm test`:
+- `npm run typecheck` — `tsc --noEmit`.
+- `npm run check:syllabus` — walks `getBlueprint()` across the 42 valid level × text-type × mode combinations and asserts the pedagogical invariants: no format outside its level or text-type range, nothing presupposing two speakers in single-voice audio, A0 free of ordering/matching/scale/V-F-NG/spot-the-difference, C1 free of basic decoding formats, every lesson covering at least two stages and three distinct skills, stage order preserved, unique slot ids, existing engine fallbacks, and Vocabulary/text-type variants genuinely differing from one another.
+- `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text.
+
+Manual checklist (needs an API key):
+1. All three modes (Standard, Vocabulary, AccentChallenge).
+2. All four levels generate stage-appropriate content.
+3. A RadioNews and a Monologue lesson: confirm zero two-speaker exercises.
+4. Vocabulary at A0 vs. C1: confirm they are no longer identical.
+5. Rendering and submit/feedback for the newer formats (`data_capture`, `minimal_pairs`, `spot_the_difference`, `matching`, `scale`, `true_false_notgiven`, `chunk_order`), including the `sourceTurns` reveal.
+6. Audio generation across accent/gender combinations; localStorage persistence; error handling for invalid keys.

@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { AppState, Level, Length, TextType, Accent, AppMode } from './types';
+import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode } from './types';
+import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
 import { generateLessonPlan, generateAudio } from './services/geminiService';
 import AudioPlayer from './components/AudioPlayer';
 import ExerciseCard from './components/ExerciseCard';
@@ -125,8 +126,36 @@ const App: React.FC = () => {
     // Dedicated Input for Vocabulary Mode
     const [vocabTopic, setVocabTopic] = useState('');
 
-    const [activeTab, setActiveTab] = useState<'transcript' | 'comprehension' | 'vocabulary'>('transcript');
+    // La lección se abre por los ejercicios, no por la transcripción: leer el
+    // texto antes de escuchar convierte cualquier tarea de comprensión auditiva
+    // en una de comprensión lectora.
+    const [activeTab, setActiveTab] = useState<'exercises' | 'transcript'>('exercises');
     const [audioError, setAudioError] = useState<string | null>(null);
+
+    /**
+     * Ejercicios agrupados por etapa de escucha, en el orden metodológico
+     * (anticipación → global → selectiva → intensiva → reflexión). Los que
+     * llegan sin etapa se muestran al final, en "Detalle".
+     */
+    const stagedExercises = useMemo(() => {
+        const exercises: Exercise[] = state.lessonPlan?.exercises || [];
+        const byStage = new Map<ListeningStage, Exercise[]>();
+
+        for (const ex of exercises) {
+            const stage: ListeningStage = ex.stage && STAGE_ORDER.includes(ex.stage) ? ex.stage : 'selectiva';
+            const bucket = byStage.get(stage) || [];
+            bucket.push(ex);
+            byStage.set(stage, bucket);
+        }
+
+        return STAGE_ORDER
+            .filter(stage => (byStage.get(stage) || []).length > 0)
+            .map((stage, i) => ({ stage, items: byStage.get(stage) || [], position: i + 1 }));
+    }, [state.lessonPlan]);
+
+    // La etapa de anticipación se responde ANTES de reproducir; el resto pierde
+    // sentido si se lee la transcripción primero.
+    const hasAnticipationStage = stagedExercises.some(g => g.stage === 'anticipacion');
 
     // --- EFFECT: COERCE INVALID LEVEL FOR NARRATIVE FORMATS ---
     // Podcast/Monólogo no tienen A0: si el usuario cambia a esos formatos estando en A0,
@@ -248,7 +277,7 @@ const App: React.FC = () => {
             error: null
         }));
         setAudioError(null);
-        setActiveTab('transcript');
+        setActiveTab('exercises');
     };
 
     const getAmbienceContext = () => {
@@ -528,9 +557,8 @@ const App: React.FC = () => {
                     {/* Custom Tabs */}
                     <div className="flex border-b border-zinc-800 flex-shrink-0 bg-black">
                         {[
-                            { id: 'transcript', label: 'Transcripción' },
-                            { id: 'comprehension', label: 'Comprensión' },
-                            { id: 'vocabulary', label: 'Vocabulario' }
+                            { id: 'exercises', label: 'Ejercicios' },
+                            { id: 'transcript', label: 'Transcripción' }
                         ].map((tab) => (
                             <button
                                 key={tab.id}
@@ -551,6 +579,15 @@ const App: React.FC = () => {
                         {/* TRANSCRIPT VIEW */}
                         {activeTab === 'transcript' && (
                             <div className="max-w-2xl mx-auto space-y-8 pb-20">
+                                <div className="flex items-start gap-3 border border-amber-900/60 bg-amber-950/20 p-4">
+                                    <AlertTriangle size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                                    <p className="font-mono text-[11px] leading-relaxed text-amber-200/80 uppercase tracking-wide">
+                                        La transcripción es material de apoyo para el final.
+                                        {hasAnticipationStage && ' Empezá por «Antes de escuchar».'} Si la leés
+                                        antes de trabajar el audio, los ejercicios pasan a medir comprensión
+                                        lectora y no auditiva.
+                                    </p>
+                                </div>
                                 {state.lessonPlan?.dialogue?.map((line, idx) => (
                                     <div key={idx} className="grid grid-cols-[60px_1fr] gap-4 group">
                                         <div className="font-mono text-xs text-zinc-500 pt-1 text-right uppercase">
@@ -571,28 +608,38 @@ const App: React.FC = () => {
                             </div>
                         )}
 
-                        {/* COMPREHENSION VIEW */}
-                        {activeTab === 'comprehension' && (
+                        {/* EXERCISES VIEW — recorrido por etapas de escucha */}
+                        {activeTab === 'exercises' && (
                             <div className="max-w-3xl mx-auto pb-20">
-                                <div className="mb-12 border-b border-zinc-800 pb-4">
-                                    <h3 className="font-display text-2xl uppercase font-bold text-white">Módulo de Análisis</h3>
-                                    <p className="font-mono text-xs text-zinc-500 mt-2">Evalúa tu comprensión basada en el audio.</p>
-                                </div>
-                                {state.lessonPlan?.exercises?.comprehension?.map((ex, idx) => (
-                                    <ExerciseCard key={ex.id || idx} exercise={ex} index={idx} />
-                                ))}
-                            </div>
-                        )}
-
-                        {/* VOCABULARY VIEW */}
-                        {activeTab === 'vocabulary' && (
-                            <div className="max-w-3xl mx-auto pb-20">
-                                <div className="mb-12 border-b border-zinc-800 pb-4">
-                                    <h3 className="font-display text-2xl uppercase font-bold text-white">Módulo de Léxico</h3>
-                                    <p className="font-mono text-xs text-zinc-500 mt-2">Adquisición de vocabulario en contexto.</p>
-                                </div>
-                                {state.lessonPlan?.exercises?.vocabulary?.map((ex, idx) => (
-                                    <ExerciseCard key={ex.id || idx} exercise={ex} index={idx} />
+                                {stagedExercises.length === 0 && (
+                                    <p className="font-mono text-xs text-zinc-500">
+                                        No se pudo construir ningún ejercicio verificable para este audio.
+                                    </p>
+                                )}
+                                {stagedExercises.map(group => (
+                                    <section key={group.stage} className="mb-16">
+                                        <div className="mb-10 border-b border-zinc-800 pb-4">
+                                            <div className="flex items-baseline gap-3 flex-wrap">
+                                                <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-600">
+                                                    {String(group.position).padStart(2, '0')}
+                                                </span>
+                                                <h3 className="font-display text-2xl uppercase font-bold text-white">
+                                                    {STAGE_META[group.stage].label}
+                                                </h3>
+                                            </div>
+                                            <p className="font-mono text-xs text-zinc-500 mt-2 leading-relaxed">
+                                                {STAGE_META[group.stage].hint}
+                                            </p>
+                                        </div>
+                                        {group.items.map((ex, idx) => (
+                                            <ExerciseCard
+                                                key={ex.id || `${group.stage}_${idx}`}
+                                                exercise={ex}
+                                                index={idx}
+                                                dialogue={state.lessonPlan?.dialogue}
+                                            />
+                                        ))}
+                                    </section>
                                 ))}
                             </div>
                         )}
