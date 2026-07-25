@@ -421,8 +421,11 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
                                   const isCorrectCell = isSubmitted && correctMap[row.id] === col.id;
                                   const isWrongSelection = isSubmitted && isSelected && correctMap[row.id] !== col.id;
 
-                                  let ringClass = "border-zinc-700";
+                                  // Anillo bien visible incluso sin marcar: un gris demasiado
+                                  // oscuro dejaba la casilla marcada y la vacía indistinguibles.
+                                  let ringClass = "border-zinc-600";
                                   let dotClass = "bg-transparent scale-0";
+                                  let cellClass = "";
 
                                   if (isSubmitted) {
                                       if (isCorrectCell) {
@@ -432,17 +435,21 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
                                           ringClass = "border-red-500 bg-red-500/20";
                                           dotClass = "bg-red-500 scale-100";
                                       } else if (isSelected) {
-                                          ringClass = "border-zinc-700 opacity-50"; 
+                                          ringClass = "border-zinc-700 opacity-50";
                                       }
                                   } else if (isSelected) {
-                                      ringClass = "border-white bg-white";
+                                      // Marca fuerte: el círculo se rellena de blanco (no solo el
+                                      // borde) y además se tiñe toda la celda, para que la opción
+                                      // marcada no dependa de distinguir un anillo de 20px.
+                                      ringClass = "border-white bg-white border-2";
                                       dotClass = "bg-black scale-100";
+                                      cellClass = "bg-white/[0.06]";
                                   }
 
                                   return (
-                                      <td key={col.id} className="py-4 px-2 text-center border-b border-zinc-800/50 cursor-pointer" onClick={() => !isSubmitted && setAnswersMap(prev => ({...prev, [row.id]: col.id}))}>
-                                          <div className={`w-5 h-5 mx-auto border rounded-full flex items-center justify-center transition-all duration-200 ${ringClass} ${!isSubmitted && !isSelected && 'group-hover:border-zinc-500'}`}>
-                                              <div className={`w-2 h-2 rounded-full transition-transform duration-200 ${dotClass}`}></div>
+                                      <td key={col.id} className={`py-4 px-2 text-center border-b border-zinc-800/50 cursor-pointer transition-colors duration-200 ${cellClass}`} onClick={() => !isSubmitted && setAnswersMap(prev => ({...prev, [row.id]: col.id}))}>
+                                          <div className={`w-6 h-6 mx-auto border rounded-full flex items-center justify-center transition-all duration-200 ${ringClass} ${!isSubmitted && !isSelected && 'group-hover:border-zinc-400'}`}>
+                                              <div className={`w-2.5 h-2.5 rounded-full transition-transform duration-200 ${dotClass}`}></div>
                                           </div>
                                       </td>
                                   )
