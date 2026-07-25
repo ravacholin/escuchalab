@@ -42,17 +42,21 @@ npm run preview
 The app uses a single `AppState` object managed in `App.tsx` with the following flow:
 1. **auth** - API key entry screen
 2. **idle** - Configuration screen (landing page)
-3. **generating_plan** - AI generating lesson content
-4. **generating_audio** - TTS generating audio
-5. **ready** - Main lesson interface with audio player and exercises
-6. **error** - Error display screen
+3. **generating_plan** - the dialogue is being written. This is the *only* blocking wait.
+4. **ready** - Main lesson interface. Exercises and audio may still be arriving; `exercisesPending`, `audioPending` and `audioProgress` track that.
+5. **error** - Error display screen
 
 ### Core Data Flow
+Generation is **staged and overlapped**, not sequential. The whole lesson used to come out of one JSON response and only then went to the TTS, so the learner waited for `plan + audio` behind a spinner (~57 s measured at B1-B2 / `Largo`). Now:
 1. User configures lesson parameters (level, mode, topic, accent, length, format)
-2. `generateLessonPlan()` in `geminiService.ts` creates structured lesson content
-3. `generateAudio()` converts dialogue to speech with appropriate voice profiles
+2. `generateDialogue()` streams back **only the dialogue** and its metadata (~6-10 s). The lesson opens here.
+3. With the dialogue in hand, two calls run **in parallel**: `generateExercises()` (which now sees the literal transcript with turn indices, so `cloze`/`chunk_order`/`spot_the_difference` targets match what is actually said) and `generateAudio()`.
 4. AudioPlayer resolves an `AmbiencePreset` (`services/ambiencePresets.ts`) from the scenario/topic and layers a bundled ambient bed with live synthetic events
 5. User interacts with transcript, comprehension, and vocabulary tabs
+
+`generateLessonPlan()` still exists as a thin sequential wrapper for callers that just want the finished plan; the app itself does not use it.
+
+**Pedagogical gating while things load.** Showing the lesson early must not turn it into a reading exercise: the **Transcripción** tab and every exercise stage after `anticipacion` stay locked until the audio exists (`transcriptLocked` in `App.tsx`). Only the pre-listening `anticipacion` stage is answerable early — which is exactly what that stage is for. If the audio *fails*, the lock is released, since the transcript is then all that is left.
 
 ### App Modes (AppMode enum)
 - **Standard**: Scenario-based dialogues using matrix selector (Locus × Modus)
@@ -84,11 +88,12 @@ Key implementation notes:
 - Multi-speaker TTS uses internal "SpeakerA"/"SpeakerB" mapping for API robustness
 
 ### Audio Generation
-- Uses `gemini-2.5-flash-preview-tts` model
+- Uses the `AUDIO_MODEL` constant (`gemini-3.1-flash-tts-preview`)
 - Sanitizes text to remove stage directions (*, [], ()) before TTS
-- Multi-speaker config with voice assignment based on character gender
-- Returns base64-encoded audio data
+- Multi-speaker config with voice assignment based on character gender, computed **once** over the whole dialogue and reused for every chunk
+- Returns **raw PCM bytes** (`Uint8Array`, 24 kHz / mono / 16-bit). The base64 → bytes decode happens in the service; `AudioPlayer.pcmToWavBlob()` only prepends the 44-byte RIFF header
 - Error handling for "non-audio response" rejections
+- **Chunked at turn boundaries** (`chunkDialogueLines`): the phonetic profile prepended to every request eats 2196-3407 of the 5000-character budget, and the old code just did `substring(0, 5000)` — a `Largo` dialogue in Buenos Aires or Lima silently lost its last turns mid-sentence while the exercises kept asking about them. `ttsDialogueBudget(accent)` computes what is actually left, and no turn is ever dropped. Chunks are also used for speed above `TURNS_BEFORE_SPLITTING` turns, generated with `TTS_CONCURRENCY = 2` (three in parallel gets 429/503 from the API) and concatenated with a 5 ms fade at each seam. **Each chunk is one more request against the TTS quota**, so short lessons deliberately stay in a single call.
 
 ### Ambient Sound System
 A hybrid, fully self-contained system — no external API calls, no CORS/rate-limit/key-exposure risk in production:
@@ -136,7 +141,7 @@ At A0 and A1-A2 the topic decides which concrete datum the dialogue *must* conta
 - `ExerciseCard.tsx`: Polymorphic renderer for the 12 formats; shows the skill badge, and on submit reveals the `sourceTurns` lines as proof of the key
 - `MatrixSelector.tsx`: Locus × Modus grid interface for Standard mode
 - `AuthScreen.tsx`: API key entry with localStorage persistence
-- `LoadingScreen.tsx`: Status-aware loading states
+- `LoadingScreen.tsx`: covers only the dialogue call, with **real** progress — it counts turns as they stream in (`generateContentStream`, first token at ~0.8 s) instead of animating a scripted `setTimeout` timeline that hit 100 % after 8 s and then sat there
 - `SelectInput.tsx`: Styled select dropdown component
 
 ## Key Implementation Details
@@ -159,6 +164,7 @@ The Intro (A0) level uses a unique "realistic immersion" approach:
 - Retry logic with exponential backoff (3 attempts, 1s → 2s delay)
 
 ### Persistence Strategy
+- Generated lessons are cached in **IndexedDB** (`services/lessonCache.ts`), keyed by `{mode, level, textType, accent, length, topic}`, LRU-capped at 20 entries. The dialogue is requested with `temperature: 0.0`, so repeating a configuration used to re-pay the whole pipeline for essentially the same lesson. `AppMode.AccentChallenge` is **never** cached — it draws two random accents per run, so its key does not describe its contents. A «Regenerar» button in the header invalidates the entry and forces a fresh lesson.
 - API key stored in localStorage for session continuity
 - Lazy initialization in `useState` prevents auth screen flash
 - Storage event listener detects cross-tab key changes
@@ -193,6 +199,17 @@ Edit `data/scenarios.ts`:
 - Each `ScenarioAction` has `label`, `value` (specific situation), `icon`
 - Icons imported from `lucide-react`
 
+### Latency Budget
+Measured against the real API (B1-B2, `Largo`, Argentina) before/after the staged pipeline:
+
+| Step | Before | After |
+|---|---|---|
+| Text generation | 25 s (one call: think 3000 tok + out 3532 tok) | ~6-10 s for the dialogue; exercises overlap the TTS |
+| TTS | ~31 s (one call, 82 s of audio) | ~16 s when the dialogue is chunked in two |
+| Lesson visible / audio playable | 57 s / 57 s | ~10 s / ~25-30 s |
+
+The levers, in order of impact: (1) not waiting for the audio to show the lesson, (2) splitting dialogue from exercises so the TTS starts ~15 s earlier, (3) `thinkingConfig: { thinkingLevel: LOW }` on both text calls — the default budget was spending ~3000 thinking tokens before emitting the first brace, (4) parallel TTS chunks. `withRetry` is now status-aware (a 400/401/403 fails immediately instead of costing three round-trips) and honours the `retryDelay` the API returns on 429.
+
 ### Adjusting Gemini Models
 Models defined as constants in `geminiService.ts`:
 - `GENERATION_MODEL`: Currently `"gemini-3.6-flash"` (stable, faster/cheaper than 2.5-flash; fallback: `"gemini-2.5-flash"`)
@@ -200,7 +217,7 @@ Models defined as constants in `geminiService.ts`:
 
 ## Important Notes
 
-- **API Key Security**: Keys stored in localStorage and injected via Vite config; never commit `.env.local`
+- **API Key Security**: Keys stored in localStorage and injected via Vite config; never commit `.env.local`. Format validation lives in `services/apiKey.ts` and accepts both prefixes Google AI Studio issues (`AIza…` and the newer `AQ.…`)
 - **Audio Sanitization**: TTS will reject text with stage directions - always sanitize before sending
 - **Speaker Mapping**: TTS requires consistent internal speaker IDs; use "SpeakerA"/"SpeakerB" mapping for robustness
 - **Ambient Beds Are Bundled Assets**: `public/ambience/*.wav` ship with the app; there is no external ambient-audio API call, so there's nothing to rate-limit or fail at runtime. Regenerate/retune them with `node scripts/generate-ambience-beds.mjs`.
@@ -213,6 +230,7 @@ Models defined as constants in `geminiService.ts`:
 
 Automated checks (no API key or network needed) — run all with `npm test`:
 - `npm run typecheck` — `tsc --noEmit`.
+- `npm run check:audio` — asserts the TTS chunking never exceeds the per-accent character budget, never loses a turn (the `substring(0, 5000)` bug), keeps short dialogues in a single request, splits an oversized single turn by sentence instead of truncating it, and that the PCM concatenation preserves every sample while fading only the seam.
 - `npm run check:syllabus` — walks `getBlueprint()` across the 42 valid level × text-type × mode combinations and asserts the pedagogical invariants: the per-level exercise budget, no format outside its level or text-type range, nothing presupposing two speakers in single-voice audio, A0 free of ordering/matching/scale/V-F-NG/spot-the-difference, C1 free of basic decoding formats, every lesson covering at least two stages and three distinct skills, stage order preserved, unique slot ids, existing engine fallbacks, and Vocabulary/text-type variants genuinely differing from one another.
 - `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text. It also pins the dictated-datum path: a phone said in words and a phone said as `654 32 18` must both yield one `Teléfono` field, and focused minimal pairs must contrast the digits rather than the greeting.
 

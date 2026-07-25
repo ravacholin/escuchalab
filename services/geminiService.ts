@@ -1,14 +1,15 @@
 
-import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
-import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from "../types";
+import { GoogleGenAI, GenerateContentResponse, Modality, ThinkingLevel } from "@google/genai";
+import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode, Exercise, DialogueLine } from "../types";
 import { ExerciseSlot, FORMAT_RULES, getBlueprint, STAGE_META } from "../data/listeningSyllabus";
 import { DATA_POINTS, inferDataPoint } from "../data/dataPoints";
 import { fillMissingSlots } from "./exerciseEngines";
 import { verifyExercises } from "./exerciseVerification";
+import { API_KEY_STORAGE } from "./apiKey";
 
 // Helper to get key from storage
 const getApiKey = (): string => {
-  const key = localStorage.getItem('gemini_api_key');
+  const key = localStorage.getItem(API_KEY_STORAGE);
   if (!key) throw new Error("API Key no encontrada. Por favor, reinicia la app e ingrésala.");
   return key;
 };
@@ -28,13 +29,52 @@ const getAi = () => {
   return aiInstance;
 };
 
+// El razonamiento por defecto de gemini-3.x-flash costaba ~3000 tokens de
+// "pensamiento" antes de escribir la primera llave del JSON: un tercio del
+// tiempo total de espera. Con el trabajo ya troceado (diálogo por un lado,
+// ejercicios por otro, cada uno con su brief explícito) no hace falta.
+const THINKING_LOW = { thinkingLevel: ThinkingLevel.LOW };
+
 // --- HELPERS ---
+
+/**
+ * Un 400/401/403 no mejora por repetirlo: una clave inválida o un diálogo que
+ * el TTS rechaza costaban tres viajes de ida y vuelta antes de que el usuario
+ * viera el error. Solo se reintenta lo que puede resolverse solo: cuota,
+ * saturación del servicio y fallos de red.
+ */
+function isRetriableError(error: any): boolean {
+  const status = error?.status ?? error?.code ?? error?.response?.status;
+  if (typeof status === 'number') {
+    if (status === 429) return true;
+    return !(status >= 400 && status < 500);
+  }
+
+  const msg = String(error?.message ?? '');
+  if (/RESOURCE_EXHAUSTED|\b429\b|UNAVAILABLE|\b50\d\b/i.test(msg)) return true;
+  if (/API[_ ]?KEY|UNAUTHENTICATED|PERMISSION_DENIED|INVALID_ARGUMENT|FAILED_PRECONDITION|\b40[0-4]\b/i.test(msg)) return false;
+  return true;
+}
+
+/**
+ * Cuando la API rechaza por cuota, dice en cuánto se puede reintentar
+ * ("retryDelay": "6s"). Esperar menos garantiza otro 429.
+ */
+function suggestedRetryDelayMs(error: any): number {
+  const match = String(error?.message ?? '').match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  if (!match) return 0;
+  return Math.min(20000, Math.ceil(parseFloat(match[1]) * 1000) + 500);
+}
+
 async function withRetry<T>(fn: () => Promise<T>, retries = 2, delay = 500): Promise<T> {
   try {
     return await fn();
   } catch (error: any) {
-    if (retries <= 0) throw error;
-    await new Promise(resolve => setTimeout(resolve, delay));
+    if (retries <= 0 || !isRetriableError(error)) throw error;
+    // Jitter: varios tramos de TTS reintentando al unísono vuelven a chocar
+    // contra el mismo límite de cuota.
+    const wait = Math.max(delay, suggestedRetryDelayMs(error)) + Math.random() * 250;
+    await new Promise(resolve => setTimeout(resolve, wait));
     return withRetry(fn, retries - 1, delay * 2);
   }
 }
@@ -667,18 +707,39 @@ const getRegisterInstruction = (textType: TextType): string => {
 
 // --- MAIN GENERATOR ---
 
-export const generateLessonPlan = async (
+/**
+ * El diálogo recién generado, con todo lo necesario para pedir después los
+ * ejercicios y sintetizar el audio.
+ *
+ * Antes, diálogo y ejercicios salían de una única respuesta JSON de ~3500
+ * tokens, así que el TTS no podía empezar hasta que el modelo hubiera
+ * terminado también los ejercicios. Separarlos permite que la síntesis de voz
+ * y la redacción de los ejercicios corran en paralelo, y de paso los
+ * ejercicios se escriben viendo la transcripción literal en vez de
+ * inventándola a la vez.
+ */
+export interface DialogueDraft {
+  title: string;
+  situationDescription: string;
+  communicativeFunction: string;
+  ambientKeywords?: string;
+  characters: Character[];
+  dialogue: DialogueLine[];
+  /** Slots del syllabus que los ejercicios tendrán que cubrir. */
+  blueprint: ExerciseSlot[];
+}
+
+/**
+ * Bloques de prompt que comparten la llamada del diálogo y la de los
+ * ejercicios (dialecto, nivel, registro, localización y blueprint).
+ */
+const buildLessonContext = (
   level: Level,
   topic: string,
-  length: Length,
   textType: TextType,
   accent: Accent,
   mode: AppMode
-): Promise<LessonPlan> => {
-
-  // DYNAMIC INSTANTIATION WITH STORED KEY
-  const ai = getAi();
-
+) => {
   let profileInstruction = "";
   let finalTopic = topic;
   let numSpeakers = (textType === TextType.RadioNews || textType === TextType.Monologue) ? 1 : 2;
@@ -710,7 +771,6 @@ export const generateLessonPlan = async (
     constraint = `NIVEL MCER: ${level}. Naturalidad y coherencia con el nivel.`;
   }
 
-
   if (mode === AppMode.AccentChallenge) {
     const allAccents = Object.values(Accent);
     const shuffled = allAccents.sort(() => 0.5 - Math.random());
@@ -735,10 +795,6 @@ export const generateLessonPlan = async (
     profileInstruction = `${baseProfile}. CONSISTENCIA: AMBOS HABLANTES SON NATIVOS DE ESTA REGIÓN. Prohibido mezclar con neutro.`;
   }
 
-  const blueprint = getBlueprint(level, textType, mode, dataPoint);
-  const exerciseLogic = buildExercisePrompt(blueprint);
-  const registerInstruction = getRegisterInstruction(textType);
-
   // LOCALIZACIÓN: el contenido de los escenarios es neutro/panhispánico; aquí se adapta
   // TODO (moneda, tratamiento, léxico, realia) a la variante regional elegida, sin mezclar.
   const localizationInstruction = (mode === AppMode.AccentChallenge)
@@ -749,6 +805,69 @@ export const generateLessonPlan = async (
       - Léxico cotidiano, instituciones, comidas, transporte y realia coherentes con la región (p. ej. auto/coche/carro, departamento/piso, celular/móvil, documento de identidad local).
       - Nombres propios, topónimos y referencias verosímiles para la región.`;
 
+  return {
+    profileInstruction,
+    finalTopic,
+    numSpeakers,
+    constraint,
+    localizationInstruction,
+    registerInstruction: getRegisterInstruction(textType),
+    blueprint: getBlueprint(level, textType, mode, dataPoint)
+  };
+};
+
+/** Transcripción con índice de turno, tal como la citan los `sourceTurns`. */
+const formatTranscript = (dialogue: DialogueLine[]): string =>
+  dialogue.map((d, i) => `[${i}] ${d.speaker}: ${d.text}`).join('\n');
+
+/**
+ * Consume la respuesta en streaming y devuelve el texto completo.
+ *
+ * El primer fragmento llega en menos de un segundo, así que la pantalla de
+ * carga puede contar turnos reales en vez de animar una barra inventada.
+ */
+async function streamText(
+  ai: GoogleGenAI,
+  request: Parameters<GoogleGenAI['models']['generateContentStream']>[0],
+  onPartial?: (text: string) => void
+): Promise<string> {
+  const stream = await ai.models.generateContentStream(request);
+  let text = "";
+  for await (const chunk of stream) {
+    if (chunk.text) {
+      text += chunk.text;
+      onPartial?.(text);
+    }
+  }
+  return text;
+}
+
+/** Turnos ya escritos en un JSON todavía incompleto. */
+const countStreamedTurns = (partial: string): number =>
+  (partial.match(/"speaker"\s*:/g) || []).length;
+
+/**
+ * PASO 1: solo el diálogo. Es la única llamada bloqueante del pipeline: en
+ * cuanto termina, el audio y los ejercicios pueden pedirse a la vez.
+ */
+export const generateDialogue = async (
+  level: Level,
+  topic: string,
+  length: Length,
+  textType: TextType,
+  accent: Accent,
+  mode: AppMode,
+  onTurnsWritten?: (turns: number) => void
+): Promise<DialogueDraft> => {
+
+  // DYNAMIC INSTANTIATION WITH STORED KEY
+  const ai = getAi();
+
+  const {
+    profileInstruction, finalTopic, numSpeakers, constraint,
+    localizationInstruction, registerInstruction, blueprint
+  } = buildLessonContext(level, topic, textType, accent, mode);
+
   const jsonStructure = `
   {
     "title": "String",
@@ -756,12 +875,8 @@ export const generateLessonPlan = async (
     "communicativeFunction": "String",
     "ambientKeywords": "String",
     "characters": [{ "name": "String", "gender": "Male" | "Female" }],
-    "dialogue": [{ "speaker": "String", "text": "String", "emotion": "String" }],
-    "exercises": [
-      { "id": "ex1", "slotId": "...", "stage": "...", "skill": "...", "type": "...", "question": "...", "explanation": "...", "sourceTurns": [0], "correctAnswer": "..." }
-    ]
+    "dialogue": [{ "speaker": "String", "text": "String", "emotion": "String" }]
   }
-  La forma concreta de cada ejercicio depende de su "type": usa exactamente el JSON indicado para ese formato en EXERCISES.
   `;
 
   // A0 prioriza la naturalidad del habla por encima del recuento de turnos: el
@@ -786,33 +901,39 @@ export const generateLessonPlan = async (
   REGISTER: ${registerInstruction}
   LOCALIZE: ${localizationInstruction}
   SPEAKERS: ${speakerEmphasis}
-  EXERCISES: ${exerciseLogic}
   ${lengthInstruction}
   AMBIENT: Generate "ambientKeywords" (3 keywords).
 
+  Devuelve SOLO el diálogo y sus metadatos. Los ejercicios se piden aparte.
   Structure: ${jsonStructure}
   `;
 
     try {
-      const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-        model: GENERATION_MODEL,
-        contents: prompt,
-        config: {
-          systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
-          responseMimeType: "application/json",
-          temperature: 0.0,
+      const raw = await withRetry(() => streamText(
+        ai,
+        {
+          model: GENERATION_MODEL,
+          contents: prompt,
+          config: {
+            systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
+            responseMimeType: "application/json",
+            temperature: 0.0,
+            thinkingConfig: THINKING_LOW,
+            maxOutputTokens: 4000,
+          },
         },
-      }));
+        partial => onTurnsWritten?.(countStreamedTurns(partial))
+      ));
 
-      if (!response.text) throw new Error("API devolvió vacío");
-      const jsonStr = cleanJsonString(response.text);
-      const plan = JSON.parse(jsonStr) as LessonPlan;
+      if (!raw) throw new Error("API devolvió vacío");
+      const jsonStr = cleanJsonString(raw);
+      const draft = JSON.parse(jsonStr) as DialogueDraft;
 
-      if (!plan.dialogue) plan.dialogue = [];
-      const rawExercises: unknown[] = Array.isArray(plan.exercises) ? plan.exercises : [];
+      if (!Array.isArray(draft.dialogue)) draft.dialogue = [];
+      if (!Array.isArray(draft.characters)) draft.characters = [];
 
       // Validate speaker count
-      const uniqueSpeakers = new Set(plan.dialogue.map(d => d.speaker?.trim()).filter(Boolean));
+      const uniqueSpeakers = new Set(draft.dialogue.map(d => d.speaker?.trim()).filter(Boolean));
       if (uniqueSpeakers.size > 2) {
         console.warn(`[Attempt ${attempt}/${MAX_SPEAKER_RETRIES}] Detected ${uniqueSpeakers.size} speakers: ${Array.from(uniqueSpeakers).join(', ')}. Retrying...`);
 
@@ -829,20 +950,12 @@ export const generateLessonPlan = async (
         console.log(`[Success] Generated valid dialogue on attempt ${attempt}/${MAX_SPEAKER_RETRIES}`);
       }
 
-      // Se descarta todo ejercicio cuya clave no se sostenga contra la
-      // transcripción y se rellenan los slots que queden vacíos con motores
-      // deterministas: mejor un ejercicio menos que uno con la respuesta mal.
-      plan.exercises = fillMissingSlots(
-        verifyExercises(rawExercises, plan.dialogue),
-        blueprint,
-        plan.dialogue
-      );
-
-      return plan;
+      draft.blueprint = blueprint;
+      return draft;
     } catch (error: any) {
       // If it's a non-speaker-related error or last attempt, throw immediately
       if (!error.message?.includes('personajes') || attempt === MAX_SPEAKER_RETRIES) {
-        console.error("Error generando plan:", error);
+        console.error("Error generando diálogo:", error);
         throw new Error(`Error GenAI: ${error.message}`);
       }
       // Otherwise, this catch is just for unexpected errors during generation, continue retry loop
@@ -853,15 +966,279 @@ export const generateLessonPlan = async (
   throw new Error("Error inesperado en generación de lección");
 };
 
+/**
+ * PASO 2: los ejercicios, ya con la transcripción literal delante. Corre en
+ * paralelo con la síntesis de voz.
+ *
+ * Nunca rechaza: si la llamada falla, los motores deterministas construyen la
+ * lección a partir de la transcripción. Mejor una lección con ejercicios de
+ * motor que ninguna lección.
+ */
+export const generateExercises = async (
+  draft: DialogueDraft,
+  level: Level,
+  accent: Accent,
+  mode: AppMode
+): Promise<Exercise[]> => {
+  const { blueprint, dialogue } = draft;
+  if (!dialogue.length || !blueprint.length) return [];
+
+  const buildLocally = () => fillMissingSlots([], blueprint, dialogue);
+
+  let rawExercises: unknown[] = [];
+  try {
+    const ai = getAi();
+    const prompt = `
+  Ejercicios de comprensión auditiva (español). Modo: ${mode}. Nivel: ${level}. Acento: ${accent}.
+
+  El audio YA ESTÁ GRABADO. Esta es su transcripción exacta, con el índice de cada turno:
+  ${formatTranscript(dialogue)}
+
+  Trabaja SOLO sobre ese texto: cita su ortografía literal y apoya cada ejercicio en los índices reales.
+
+  EXERCISES: ${buildExercisePrompt(blueprint)}
+
+  Structure: { "exercises": [ { "id": "ex1", "slotId": "...", "stage": "...", "skill": "...", "type": "...", "question": "...", "explanation": "...", "sourceTurns": [0], "correctAnswer": "..." } ] }
+  La forma concreta de cada ejercicio depende de su "type": usa exactamente el JSON indicado para ese formato en EXERCISES.
+  `;
+
+    const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
+      model: GENERATION_MODEL,
+      contents: prompt,
+      config: {
+        systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
+        responseMimeType: "application/json",
+        temperature: 0.0,
+        thinkingConfig: THINKING_LOW,
+        maxOutputTokens: 10000,
+      },
+    }));
+
+    if (!response.text) throw new Error("API devolvió vacío");
+    const parsed = JSON.parse(cleanJsonString(response.text));
+    rawExercises = Array.isArray(parsed?.exercises) ? parsed.exercises : (Array.isArray(parsed) ? parsed : []);
+  } catch (error: any) {
+    console.warn("Error generando ejercicios; se usan motores deterministas:", error?.message);
+    return buildLocally();
+  }
+
+  // Se descarta todo ejercicio cuya clave no se sostenga contra la
+  // transcripción y se rellenan los slots que queden vacíos con motores
+  // deterministas: mejor un ejercicio menos que uno con la respuesta mal.
+  return fillMissingSlots(verifyExercises(rawExercises, dialogue), blueprint, dialogue);
+};
+
+/**
+ * Lección completa (diálogo + ejercicios), en secuencia.
+ *
+ * La app no usa este camino —orquesta los dos pasos por separado para
+ * solaparlos con el TTS—, pero se mantiene para quien solo quiera el plan.
+ */
+export const generateLessonPlan = async (
+  level: Level,
+  topic: string,
+  length: Length,
+  textType: TextType,
+  accent: Accent,
+  mode: AppMode
+): Promise<LessonPlan> => {
+  const draft = await generateDialogue(level, topic, length, textType, accent, mode);
+  const exercises = await generateExercises(draft, level, accent, mode);
+  const { blueprint, ...plan } = draft;
+  return { ...plan, exercises };
+};
+
+// --- AUDIO (TTS) -----------------------------------------------------------
+
+/** El TTS devuelve PCM crudo sin cabecera: 24 kHz, mono, 16 bits. */
+const PCM_SAMPLE_RATE = 24000;
+
+/** Techo de caracteres que acepta una petición al modelo de voz. */
+const TTS_PROMPT_LIMIT = 5000;
+
+/**
+ * Peticiones de voz simultáneas. Con tres en paralelo la API empieza a
+ * devolver 429 y 503; con dos aguanta.
+ */
+const TTS_CONCURRENCY = 2;
+
+/**
+ * A partir de aquí se trocea también por velocidad, no solo porque el texto no
+ * quepa. Cada tramo es una petición más contra la cuota del modelo de voz, así
+ * que solo compensa en diálogos largos, donde una sola llamada tarda ~30 s.
+ * Los troceos que impone el presupuesto de caracteres ocurren igualmente: sin
+ * ellos el diálogo se cortaba a media frase.
+ */
+const TURNS_BEFORE_SPLITTING = 12;
+
+/** Fundido en cada unión entre tramos, para que no se oiga un clic. */
+const JOIN_FADE_MS = 5;
+
+export type AudioProgress = (done: number, total: number) => void;
+
+const base64ToBytes = (b64: string): Uint8Array => {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+};
+
+/** Ejecuta `fn` sobre `items` con un tope de tareas simultáneas, conservando el orden. */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+
+  const worker = async () => {
+    while (true) {
+      const i = next++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, worker)
+  );
+  return results;
+}
+
+/** Parte una línea que por sí sola no cabe, primero por frases y luego por palabras. */
+function splitOversizedLine(line: string, limit: number): string[] {
+  if (line.length <= limit) return [line];
+
+  const pieces: string[] = [];
+  let current = "";
+  const units = line.match(/[^.!?…]+[.!?…]*\s*/g) ?? line.split(/(?<=\s)/);
+
+  for (const unit of units) {
+    if (current && current.length + unit.length > limit) {
+      pieces.push(current.trim());
+      current = "";
+    }
+    if (unit.length > limit) {
+      // Ni una frase suelta cabe: se corta por palabras.
+      for (const word of unit.split(/\s+/)) {
+        if (current && current.length + word.length + 1 > limit) {
+          pieces.push(current.trim());
+          current = "";
+        }
+        current += (current ? " " : "") + word;
+      }
+    } else {
+      current += unit;
+    }
+  }
+  if (current.trim()) pieces.push(current.trim());
+  return pieces.filter(Boolean);
+}
+
+/** Agrupa líneas en tramos sin pasar de `limit` caracteres, sin partir turnos. */
+function packLines(lines: string[], joiner: string, limit: number): string[][] {
+  const chunks: string[][] = [];
+  let current: string[] = [];
+  let size = 0;
+
+  for (const line of lines) {
+    const cost = line.length + (current.length ? joiner.length : 0);
+    if (current.length && size + cost > limit) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(line);
+    size += line.length + (current.length > 1 ? joiner.length : 0);
+  }
+  if (current.length) chunks.push(current);
+  return chunks;
+}
+
+/**
+ * Trocea el diálogo en fronteras de turno.
+ *
+ * `hardLimit` es lo que deja libre el perfil fonético dentro del techo de la
+ * API. Antes esto se resolvía con un `substring(0, 5000)` a ciegas: con los
+ * perfiles largos (Buenos Aires ocupa 3407 caracteres) un diálogo `Largo`
+ * perdía el final a mitad de frase y el audio dejaba de cubrir los
+ * `sourceTurns` de los ejercicios.
+ */
+/**
+ * Caracteres de diálogo que caben en una petición para ese acento, una vez
+ * descontado el perfil fonético (entre 2196 y 3407 caracteres según la
+ * variante) y un margen para el prefijo de continuación.
+ */
+export function ttsDialogueBudget(accent: Accent): number {
+  const profile = TTS_PHONETIC_PROFILES[accent] || "";
+  const headerLength = profile ? profile.length + "\n\n---BEGIN DIALOGUE---\n\n".length : 0;
+  return Math.max(600, TTS_PROMPT_LIMIT - headerLength - 200);
+}
+
+export function chunkDialogueLines(lines: string[], joiner: string, hardLimit: number): string[][] {
+  const safeLines = lines.flatMap(line => splitOversizedLine(line, hardLimit));
+
+  const byBudget = packLines(safeLines, joiner, hardLimit);
+  const desired = safeLines.length >= TURNS_BEFORE_SPLITTING ? 2 : 1;
+  const chunkCount = Math.max(byBudget.length, desired);
+  if (chunkCount <= 1) return [safeLines];
+
+  // Tramos de tamaño parecido: con dos peticiones en paralelo, el tiempo total
+  // lo marca la más larga.
+  const totalChars = safeLines.reduce((n, l) => n + l.length + joiner.length, 0);
+  const target = Math.max(
+    Math.ceil(totalChars / chunkCount),
+    ...safeLines.map(l => l.length)
+  );
+  return packLines(safeLines, joiner, Math.min(hardLimit, target));
+}
+
+/**
+ * Une los tramos de PCM aplicando un fundido corto en cada costura. Todos
+ * comparten formato (24 kHz, mono, 16 bits), así que basta concatenar.
+ */
+export function concatPcmChunks(chunks: Uint8Array[]): Uint8Array {
+  const usable = chunks.filter(c => c && c.length > 1);
+  if (usable.length === 0) return new Uint8Array(0);
+  if (usable.length === 1) return usable[0];
+
+  const total = usable.reduce((n, c) => n + c.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of usable) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  const samples = new Int16Array(out.buffer, out.byteOffset, Math.floor(out.length / 2));
+  const fade = Math.floor((PCM_SAMPLE_RATE * JOIN_FADE_MS) / 1000);
+  let boundary = 0;
+  for (let i = 0; i < usable.length - 1; i++) {
+    boundary += Math.floor(usable[i].length / 2);
+    for (let n = 0; n < fade; n++) {
+      const gain = n / fade;
+      const before = boundary - 1 - n;
+      const after = boundary + n;
+      if (before >= 0) samples[before] = Math.round(samples[before] * gain);
+      if (after < samples.length) samples[after] = Math.round(samples[after] * gain);
+    }
+  }
+
+  return out;
+}
+
 export const generateAudio = async (
   dialogue: LessonPlan['dialogue'],
   characters: Character[],
-  accent: Accent
-): Promise<string> => {
+  accent: Accent,
+  onProgress?: AudioProgress
+): Promise<Uint8Array> => {
   // DYNAMIC INSTANTIATION WITH STORED KEY
   const ai = getAi();
 
-  if (!dialogue || dialogue.length === 0) return "";
+  const empty = new Uint8Array(0);
+  if (!dialogue || dialogue.length === 0) return empty;
 
   const speakerCounts: Record<string, number> = {};
   dialogue.forEach(d => {
@@ -869,11 +1246,12 @@ export const generateAudio = async (
   });
 
   const sortedSpeakers = Object.keys(speakerCounts).sort((a, b) => speakerCounts[b] - speakerCounts[a]);
-  if (sortedSpeakers.length === 0) return "";
+  if (sortedSpeakers.length === 0) return empty;
 
   const isMultiSpeaker = sortedSpeakers.length >= 2;
   let speechConfig;
-  let textPrompt = "";
+  let lines: string[];
+  let joiner: string;
 
   if (isMultiSpeaker) {
     const s1 = sortedSpeakers[0];
@@ -904,15 +1282,15 @@ export const generateAudio = async (
       }
     };
 
-    textPrompt = dialogue
+    joiner = '\n';
+    lines = dialogue
       .filter(d => d.speaker && (d.speaker.includes(s1) || d.speaker.includes(s2) || s1.includes(d.speaker) || s2.includes(d.speaker)))
       .map(d => {
         const cleanText = sanitizeForTTS(d.text);
         if (!cleanText) return null;
         return `${d.speaker}: ${cleanText}`;
       })
-      .filter(Boolean) // Remove nulls
-      .join('\n');
+      .filter((l): l is string => Boolean(l));
 
   } else {
     // Single Speaker Logic
@@ -927,58 +1305,66 @@ export const generateAudio = async (
       }
     };
 
-    textPrompt = dialogue
+    joiner = '\n\n';
+    lines = dialogue
       .map(d => sanitizeForTTS(d.text))
-      .filter(t => t.length > 0)
-      .join('\n\n');
+      .filter(t => t.length > 0);
   }
 
   // Final validation before sending
-  if (textPrompt.length === 0) {
+  if (lines.length === 0) {
     throw new Error("No hay texto válido para generar audio.");
   }
 
   // --- CRITICAL: INJECT PHONETIC PRONUNCIATION INSTRUCTIONS ---
   // This is the "bulletproof" accent system - we prepend pronunciation rules
   // so the TTS model knows exactly how to pronounce each dialect
-  const phoneticProfile = TTS_PHONETIC_PROFILES[accent];
-  if (phoneticProfile) {
-    // Prepend the pronunciation instructions as a system-level directive
-    textPrompt = `${phoneticProfile}\n\n---BEGIN DIALOGUE---\n\n${textPrompt}`;
-  }
+  const phoneticProfile = TTS_PHONETIC_PROFILES[accent] || "";
+  const header = phoneticProfile ? `${phoneticProfile}\n\n---BEGIN DIALOGUE---\n\n` : "";
 
-  // Ensure we don't exceed TTS limits (accounting for the added instructions)
-  if (textPrompt.length > 5000) textPrompt = textPrompt.substring(0, 5000);
+  const chunks = chunkDialogueLines(lines, joiner, ttsDialogueBudget(accent));
+  const total = chunks.length;
+  onProgress?.(0, total);
 
   try {
-    console.log(`[TTS] Generating audio with ${isMultiSpeaker ? 'multi-speaker' : 'single-speaker'} config...`);
-    const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: AUDIO_MODEL,
-      contents: [{ parts: [{ text: textPrompt }] }],
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: speechConfig
+    console.log(`[TTS] Generating audio with ${isMultiSpeaker ? 'multi-speaker' : 'single-speaker'} config in ${total} chunk(s)...`);
+
+    let done = 0;
+    const parts = await mapWithConcurrency(chunks, TTS_CONCURRENCY, async (chunkLines, index) => {
+      const continuation = index > 0
+        ? `(Continuación de la misma conversación; mantén exactamente las mismas voces, ritmo y acento.)\n\n`
+        : "";
+      const textPrompt = `${header}${continuation}${chunkLines.join(joiner)}`;
+
+      const response = await withRetry<GenerateContentResponse>(() => ai.models.generateContent({
+        model: AUDIO_MODEL,
+        contents: [{ parts: [{ text: textPrompt }] }],
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: speechConfig
+        }
+      }));
+
+      const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!audioData) {
+        console.error(`[TTS] No audio data in chunk ${index + 1}/${total}.`);
+        throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
       }
-    }));
 
-    console.log('[TTS] Response received, checking for audio data...');
+      done++;
+      onProgress?.(done, total);
+      return base64ToBytes(audioData);
+    });
 
-    // Check if we actually got audio data
-    const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!audioData) {
-      console.error('[TTS] No audio data in response. Response structure:', JSON.stringify(response, null, 2));
+    const merged = concatPcmChunks(parts);
+    if (merged.length === 0) {
       throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
     }
 
-    console.log('[TTS] Audio generation successful');
-    return audioData;
+    console.log(`[TTS] Audio generation successful (${(merged.length / (PCM_SAMPLE_RATE * 2)).toFixed(1)}s)`);
+    return merged;
   } catch (error: any) {
     console.error("Audio Gen Error:", error);
-    console.error("Error details:", {
-      message: error.message,
-      name: error.name,
-      stack: error.stack
-    });
 
     // Extract meaningful message from API error if possible
     let msg = error.message || "Error desconocido";

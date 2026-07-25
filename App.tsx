@@ -1,8 +1,12 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode } from './types';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { AppState, Exercise, LessonPlan, Level, Length, ListeningStage, TextType, Accent, AppMode } from './types';
 import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
-import { generateLessonPlan, generateAudio } from './services/geminiService';
+import { generateDialogue, generateExercises, generateAudio } from './services/geminiService';
+import { getAmbiencePreset } from './services/ambiencePresets';
+import { prefetchAmbienceBed } from './services/ambienceLibrary';
+import { forgetLesson, isCacheable, lessonCacheKey, readLesson, writeLesson } from './services/lessonCache';
+import { API_KEY_STORAGE, looksLikeApiKey } from './services/apiKey';
 import AudioPlayer from './components/AudioPlayer';
 import ExerciseCard from './components/ExerciseCard';
 import LoadingScreen from './components/LoadingScreen';
@@ -10,7 +14,7 @@ import AuthScreen from './components/AuthScreen';
 import SelectInput from './components/SelectInput';
 import MatrixSelector from './components/MatrixSelector';
 import { SCENARIO_DATABASE, ScenarioContext, ScenarioAction } from './data/scenarios';
-import { ArrowRight, AlertTriangle, BookOpen, Mic2, Layout, Search, Key } from 'lucide-react';
+import { ArrowRight, AlertTriangle, BookOpen, Mic2, Layout, Search, Key, Loader2, RefreshCw } from 'lucide-react';
 
 const LEVELS = Object.values(Level);
 const LENGTHS = Object.values(Length);
@@ -35,6 +39,16 @@ const MODES = [
     { value: AppMode.AccentChallenge, label: 'Adivina Acento', icon: Mic2 },
 ];
 
+// Turnos que cabe esperar de cada longitud, para que la barra de espera diga
+// algo real en vez de animar un porcentaje inventado.
+const expectedTurns = (length: Length): number => {
+    switch (length) {
+        case Length.Short: return 6;
+        case Length.Medium: return 12;
+        default: return 16;
+    }
+};
+
 const getSpeedForLevel = (level: Level): number => {
     // User requested natural speed for all levels, no "slow motion"
     return 1.0;
@@ -45,9 +59,9 @@ const App: React.FC = () => {
     const [state, setState] = useState<AppState>(() => {
         // Try/Catch for safer localStorage access
         try {
-            const storedKey = localStorage.getItem('gemini_api_key');
+            const storedKey = localStorage.getItem(API_KEY_STORAGE);
             return {
-                status: (storedKey && storedKey.startsWith('AIza')) ? 'idle' : 'auth',
+                status: looksLikeApiKey(storedKey) ? 'idle' : 'auth',
                 config: {
                     mode: AppMode.Standard,
                     level: Level.Intro,
@@ -58,6 +72,9 @@ const App: React.FC = () => {
                 },
                 lessonPlan: null,
                 audioBlob: null,
+                exercisesPending: false,
+                audioPending: false,
+                audioProgress: null,
                 error: null,
             };
         } catch (e) {
@@ -73,6 +90,9 @@ const App: React.FC = () => {
                 },
                 lessonPlan: null,
                 audioBlob: null,
+                exercisesPending: false,
+                audioPending: false,
+                audioProgress: null,
                 error: null,
             };
         }
@@ -82,8 +102,8 @@ const App: React.FC = () => {
     // This ensures that if the lazy init failed for some reason, we recover the session.
     useEffect(() => {
         const checkKey = () => {
-            const storedKey = localStorage.getItem('gemini_api_key');
-            if (storedKey && storedKey.startsWith('AIza') && state.status === 'auth') {
+            const storedKey = localStorage.getItem(API_KEY_STORAGE);
+            if (looksLikeApiKey(storedKey) && state.status === 'auth') {
                 console.log("Restoring session from local storage...");
                 setState(prev => ({ ...prev, status: 'idle' }));
             }
@@ -99,7 +119,7 @@ const App: React.FC = () => {
 
     const handleResetKey = () => {
         if (window.confirm("¿Seguro que quieres borrar la API Key y salir? Esto requerirá ingresarla de nuevo.")) {
-            localStorage.removeItem('gemini_api_key');
+            localStorage.removeItem(API_KEY_STORAGE);
             setState(prev => ({ ...prev, status: 'auth', error: null }));
         }
     };
@@ -131,6 +151,10 @@ const App: React.FC = () => {
     // en una de comprensión lectora.
     const [activeTab, setActiveTab] = useState<'exercises' | 'transcript'>('exercises');
     const [audioError, setAudioError] = useState<string | null>(null);
+    /** Clave de caché de la lección en pantalla (null si el modo no se cachea). */
+    const [currentCacheKey, setCurrentCacheKey] = useState<string | null>(null);
+    /** Turnos ya escritos por el modelo, para la pantalla de espera. */
+    const [turnsWritten, setTurnsWritten] = useState(0);
 
     /**
      * Ejercicios agrupados por etapa de escucha, en el orden metodológico
@@ -156,6 +180,20 @@ const App: React.FC = () => {
     // La etapa de anticipación se responde ANTES de reproducir; el resto pierde
     // sentido si se lee la transcripción primero.
     const hasAnticipationStage = stagedExercises.some(g => g.stage === 'anticipacion');
+
+    // La lección aparece en cuanto existe el diálogo, con el audio todavía
+    // sintetizándose. Mientras tanto solo se abre lo que es legítimamente
+    // pre-escucha: la anticipación. Ni la transcripción ni el resto de etapas.
+    const audioReady = !!state.audioBlob && state.audioBlob.length > 0;
+    // Si el audio falla, la transcripción es lo único que queda: se desbloquea.
+    const transcriptLocked = !audioReady && !audioError;
+    const audioPercent = state.audioProgress && state.audioProgress.total > 0
+        ? Math.max(8, Math.round((state.audioProgress.done / state.audioProgress.total) * 100))
+        : 8;
+
+    useEffect(() => {
+        if (transcriptLocked && activeTab === 'transcript') setActiveTab('exercises');
+    }, [transcriptLocked, activeTab]);
 
     // --- EFFECT: COERCE INVALID LEVEL FOR NARRATIVE FORMATS ---
     // Podcast/Monólogo no tienen A0: si el usuario cambia a esos formatos estando en A0,
@@ -195,9 +233,30 @@ const App: React.FC = () => {
         if (isCustomMode) setIsCustomMode(false);
     }, [state.config.level, state.config.textType, isCustomMode]);
 
-    const handleGenerate = async () => {
-        setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null }));
+    /**
+     * Identifica la generación en curso. El diálogo, los ejercicios y el audio
+     * llegan por separado y en distinto momento: si el usuario reinicia y pide
+     * otra lección, lo que quedaba en vuelo de la anterior no debe pisarla.
+     */
+    const generationRef = useRef(0);
+
+    const handleGenerate = async (options?: { skipCache?: boolean }) => {
+        const runId = ++generationRef.current;
+        const isCurrent = () => generationRef.current === runId;
+
+        setState(prev => ({
+            ...prev,
+            status: 'generating_plan',
+            error: null,
+            lessonPlan: null,
+            audioBlob: null,
+            exercisesPending: true,
+            audioPending: true,
+            audioProgress: null
+        }));
         setAudioError(null);
+        setActiveTab('exercises');
+        setTurnsWritten(0);
 
         let finalTopic = "";
 
@@ -224,56 +283,142 @@ const App: React.FC = () => {
             return;
         }
 
+        const { level, length, textType, accent, mode } = state.config;
+        const cacheParts = { mode, level, topic: finalTopic, length, textType, accent };
+        const cacheKey = lessonCacheKey(cacheParts);
+        const cacheable = isCacheable(cacheParts);
+        setCurrentCacheKey(cacheable ? cacheKey : null);
+
         try {
-            const plan = await generateLessonPlan(
-                state.config.level,
-                finalTopic,
-                state.config.length,
-                state.config.textType,
-                state.config.accent,
-                state.config.mode
+            // Misma configuración, misma lección (el diálogo se pide con
+            // temperature 0): no hay razón para volver a pagar el pipeline.
+            if (cacheable && !options?.skipCache) {
+                const cached = await readLesson(cacheKey);
+                if (cached && isCurrent()) {
+                    setState(prev => ({
+                        ...prev,
+                        config: { ...prev.config, topic: finalTopic },
+                        lessonPlan: cached.plan,
+                        audioBlob: cached.audio,
+                        status: 'ready',
+                        exercisesPending: false,
+                        audioPending: false,
+                        audioProgress: null
+                    }));
+                    return;
+                }
+            }
+
+            // PASO 1 — el diálogo. Única espera bloqueante: en cuanto existe,
+            // la lección ya se puede mostrar y el resto avanza en paralelo.
+            const draft = await generateDialogue(
+                level, finalTopic, length, textType, accent, mode,
+                turns => { if (isCurrent()) setTurnsWritten(turns); }
             );
+            if (!isCurrent()) return;
+
+            const basePlan: LessonPlan = {
+                title: draft.title,
+                situationDescription: draft.situationDescription,
+                communicativeFunction: draft.communicativeFunction,
+                ambientKeywords: draft.ambientKeywords,
+                characters: draft.characters,
+                dialogue: draft.dialogue,
+                exercises: []
+            };
 
             setState(prev => ({
                 ...prev,
                 config: { ...prev.config, topic: finalTopic },
-                lessonPlan: plan,
-                status: 'generating_audio'
+                lessonPlan: basePlan,
+                status: 'ready'
             }));
 
-            try {
-                const audioUrl = await generateAudio(plan.dialogue, plan.characters, state.config.accent);
-                setState(prev => ({
-                    ...prev,
-                    audioBlob: audioUrl,
-                    status: 'ready'
-                }));
-            } catch (audioErr: any) {
-                console.warn("Audio generation failed:", audioErr);
-                setAudioError(audioErr.message || "Fallo en la generación de audio");
-                setState(prev => ({
-                    ...prev,
-                    audioBlob: null,
-                    status: 'ready'
-                }));
+            // La cama de ambiente se descarga mientras se sintetiza la voz, no
+            // al pulsar play.
+            prefetchAmbienceBed(getAmbiencePreset({
+                scenarioLabel: mode === AppMode.Standard && !isCustomMode ? selectedLocus.label : undefined,
+                scenarioActionLabel: mode === AppMode.Standard && !isCustomMode ? selectedModus.label : undefined,
+                topic: `${draft.title} ${draft.situationDescription}`,
+                keywords: draft.ambientKeywords
+            }).profile);
+
+            // PASO 2a — ejercicios (nunca rechaza: cae a motores deterministas).
+            const exercisesPromise = generateExercises(draft, level, accent, mode)
+                .then(exercises => {
+                    if (isCurrent()) {
+                        setState(prev => ({
+                            ...prev,
+                            lessonPlan: prev.lessonPlan ? { ...prev.lessonPlan, exercises } : prev.lessonPlan,
+                            exercisesPending: false
+                        }));
+                    }
+                    return exercises;
+                })
+                .catch(err => {
+                    console.warn("Exercise generation failed:", err);
+                    if (isCurrent()) setState(prev => ({ ...prev, exercisesPending: false }));
+                    return [] as Exercise[];
+                });
+
+            // PASO 2b — voz, en paralelo con los ejercicios.
+            const audioPromise = generateAudio(
+                draft.dialogue,
+                draft.characters,
+                accent,
+                (done, total) => {
+                    if (isCurrent()) setState(prev => ({ ...prev, audioProgress: { done, total } }));
+                }
+            )
+                .then(audio => {
+                    if (isCurrent()) {
+                        setState(prev => ({ ...prev, audioBlob: audio, audioPending: false, audioProgress: null }));
+                    }
+                    return audio;
+                })
+                .catch((audioErr: any) => {
+                    console.warn("Audio generation failed:", audioErr);
+                    if (isCurrent()) {
+                        setAudioError(audioErr.message || "Fallo en la generación de audio");
+                        setState(prev => ({ ...prev, audioBlob: null, audioPending: false, audioProgress: null }));
+                    }
+                    return null;
+                });
+
+            const [exercises, audio] = await Promise.all([exercisesPromise, audioPromise]);
+            if (cacheable && audio?.length && exercises.length) {
+                void writeLesson(cacheKey, { ...basePlan, exercises }, audio);
             }
 
         } catch (error: any) {
             console.error("Critical Generation Error:", error);
+            if (!isCurrent()) return;
             setState(prev => ({
                 ...prev,
                 status: 'error',
+                exercisesPending: false,
+                audioPending: false,
                 error: error.message || "FALLO CRÍTICO EN LA SECUENCIA DE GENERACIÓN."
             }));
         }
     };
 
+    /** Descarta la versión cacheada y vuelve a generar la misma configuración. */
+    const handleRegenerate = async () => {
+        if (currentCacheKey) await forgetLesson(currentCacheKey);
+        void handleGenerate({ skipCache: true });
+    };
+
     const resetApp = () => {
+        generationRef.current++;
         setState(prev => ({
             ...prev,
             status: 'idle',
             lessonPlan: null,
             audioBlob: null,
+            exercisesPending: false,
+            audioPending: false,
+            audioProgress: null,
             error: null
         }));
         setAudioError(null);
@@ -296,8 +441,8 @@ const App: React.FC = () => {
     }
 
     // --- SCREEN: LOADING ---
-    if (state.status === 'generating_plan' || state.status === 'generating_audio') {
-        return <LoadingScreen status={state.status} />;
+    if (state.status === 'generating_plan') {
+        return <LoadingScreen turnsWritten={turnsWritten} expectedTurns={expectedTurns(state.config.length)} />;
     }
 
     // --- SCREEN: ERROR ---
@@ -471,7 +616,7 @@ const App: React.FC = () => {
                         </div>
 
                         <button
-                            onClick={handleGenerate}
+                            onClick={() => void handleGenerate()}
                             className="w-full py-8 bg-white text-black font-display text-2xl uppercase font-bold tracking-tight hover:bg-zinc-300 transition-colors flex items-center justify-center gap-4 group"
                         >
                             {state.config.mode === AppMode.AccentChallenge ? 'Iniciar Reto' : 'Generar Lección'}
@@ -492,7 +637,18 @@ const App: React.FC = () => {
                     <div className="w-2 h-2 bg-white"></div>
                     <span className="font-display font-bold uppercase tracking-tight text-2xl cursor-pointer" onClick={resetApp}>Escucha<span className="text-zinc-600">LAB</span></span>
                 </div>
-                <div className="flex gap-6 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                <div className="flex items-center gap-6 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                    {currentCacheKey && (
+                        <button
+                            disabled={state.exercisesPending || state.audioPending}
+                            onClick={() => void handleRegenerate()}
+                            title="Genera una lección nueva para esta misma configuración"
+                            className="flex items-center gap-2 border border-zinc-800 px-2 py-1 transition-colors enabled:hover:border-white enabled:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                            <RefreshCw size={11} />
+                            <span className="hidden sm:inline">Regenerar</span>
+                        </button>
+                    )}
                     <span className="hidden sm:inline">NIV: {state.config.level.split(' ')[0]}</span>
                     {state.config.mode !== AppMode.AccentChallenge && (
                         <span className="hidden sm:inline">MOD: {state.config.accent.split(' ')[0]}</span>
@@ -545,8 +701,24 @@ const App: React.FC = () => {
                                 hideTrackInfo={state.config.mode === AppMode.AccentChallenge}
                             />
                         ) : (
-                            <div className="p-4 text-center font-mono text-xs text-zinc-500 uppercase">
-                                Inicializando Stream...
+                            <div className="p-4 space-y-2">
+                                <div className="flex items-center justify-between font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                                    <span className="flex items-center gap-2">
+                                        <Loader2 size={12} className="animate-spin" />
+                                        Sintetizando voz
+                                    </span>
+                                    <span>
+                                        {state.audioProgress
+                                            ? `${state.audioProgress.done}/${state.audioProgress.total}`
+                                            : '···'}
+                                    </span>
+                                </div>
+                                <div className="w-full h-1 bg-zinc-900 overflow-hidden">
+                                    <div
+                                        className="h-full bg-white transition-all duration-500 ease-out"
+                                        style={{ width: `${audioPercent}%` }}
+                                    />
+                                </div>
                             </div>
                         )}
                     </div>
@@ -557,17 +729,22 @@ const App: React.FC = () => {
                     {/* Custom Tabs */}
                     <div className="flex border-b border-zinc-800 flex-shrink-0 bg-black">
                         {[
-                            { id: 'exercises', label: 'Ejercicios' },
-                            { id: 'transcript', label: 'Transcripción' }
+                            { id: 'exercises', label: 'Ejercicios', locked: false },
+                            // Con el audio todavía en camino, abrir la transcripción
+                            // convertiría la lección en un ejercicio de lectura.
+                            { id: 'transcript', label: 'Transcripción', locked: transcriptLocked }
                         ].map((tab) => (
                             <button
                                 key={tab.id}
-                                onClick={() => setActiveTab(tab.id as any)}
-                                className={`flex-1 py-4 font-mono text-[10px] sm:text-xs uppercase tracking-widest border-r border-zinc-800 hover:bg-zinc-900 transition-colors relative
-                                ${activeTab === tab.id ? 'bg-white text-black border-r-white' : 'text-zinc-500'}
+                                disabled={tab.locked}
+                                title={tab.locked ? 'Disponible cuando termine el audio' : undefined}
+                                onClick={() => !tab.locked && setActiveTab(tab.id as any)}
+                                className={`flex-1 py-4 font-mono text-[10px] sm:text-xs uppercase tracking-widest border-r border-zinc-800 transition-colors relative
+                                ${tab.locked ? 'text-zinc-700 cursor-not-allowed' : 'hover:bg-zinc-900'}
+                                ${activeTab === tab.id ? 'bg-white text-black border-r-white' : (tab.locked ? '' : 'text-zinc-500')}
                             `}
                             >
-                                {tab.label}
+                                {tab.locked ? `${tab.label} ·` : tab.label}
                                 {activeTab === tab.id && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-black"></div>}
                             </button>
                         ))}
@@ -611,12 +788,23 @@ const App: React.FC = () => {
                         {/* EXERCISES VIEW — recorrido por etapas de escucha */}
                         {activeTab === 'exercises' && (
                             <div className="max-w-3xl mx-auto pb-20">
-                                {stagedExercises.length === 0 && (
+                                {state.exercisesPending && (
+                                    <div className="mb-10 flex items-center gap-3 border border-zinc-800 bg-zinc-950/60 p-4 font-mono text-[11px] uppercase tracking-widest text-zinc-400">
+                                        <Loader2 size={14} className="animate-spin flex-shrink-0" />
+                                        Redactando los ejercicios sobre este diálogo…
+                                    </div>
+                                )}
+                                {!state.exercisesPending && stagedExercises.length === 0 && (
                                     <p className="font-mono text-xs text-zinc-500">
                                         No se pudo construir ningún ejercicio verificable para este audio.
                                     </p>
                                 )}
-                                {stagedExercises.map(group => (
+                                {stagedExercises.map(group => {
+                                    // Todo lo posterior a la anticipación se resuelve
+                                    // escuchando: hasta que exista el audio, se muestra
+                                    // pero no se puede responder.
+                                    const locked = transcriptLocked && group.stage !== 'anticipacion';
+                                    return (
                                     <section key={group.stage} className="mb-16">
                                         <div className="mb-10 border-b border-zinc-800 pb-4">
                                             <div className="flex items-baseline gap-3 flex-wrap">
@@ -626,21 +814,29 @@ const App: React.FC = () => {
                                                 <h3 className="font-display text-2xl uppercase font-bold text-white">
                                                     {STAGE_META[group.stage].label}
                                                 </h3>
+                                                {locked && (
+                                                    <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 border border-zinc-800 px-2 py-0.5">
+                                                        Esperando el audio · {audioPercent}%
+                                                    </span>
+                                                )}
                                             </div>
                                             <p className="font-mono text-xs text-zinc-500 mt-2 leading-relaxed">
                                                 {STAGE_META[group.stage].hint}
                                             </p>
                                         </div>
-                                        {group.items.map((ex, idx) => (
-                                            <ExerciseCard
-                                                key={ex.id || `${group.stage}_${idx}`}
-                                                exercise={ex}
-                                                index={idx}
-                                                dialogue={state.lessonPlan?.dialogue}
-                                            />
-                                        ))}
+                                        <div className={locked ? 'pointer-events-none select-none opacity-40' : undefined} aria-disabled={locked}>
+                                            {group.items.map((ex, idx) => (
+                                                <ExerciseCard
+                                                    key={ex.id || `${group.stage}_${idx}`}
+                                                    exercise={ex}
+                                                    index={idx}
+                                                    dialogue={state.lessonPlan?.dialogue}
+                                                />
+                                            ))}
+                                        </div>
                                     </section>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
