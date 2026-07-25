@@ -6,7 +6,7 @@ import type { EnvironmentProfile, AmbienceTag } from '../services/ambiencePreset
 import { loadAmbienceBed } from '../services/ambienceLibrary';
 
 interface AudioPlayerProps {
-  speechSrc: string; // Base64 raw PCM
+  speechSrc: Uint8Array; // Raw PCM (24 kHz, mono, 16-bit) as returned by the TTS
   recommendedSpeed?: number;
   topic?: string;
   ambientKeywords?: string; // AI-generated English keywords
@@ -19,13 +19,8 @@ interface AudioPlayerProps {
 // ----------------------------------------------------------------------
 // HELPER: Convert raw PCM to WAV Blob
 // ----------------------------------------------------------------------
-function pcmToWavBlob(base64PCM: string, sampleRate = 24000): Blob {
-  const binaryString = atob(base64PCM);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
+function pcmToWavBlob(bytes: Uint8Array, sampleRate = 24000): Blob {
+  const len = bytes.length;
 
   const wavHeader = new ArrayBuffer(44);
   const view = new DataView(wavHeader);
@@ -256,7 +251,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   // Load Speech Blob
   useEffect(() => {
     try {
-      if (!speechSrc) return;
+      if (!speechSrc || speechSrc.length === 0) return;
       const blob = pcmToWavBlob(speechSrc);
       const url = URL.createObjectURL(blob);
       setSpeechUrl(url);

@@ -184,7 +184,11 @@ export interface LessonPlan {
 }
 
 export interface AppState {
-  status: 'auth' | 'idle' | 'generating_plan' | 'generating_audio' | 'ready' | 'error';
+  /**
+   * `generating_plan` cubre solo la escritura del diálogo: en cuanto existe se
+   * pasa a `ready` y los ejercicios y la voz siguen llegando en segundo plano.
+   */
+  status: 'auth' | 'idle' | 'generating_plan' | 'ready' | 'error';
   config: {
     mode: AppMode;
     level: Level;
@@ -194,6 +198,15 @@ export interface AppState {
     accent: Accent;
   };
   lessonPlan: LessonPlan | null;
-  audioBlob: string | null;
+  /** PCM crudo del diálogo (24 kHz, mono, 16 bits), tal como lo devuelve el TTS. */
+  audioBlob: Uint8Array | null;
+  /**
+   * La lección se muestra en cuanto existe el diálogo; los ejercicios y el
+   * audio siguen llegando después, cada uno por su cuenta.
+   */
+  exercisesPending: boolean;
+  audioPending: boolean;
+  /** Tramos de voz ya sintetizados, para el indicador de progreso. */
+  audioProgress: { done: number; total: number } | null;
   error: string | null;
 }

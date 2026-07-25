@@ -17,6 +17,18 @@ export function bedAssetForProfile(profile: EnvironmentProfile): string {
 
 const bufferCache = new Map<string, Promise<AudioBuffer | null>>();
 
+// Warm the HTTP cache while the lesson is still generating, so the bed is
+// already on disk when the learner hits play. Only the bytes are prefetched:
+// decoding needs an AudioContext, and that one is born on the first gesture
+// inside AudioPlayer. Failures are irrelevant — the real load re-fetches.
+export function prefetchAmbienceBed(profile: EnvironmentProfile): void {
+  try {
+    fetch(bedAssetForProfile(profile)).catch(() => undefined);
+  } catch {
+    /* no-op */
+  }
+}
+
 // Fetch + decode a bundled bed asset into an AudioBuffer, cached by URL so
 // repeated scene changes to the same profile don't redecode. Same-origin
 // static asset, so this can never fail on CORS; only real I/O/decode errors

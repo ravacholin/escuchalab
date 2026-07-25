@@ -1,6 +1,7 @@
 
 import React, { useState } from 'react';
 import { Key, ArrowRight, ExternalLink, ShieldCheck, Lock } from 'lucide-react';
+import { API_KEY_STORAGE, looksLikeApiKey } from '../services/apiKey';
 
 interface AuthScreenProps {
   onSuccess: () => void;
@@ -11,11 +12,11 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onSuccess }) => {
   const [error, setError] = useState('');
 
   const handleSave = () => {
-    if (!inputKey.trim().startsWith('AIza')) {
-      setError('Formato de clave inválido (debe empezar por AIza...)');
+    if (!looksLikeApiKey(inputKey)) {
+      setError('Formato de clave inválido (debe empezar por AIza... o AQ....)');
       return;
     }
-    localStorage.setItem('gemini_api_key', inputKey.trim());
+    localStorage.setItem(API_KEY_STORAGE, inputKey.trim());
     onSuccess();
   };
 
