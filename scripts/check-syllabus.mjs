@@ -79,6 +79,20 @@ const SINGLE_SPEAKER = [TEXT_TYPES.RadioNews, TEXT_TYPES.Monologue];
 // A0 no se ofrece en los formatos narrativos (ver `availableLevels` en App.tsx).
 const NARRATIVE = [TEXT_TYPES.PodcastInterview, TEXT_TYPES.Monologue];
 
+/**
+ * Presupuesto de ejercicios por nivel. No es una preferencia estética: en A0 el
+ * alumno decodifica datos, no cláusulas, y cada ejercicio de más es una tarea de
+ * lectura en una lengua que todavía no lee. El techo baja según baja el nivel
+ * para que no vuelva a colarse una lección de seis ejercicios de la que sólo uno
+ * trabaje el dato dictado.
+ */
+const MAX_SLOTS = {
+  [LEVELS.Intro]: 4,
+  [LEVELS.Beginner]: 6,
+  [LEVELS.Intermediate]: 9,
+  [LEVELS.Advanced]: 10
+};
+
 /** Mecánicas cuya carga cognitiva las hace impropias de un principiante absoluto. */
 const FORBIDDEN_AT_A0 = ['ordering', 'matching', 'scale', 'true_false_notgiven', 'spot_the_difference'];
 /** Mecánicas de decodificación básica que en C1 serían trabajo perdido. */
@@ -124,7 +138,10 @@ for (const { level, textType, mode } of combos) {
   blueprintsByKey.set(`${level}|${textType}|${mode}`, slots);
 
   check(slots.length >= 3, `${where}: solo ${slots.length} ejercicios (mínimo 3)`);
-  check(slots.length <= 10, `${where}: ${slots.length} ejercicios (máximo 10)`);
+  check(
+    slots.length <= MAX_SLOTS[level],
+    `${where}: ${slots.length} ejercicios (máximo ${MAX_SLOTS[level]} en este nivel)`
+  );
 
   const seen = new Set();
   const stages = new Set();

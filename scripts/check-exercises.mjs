@@ -351,6 +351,109 @@ for (const text of shownTexts) {
 }
 
 // ---------------------------------------------------------------------------
+// 5. El dato dictado: el motor de ficha tiene que encontrarlo de las dos formas
+// ---------------------------------------------------------------------------
+// El prompt de A0 pide dictar el teléfono "dígito a dígito", así que el modelo
+// escribe tanto "seis, cinco, cuatro…" como "654 32 18". Con solo la primera
+// forma el motor no encontraba nada y la ficha —el único ejercicio del nivel
+// sobre el número— desaparecía; con la segunda partía el teléfono en tres
+// campos sueltos llamados "Número".
+
+const PHONE_SLOT = {
+  slotId: 't-ficha-tel',
+  stage: 'selectiva',
+  skill: 'dato_literal',
+  format: 'data_capture',
+  items: 3,
+  brief: 'x',
+  engineFallback: 'data_capture',
+  focus: 'phone'
+};
+
+const SPOKEN_PHONE = [
+  { speaker: 'Cliente', text: 'Hola, quería dejar mi contacto para el aviso del pedido.' },
+  { speaker: 'Empleada', text: 'Perfecto, dígame el teléfono.' },
+  { speaker: 'Cliente', text: 'Es el seis cinco cuatro treinta y dos dieciocho, sí.' },
+  { speaker: 'Empleada', text: 'Anotado. Le avisamos esta misma tarde, sobre las 18:30.' }
+];
+
+const spokenFicha = fillMissingSlots([], [PHONE_SLOT], SPOKEN_PHONE).find(
+  ex => ex.slotId === 't-ficha-tel'
+);
+check(!!spokenFicha, 'un teléfono dictado con palabras debería producir una ficha de datos');
+if (spokenFicha) {
+  check(
+    verifyExercise(spokenFicha, buildTranscriptIndex(SPOKEN_PHONE)).ok,
+    'la ficha del teléfono dictado con palabras no verifica'
+  );
+  check(
+    spokenFicha.fields.some(f => f.label === 'Teléfono'),
+    `la ficha debería tener un campo "Teléfono" (tiene: ${spokenFicha.fields.map(f => f.label).join(', ')})`
+  );
+  const phoneField = spokenFicha.fields.find(f => f.label === 'Teléfono');
+  if (phoneField) {
+    check(
+      phoneField.options.length >= 3,
+      'el campo del teléfono debería ofrecer el valor correcto y dos alternativas casi idénticas'
+    );
+  }
+}
+
+const GROUPED_PHONE = [
+  { speaker: 'Cliente', text: 'Le dejo mi número por si acaso.' },
+  { speaker: 'Empleada', text: 'Muy bien, ¿cuál es?' },
+  { speaker: 'Cliente', text: 'El 654 32 18. Y el pedido lo recojo a las 19:15.' }
+];
+
+const groupedFicha = fillMissingSlots([], [PHONE_SLOT], GROUPED_PHONE).find(
+  ex => ex.slotId === 't-ficha-tel'
+);
+check(!!groupedFicha, 'un teléfono en cifras agrupadas debería producir una ficha de datos');
+if (groupedFicha) {
+  const labels = groupedFicha.fields.map(f => f.label);
+  check(
+    labels.filter(l => l.startsWith('Número')).length === 0,
+    `"654 32 18" debería leerse como un único teléfono, no como números sueltos (campos: ${labels.join(', ')})`
+  );
+  check(
+    labels.includes('Teléfono'),
+    `la ficha debería tener un campo "Teléfono" (tiene: ${labels.join(', ')})`
+  );
+  const phoneField = groupedFicha.fields.find(f => f.label === 'Teléfono');
+  if (phoneField) {
+    check(
+      phoneField.options.some(o => o.text === '654 32 18'),
+      'el valor correcto del teléfono debería mostrarse completo, tal como se dice'
+    );
+  }
+}
+
+// Y los pares mínimos con foco tienen que caer sobre las cifras, no sobre el saludo.
+const PAIRS_SLOT = {
+  slotId: 't-pares-tel',
+  stage: 'selectiva',
+  skill: 'decodificacion',
+  format: 'minimal_pairs',
+  items: 4,
+  brief: 'x',
+  engineFallback: 'minimal_pairs',
+  focus: 'phone'
+};
+
+const focusedPairs = fillMissingSlots([], [PAIRS_SLOT], SPOKEN_PHONE).find(
+  ex => ex.slotId === 't-pares-tel'
+);
+check(!!focusedPairs, 'los pares mínimos con foco deberían construirse sobre un teléfono dictado');
+if (focusedPairs) {
+  const NUMERALS = new Set(['seis', 'cinco', 'cuatro', 'treinta', 'dos', 'dieciocho']);
+  const firstOptions = focusedPairs.fields[0].options.map(o => o.text.toLowerCase());
+  check(
+    firstOptions.some(text => NUMERALS.has(text)),
+    `el primer par mínimo debería contrastar cifras del teléfono, no otra palabra (${firstOptions.join(' / ')})`
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 console.warn = realWarn;
 
