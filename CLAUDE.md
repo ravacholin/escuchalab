@@ -29,7 +29,7 @@ npm run preview
 ### Environment Setup
 - Create `.env.local` file with `GEMINI_API_KEY=your_key_here`
 - API key is also stored in localStorage under `gemini_api_key` for persistence
-- The app validates keys starting with "AIza" prefix
+- The app accepts both AI Studio key formats (`AIza…` and the newer `AQ.…`); the check lives in `services/apiKey.ts` (`looksLikeApiKey`)
 
 ### Vite Configuration
 - Dev server runs on port 3000 (host: 0.0.0.0)
@@ -134,6 +134,33 @@ At A0 and A1-A2 the topic decides which concrete datum the dialogue *must* conta
 **Deterministic engines** read `slot.focus` so the fallback lands on the datum too. They understand a datum dictated **in words** (`seis cinco cuatro treinta y dos…`, which is what the A0 prompt actually asks for) as well as in digits, and they group `654 32 18` into one `Teléfono` field instead of three loose `Número` ones. Word-run distractors change exactly one numeral and stay grammatical — `treinta y dos` → `cuarenta y dos`, never `veinte y dos`. Engines exist only where a provably correct exercise can be derived from the transcript. There is deliberately **no `ordering` or `matching` engine**: both need paraphrase, and an automatic paraphrase cannot be verified. Distractors are **phonetic neighbours** of words that are actually said (see `MINIMAL_PAIR_BANK`), never topic-related words, which would be discardable by plausibility without listening. Contrasts neutralised in most varieties (b/v, ll/y, silent h, and c/z~s under seseo) are excluded on purpose.
 
 **Never** show learners the normalised form of a word: `normalizeText()` in `services/textUtils.ts` is for comparison only. Display always keeps real orthography, accents and capitals included.
+
+### Progress Reporting (loading screens)
+
+The loading screen used to animate an invented script with `setTimeout`: the bar
+advanced on a clock rather than on work done, hit 100 % after ~8 s and then sat
+there while the request was still in flight. Nothing on screen may be simulated.
+
+With the staged pipeline there is only **one** blocking wait to report — the
+dialogue — and everything shown about it is measured:
+
+- **The dialogue call is streamed** (`generateContentStream`), which is what makes
+  measurement possible at all: a single opaque request has nothing to report between
+  send and response. `countStreamedTurns()` counts the turns already present in the
+  partial JSON and `LoadingScreen` renders that count against the turns the requested
+  length leads us to expect (`expectedTurns()` in `App.tsx`).
+- **The bar never reaches 100 %**: it is capped at 92 %, and the last stretch is
+  closed by the real response. A denominator we only estimate does not get to claim
+  completion.
+- **The other two phases are not behind a spinner any more**, so they report *inside*
+  the lesson instead: `exercisesPending` shows the exercises are still being written,
+  and `audioProgress` shows `done/total` **TTS chunks** — a real denominator, because
+  `chunkDialogueLines()` knows how many requests it is going to make. Neither invents
+  a percentage of anything the API doesn't announce.
+- `verifyExercises()` and `fillMissingSlots()` take optional reporting callbacks
+  (`onReject`, `onSlot`) so discards and engine fallbacks can be surfaced instead of
+  only landing in `console.warn`.
+- The only clock-driven element left is the elapsed-time counter, because it is a clock.
 
 ### Component Structure
 - `App.tsx`: Main orchestrator (580 lines) - handles all state and screen rendering
