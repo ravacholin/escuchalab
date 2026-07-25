@@ -61,8 +61,8 @@ The app uses a single `AppState` object managed in `App.tsx` with the following 
 
 ### Level System (Level enum)
 Levels differ in the *listening sub-skills* they train, not just in exercise difficulty. What each level can and cannot be asked is declared in `data/listeningSyllabus.ts` (see Exercise System below).
-- **Intro (A0)**: Natural-speed native audio; the learner decodes *data*, not clauses. Number/letter/time discrimination, minimal-pair contrasts, word spotting. No turn-ordering, no matching, no inference, no register judgements.
-- **Beginner (A1-A2)**: Topic and outcome of the exchange, sequence of actions, attribution to concrete *roles* (client/clerk — never abstract "formal/informal", which is B1+), frequent lexis and routine formulae.
+- **Intro (A0)**: Natural-speed native audio; the learner decodes *data*, not clauses. **Three exercises, all anchored to the dictated datum**: what the situation is, a data-capture form whose mandatory field *is* that datum, and minimal-pair discrimination on the digits/letters it is made of. No turn-ordering, no matching, no inference, no register judgements — and no pre-listening prediction or metacognitive wrap-up either, since both are reading tasks in a language the learner does not yet read.
+- **Beginner (A1-A2)**: Topic and outcome of the exchange, sequence of actions, data capture, chunk reconstruction and routine formulae — **five exercises**. Roles are named by their concrete part (client/clerk — never abstract "formal/informal", which is B1+). `matching` and `spot_the_difference` are deliberately *not* used here (they remain in Vocabulary mode and B1+): stacking them on top of `ordering` and `chunk_order` made a single lesson ask for ~36 discrete answers.
 - **Intermediate (B1-B2)**: Bridging inference, fact vs. opinion, problem↔solution, graded attitude, lexical precision and collocation. Introduces V/F/NOT GIVEN to penalise over-inference.
 - **Advanced (C1)**: Implicature, irony, subtext, rhetorical organisation, hedging, diaphasic/diastratic variation.
 
@@ -112,7 +112,11 @@ The exercise system is organised around a **listening syllabus**, not around ren
 
 `LessonPlan.exercises` is a **flat `Exercise[]`** ordered by stage. Each `Exercise` carries `stage`, `skill`, `slotId` and `sourceTurns` (dialogue indices, revealed in the feedback panel).
 
+**`data/dataPoints.ts` — the dictated datum, as a first-class value**
+At A0 and A1-A2 the topic decides which concrete datum the dialogue *must* contain (`inferDataPoint()` → `phone`, `price`, `time`, `spelling`…). That decision used to live inside `generateLessonPlan()` and die there, so the exercises never knew what had been dictated and the data-capture slot could land on anything. Now the `DataPointKind` travels to all three places that need it: the dialogue prompt (`instruction`), the exercise briefs (`{{dato}}`, `{{campo}}`, `{{contrastes}}`, interpolated by `getBlueprint(level, textType, mode, dataPoint)`) and the deterministic engines (`ExerciseSlot.focus`).
+
 **`data/listeningSyllabus.ts` — the pedagogical source of truth**
+- **Exercise budget per level.** `scripts/check-syllabus.mjs` caps lessons at 4 / 6 / 9 / 10 slots (A0 / A1-A2 / B1-B2 / C1). The blueprint *is* the lesson — there is no trimming step downstream — so a slot added to a low level has to displace another one.
 - `FORMAT_RULES[format]`: allowed levels and text types, the exact JSON shape shown to the model, and the authoring rules. Level gating applies **only** to formats whose mechanic itself carries the cognitive load (`ordering`, `matching`, `scale`, `true_false_notgiven`, `spot_the_difference`, `chunk_order`). For the rest the widget is neutral and the difficulty lives entirely in the slot's `brief`.
 - `getBlueprint(level, textType, mode)`: composes level templates → resolves each `brief` for the text type → filters structurally. **`textType` genuinely matters**: a radio bulletin (one speaker) never gets "who says it", a monologue gets real-chronology vs. narration order, a podcast gets question↔answer matching, news gets inverted-pyramid ordering and source attribution.
 - Mode overrides: `Vocabulary` now scales by level (A0 sound recognition → C1 nuance and connotation); `AccentChallenge` teaches the cues (minimal pairs on the discriminating feature → lexis by speaker) before asking for the country.
@@ -122,7 +126,7 @@ The exercise system is organised around a **listening syllabus**, not around ren
 2. `verifyExercises(raw, dialogue)` (`services/exerciseVerification.ts`) checks both internal coherence (keys point to existing ids, matchings are bijections, orderings are permutations, no degenerate items) **and fidelity to the audio** (cloze targets, chunk reconstructions and captured data must actually be said; tokens marked as altered must not appear in the source turn). Anything that fails is dropped — never shown with a false key.
 3. `fillMissingSlots(verified, blueprint, dialogue)` (`services/exerciseEngines.ts`) fills empty slots with deterministic engines, **in the slot's position**, and everything it builds goes through the same verifier.
 
-**Deterministic engines** exist only where a provably correct exercise can be derived from the transcript. There is deliberately **no `ordering` or `matching` engine**: both need paraphrase, and an automatic paraphrase cannot be verified. Distractors are **phonetic neighbours** of words that are actually said (see `MINIMAL_PAIR_BANK`), never topic-related words, which would be discardable by plausibility without listening. Contrasts neutralised in most varieties (b/v, ll/y, silent h, and c/z~s under seseo) are excluded on purpose.
+**Deterministic engines** read `slot.focus` so the fallback lands on the datum too. They understand a datum dictated **in words** (`seis cinco cuatro treinta y dos…`, which is what the A0 prompt actually asks for) as well as in digits, and they group `654 32 18` into one `Teléfono` field instead of three loose `Número` ones. Word-run distractors change exactly one numeral and stay grammatical — `treinta y dos` → `cuarenta y dos`, never `veinte y dos`. Engines exist only where a provably correct exercise can be derived from the transcript. There is deliberately **no `ordering` or `matching` engine**: both need paraphrase, and an automatic paraphrase cannot be verified. Distractors are **phonetic neighbours** of words that are actually said (see `MINIMAL_PAIR_BANK`), never topic-related words, which would be discardable by plausibility without listening. Contrasts neutralised in most varieties (b/v, ll/y, silent h, and c/z~s under seseo) are excluded on purpose.
 
 **Never** show learners the normalised form of a word: `normalizeText()` in `services/textUtils.ts` is for comparison only. Display always keeps real orthography, accents and capitals included.
 
@@ -140,7 +144,7 @@ The exercise system is organised around a **listening syllabus**, not around ren
 ### A0 Level Special Handling
 The Intro (A0) level uses a unique "realistic immersion" approach:
 - Generates natural-speed native dialogue (no simplification)
-- Dynamically injects mandatory data points based on topic keywords:
+- Injects a mandatory data point chosen from the topic by `inferDataPoint()` (`data/dataPoints.ts`). A1-A2 gets the same injection in a softer wording, so its data-capture slot always has material:
   - Phone numbers (digit-by-digit dictation)
   - Spelled names/surnames
   - Specific prices with cents
@@ -209,8 +213,8 @@ Models defined as constants in `geminiService.ts`:
 
 Automated checks (no API key or network needed) — run all with `npm test`:
 - `npm run typecheck` — `tsc --noEmit`.
-- `npm run check:syllabus` — walks `getBlueprint()` across the 42 valid level × text-type × mode combinations and asserts the pedagogical invariants: no format outside its level or text-type range, nothing presupposing two speakers in single-voice audio, A0 free of ordering/matching/scale/V-F-NG/spot-the-difference, C1 free of basic decoding formats, every lesson covering at least two stages and three distinct skills, stage order preserved, unique slot ids, existing engine fallbacks, and Vocabulary/text-type variants genuinely differing from one another.
-- `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text.
+- `npm run check:syllabus` — walks `getBlueprint()` across the 42 valid level × text-type × mode combinations and asserts the pedagogical invariants: the per-level exercise budget, no format outside its level or text-type range, nothing presupposing two speakers in single-voice audio, A0 free of ordering/matching/scale/V-F-NG/spot-the-difference, C1 free of basic decoding formats, every lesson covering at least two stages and three distinct skills, stage order preserved, unique slot ids, existing engine fallbacks, and Vocabulary/text-type variants genuinely differing from one another.
+- `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text. It also pins the dictated-datum path: a phone said in words and a phone said as `654 32 18` must both yield one `Teléfono` field, and focused minimal pairs must contrast the digits rather than the greeting.
 
 Manual checklist (needs an API key):
 1. All three modes (Standard, Vocabulary, AccentChallenge).

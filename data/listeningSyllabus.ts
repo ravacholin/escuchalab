@@ -1,4 +1,5 @@
 import { AppMode, ExerciseOption, ExerciseType, Level, ListeningSkill, ListeningStage, TextType } from '@/types';
+import { DataPointKind, dataPointProfile } from '@/data/dataPoints';
 
 /**
  * ============================================================================
@@ -118,6 +119,10 @@ export const FORMAT_LABELS: Record<ExerciseType, string> = {
  * verificable: antes se rellenaba ese hueco copiando turnos literales del
  * diálogo, que se ordenan leyendo y sin escuchar nada. Si el modelo falla uno de
  * esos slots, la lección sale con un ejercicio menos.
+ *
+ * `mention_true_false` no lo reclama hoy ningún slot (el `a2-datos` que lo usaba
+ * pasó a ser una ficha de datos), pero se conserva registrado y verificado: es
+ * el respaldo natural en cuanto vuelva a haber un slot de verdadero/falso.
  */
 export const ENGINE_IDS = [
   'select_all_heard',
@@ -276,16 +281,42 @@ export interface ExerciseSlot {
   engineFallback?: EngineId;
   /** Presupone interacción entre dos hablantes. */
   requiresTwoSpeakers?: boolean;
+  /**
+   * Dato obligatorio de la situación al que este slot tiene que apuntar. Lo
+   * rellena `getBlueprint()` en los slots marcados con `focusOnDataPoint`, y lo
+   * leen los motores deterministas para no construir la ficha ni los pares
+   * mínimos sobre el saludo en lugar de sobre la cifra dictada.
+   */
+  focus?: DataPointKind;
 }
 
-interface SlotTemplate extends Omit<ExerciseSlot, 'brief'> {
+interface SlotTemplate extends Omit<ExerciseSlot, 'brief' | 'focus'> {
   brief: string;
   briefByTextType?: Partial<Record<TextType, string>>;
+  /** El slot gira alrededor del dato obligatorio: recibe `focus` y interpolación. */
+  focusOnDataPoint?: boolean;
 }
 
-function resolve(template: SlotTemplate, textType: TextType): ExerciseSlot {
-  const { briefByTextType, ...rest } = template;
-  return { ...rest, brief: briefByTextType?.[textType] ?? template.brief };
+/**
+ * Marcadores que los briefs de los niveles bajos usan para hablar del dato
+ * concreto que se dictó, en vez de decir "un dato" en abstracto.
+ */
+function interpolate(brief: string, dataPoint?: DataPointKind): string {
+  const profile = dataPointProfile(dataPoint);
+  return brief
+    .replace(/\{\{dato\}\}/g, profile.label)
+    .replace(/\{\{campo\}\}/g, profile.fieldLabel)
+    .replace(/\{\{contrastes\}\}/g, profile.contrasts);
+}
+
+function resolve(template: SlotTemplate, textType: TextType, dataPoint?: DataPointKind): ExerciseSlot {
+  const { briefByTextType, focusOnDataPoint, ...rest } = template;
+  const brief = briefByTextType?.[textType] ?? template.brief;
+  return {
+    ...rest,
+    brief: focusOnDataPoint ? interpolate(brief, dataPoint) : brief,
+    ...(focusOnDataPoint ? { focus: dataPoint ?? 'generic' } : {})
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -295,21 +326,16 @@ function resolve(template: SlotTemplate, textType: TextType): ExerciseSlot {
 // decodifica DATOS. Todo lo que exija leer español corrido, inferir o juzgar
 // registro queda fuera. Las opciones son cortas, concretas y casi siempre
 // numéricas o de una o dos palabras.
+//
+// Son TRES ejercicios y los tres giran alrededor del dato obligatorio de la
+// situación. Antes eran seis (≈26 respuestas): predicción previa, idea global,
+// ficha, pares mínimos, caza de palabras y una reflexión metacognitiva redactada
+// en español corrido. En una lección de "pedir un número de teléfono" eso
+// significaba preguntar veintitantas cosas y sólo tres o cuatro sobre el número,
+// que es lo único que el nivel declara entrenar. La caza de palabras y la
+// reflexión, además, exigían leer español a quien todavía no lo lee.
 
 const A0_SLOTS: SlotTemplate[] = [
-  {
-    slotId: 'a0-anticipacion',
-    stage: 'anticipacion',
-    skill: 'estrategia',
-    format: 'multiple_choice',
-    items: 6,
-    brief:
-      'Antes de escuchar. 6 opciones de 1 a 3 palabras (o cifras), sin definiciones ni frases largas. El alumno marca las que cree que va a oír; "correctAnswer" es el array de las 2 o 3 que SÍ aparecen literalmente. Usa palabras transparentes, nombres propios y números.',
-    briefByTextType: {
-      [TextType.RadioNews]:
-        'Antes de escuchar. 6 temas o palabras clave de 1 a 3 palabras; "correctAnswer" es el array de las 2 o 3 que SÍ se mencionan en el boletín.'
-    }
-  },
   {
     slotId: 'a0-global',
     stage: 'global',
@@ -332,10 +358,15 @@ const A0_SLOTS: SlotTemplate[] = [
     stage: 'selectiva',
     skill: 'dato_literal',
     format: 'data_capture',
-    items: 4,
+    items: 3,
     engineFallback: 'data_capture',
+    focusOnDataPoint: true,
     brief:
-      'Ficha de datos de la situación con 3 o 4 campos. Es el ejercicio central del nivel: recoge exactamente el dato obligatorio que se dictó en el audio (teléfono, hora, precio, número, código o nombre deletreado).'
+      'Ficha de datos de la situación con 3 campos. Es EL ejercicio del nivel. El campo obligatorio se llama "{{campo}}" y recoge {{dato}}, exactamente como suena en el audio. Los otros dos campos son datos concretos secundarios de la misma situación (una cifra, una hora, un nombre). Las opciones de cada campo se diferencian en un solo elemento y suenan casi igual, y el valor correcto se dice literalmente.',
+    briefByTextType: {
+      [TextType.RadioNews]:
+        'Ficha con 3 campos sobre los datos concretos del boletín. El campo obligatorio se llama "{{campo}}" y recoge {{dato}}, exactamente como suena. Las opciones de cada campo se diferencian en un solo elemento y suenan casi igual.'
+    }
   },
   {
     slotId: 'a0-pares',
@@ -344,27 +375,9 @@ const A0_SLOTS: SlotTemplate[] = [
     format: 'minimal_pairs',
     items: 4,
     engineFallback: 'minimal_pairs',
+    focusOnDataPoint: true,
     brief:
-      '4 ítems de discriminación. Prioriza los contrastes que de verdad confunden a un principiante con este audio: cifras parecidas, acento de palabra y consonantes próximas.'
-  },
-  {
-    slotId: 'a0-caza',
-    stage: 'selectiva',
-    skill: 'reconocimiento_lexico',
-    format: 'multiple_choice',
-    items: 6,
-    engineFallback: 'select_all_heard',
-    brief:
-      'Caza de palabras: 6 palabras escritas con su ortografía real (tildes y mayúsculas incluidas). 3 aparecen literalmente en el audio y 3 no; "correctAnswer" es el array de las 3 que sí. Los distractores tienen que PARECERSE FONÉTICAMENTE a palabras que sí suenan (por ejemplo "cuento" frente a "cuenta"), nunca palabras sueltas del mismo tema, porque entonces se acierta por plausibilidad sin escuchar.'
-  },
-  {
-    slotId: 'a0-reflexion',
-    stage: 'reflexion',
-    skill: 'estrategia',
-    format: 'multiple_choice',
-    items: 3,
-    brief:
-      '¿Qué te ayudó a captar el dato? 3 opciones cortas y concretas sobre lo que ocurre REALMENTE en este audio ("lo repitieron dos veces", "lo deletrearon", "lo dijeron más despacio", "lo confirmaron al final"). "correctAnswer" es la que efectivamente pasa.'
+      '4 ítems de discriminación sobre {{dato}} y las palabras que lo rodean. Prioriza estos contrastes: {{contrastes}}. Cada ítem enfrenta la forma que SÍ suena con otra que suena casi igual.'
   }
 ];
 
@@ -374,17 +387,15 @@ const A0_SLOTS: SlotTemplate[] = [
 // Ya sigue la situación completa: qué se quiere, en qué orden pasa y en qué
 // queda. Los roles se nombran por su papel concreto (cliente/empleado), nunca
 // por etiquetas abstractas como "formal/informal", que son B1+.
+//
+// Son CINCO ejercicios. Antes eran nueve (≈36 respuestas) y acumulaban en la
+// misma lección un emparejamiento 4×4, un caza-el-cambio de 4 alteraciones sobre
+// una frase de 20 palabras y una reconstrucción por grupos fónicos: tres
+// mecánicas exigentes seguidas, y ninguna captura de datos, que es justamente lo
+// que este nivel todavía necesita consolidar. `matching` y
+// `spot_the_difference` siguen usándose en el modo Vocabulario y en B1+.
 
 const A2_SLOTS: SlotTemplate[] = [
-  {
-    slotId: 'a2-anticipacion',
-    stage: 'anticipacion',
-    skill: 'estrategia',
-    format: 'multiple_choice',
-    items: 6,
-    brief:
-      'Antes de escuchar. 6 expresiones frecuentes y breves propias de esta situación; el alumno marca las que espera oír. "correctAnswer" es el array de las 3 que aparecen literalmente.'
-  },
   {
     slotId: 'a2-global',
     stage: 'global',
@@ -420,41 +431,21 @@ const A2_SLOTS: SlotTemplate[] = [
     }
   },
   {
-    slotId: 'a2-emparejar',
-    stage: 'selectiva',
-    skill: 'rol_fuente',
-    format: 'matching',
-    items: 4,
-    brief:
-      'Empareja 4 frases del audio con los 4 propósitos concretos que cumplen ("pide la cuenta", "pregunta el precio", "rechaza la oferta", "confirma la hora"). Nada de etiquetas abstractas de registro.',
-    briefByTextType: {
-      [TextType.PodcastInterview]:
-        'Empareja las 4 preguntas del entrevistador con las 4 respuestas del entrevistado, parafraseadas en una línea.',
-      [TextType.RadioNews]:
-        'Empareja 4 datos del boletín (una cifra, una fecha, un lugar, una persona) con lo que representan en la noticia.',
-      [TextType.Monologue]:
-        'Empareja 4 momentos del relato con la reacción concreta del narrador en cada uno.'
-    }
-  },
-  {
     slotId: 'a2-datos',
     stage: 'selectiva',
     skill: 'dato_literal',
-    format: 'true_false',
-    items: 4,
-    engineFallback: 'mention_true_false',
+    format: 'data_capture',
+    items: 3,
+    engineFallback: 'data_capture',
+    focusOnDataPoint: true,
     brief:
-      '4 afirmaciones de máximo 10 palabras sobre información EXPLÍCITA (2 verdaderas, 2 falsas). Cada falsa debe contradecir algo que se dice en el audio.'
-  },
-  {
-    slotId: 'a2-caza-cambio',
-    stage: 'intensiva',
-    skill: 'segmentacion',
-    format: 'spot_the_difference',
-    items: 4,
-    engineFallback: 'spot_the_difference',
-    brief:
-      'Toma una oración del audio de 12 a 20 palabras y altera 4 palabras con cambios LÉXICOS o de concordancia sencillos: singular/plural, artículo, preposición, o una palabra por otra parecida y frecuente.'
+      'Ficha con 3 campos de la situación (una comanda, una reserva, una ficha de cliente). Uno de los campos se llama "{{campo}}" y recoge {{dato}}. Las opciones de cada campo se diferencian en un solo elemento y suenan casi igual ("14,95" / "40,95" / "14,55"), y el valor correcto se dice literalmente en el audio.',
+    briefByTextType: {
+      [TextType.RadioNews]:
+        'Ficha con 3 campos sobre los datos duros del boletín (cifra, fecha, lugar). Uno de los campos se llama "{{campo}}" y recoge {{dato}}. Las opciones de cada campo se diferencian en un solo elemento y suenan casi igual.',
+      [TextType.Monologue]:
+        'Ficha con 3 campos sobre los datos concretos del relato (cuándo, cuánto, dónde). Uno de los campos se llama "{{campo}}" y recoge {{dato}}. Las opciones de cada campo se diferencian en un solo elemento y suenan casi igual.'
+    }
   },
   {
     slotId: 'a2-chunks',
@@ -475,15 +466,6 @@ const A2_SLOTS: SlotTemplate[] = [
     engineFallback: 'two_gap_cloze',
     brief:
       'Frase del audio con 2 huecos que caigan sobre una FÓRMULA rutinaria de la situación ("¿me pone…?", "¿cuánto le debo?", "un momentito"). Las 3 opciones de cada hueco son fórmulas del mismo tipo, todas gramaticales en ese lugar.'
-  },
-  {
-    slotId: 'a2-lexico',
-    stage: 'intensiva',
-    skill: 'lexico_significado',
-    format: 'multiple_choice',
-    items: 4,
-    brief:
-      'Una palabra o expresión del audio y su significado EN ESTE CONTEXTO. Las 4 opciones son paráfrasis cortas y concretas, sin metalenguaje gramatical.'
   }
 ];
 
@@ -742,30 +724,20 @@ const VOCABULARY_SLOTS: Record<Level, SlotTemplate[]> = {
       stage: 'selectiva',
       skill: 'reconocimiento_lexico',
       format: 'multiple_choice',
-      items: 8,
+      items: 6,
       engineFallback: 'select_all_heard',
       brief:
-        '8 palabras del campo temático escritas correctamente; 4 aparecen literalmente en el audio y 4 no, y los distractores deben parecerse fonéticamente a las que sí suenan.'
+        '6 palabras del campo temático escritas correctamente; 3 aparecen literalmente en el audio y 3 no, y los distractores deben parecerse fonéticamente a las que sí suenan.'
     },
     {
       slotId: 'voc-a0-ficha',
       stage: 'selectiva',
       skill: 'dato_literal',
       format: 'data_capture',
-      items: 4,
+      items: 3,
       engineFallback: 'data_capture',
       brief:
-        'Ficha con 4 campos del tema (cantidad, precio, hora, nombre) con opciones casi idénticas.'
-    },
-    {
-      slotId: 'voc-a0-cloze',
-      stage: 'intensiva',
-      skill: 'colocacion_formula',
-      format: 'cloze',
-      items: 1,
-      engineFallback: 'listening_cloze',
-      brief:
-        'Frase corta del audio con 1 hueco sobre la palabra clave del tema y 4 opciones que suenan parecido.'
+        'Ficha con 3 campos del tema (cantidad, precio, hora, nombre) con opciones casi idénticas.'
     }
   ],
   [Level.Beginner]: [
@@ -897,17 +869,25 @@ const VOCABULARY_SLOTS: Record<Level, SlotTemplate[]> = {
 
 function accentSlots(level: Level): SlotTemplate[] {
   const isLow = level === Level.Intro || level === Level.Beginner;
+  const isIntro = level === Level.Intro;
 
   return [
-    {
-      slotId: 'acc-anticipacion',
-      stage: 'anticipacion',
-      skill: 'variacion_dialectal',
-      format: 'multiple_choice',
-      items: 6,
-      brief:
-        'Antes de escuchar. 6 rasgos observables descritos SIN nombrar países ("pronuncia la c de cinco como z", "usa vos en vez de tú", "aspira la s final"). El alumno marca los que cree que va a oír; "correctAnswer" es el array de los que efectivamente aparecen.'
-    },
+    // La anticipación exige leer descripciones metafonéticas en español corrido
+    // ("aspira la s final"), que en A0/A1 es una tarea de lectura disfrazada de
+    // escucha. En niveles bajos se entra directamente por la percepción.
+    ...(isLow
+      ? []
+      : [
+          {
+            slotId: 'acc-anticipacion',
+            stage: 'anticipacion' as const,
+            skill: 'variacion_dialectal' as const,
+            format: 'multiple_choice' as const,
+            items: 6,
+            brief:
+              'Antes de escuchar. 6 rasgos observables descritos SIN nombrar países ("pronuncia la c de cinco como z", "usa vos en vez de tú", "aspira la s final"). El alumno marca los que cree que va a oír; "correctAnswer" es el array de los que efectivamente aparecen.'
+          }
+        ]),
     {
       // La percepción va primero: identificar el país sin haber aislado antes el
       // rasgo que lo delata es adivinar. En niveles bajos se usan solo los
@@ -921,15 +901,23 @@ function accentSlots(level: Level): SlotTemplate[] {
         ? '4 ítems con los contrastes MÁS MARCADOS que aparecen en el audio: la misma palabra tal como suena en boca de cada hablante ("cinco" con z frente a "cinco" con s, "calle" con y frente a "calle" con sh, "tú tienes" frente a "vos tenés"). El alumno marca la forma que realmente oye.'
         : '4 ítems que aíslen el rasgo discriminante fino: seseo frente a distinción, aspiración o elisión de /s/ final, yeísmo rehilado, y realización de la jota. Usa palabras que se dicen en el audio.'
     },
-    {
-      slotId: 'acc-lexico',
-      stage: 'selectiva',
-      skill: 'variacion_dialectal',
-      format: 'classification',
-      items: 6,
-      brief:
-        '6 palabras o expresiones DIALECTALES realmente dichas en el audio; 2 columnas, una por hablante, identificadas como "Hablante A" y "Hablante B" sin revelar el país.'
-    },
+    // Clasificar seis expresiones dialectales escritas es, en A0, una tarea de
+    // lectura: el alumno no tiene aún léxico con el que reconocerlas. El andamio
+    // que sí funciona a ese nivel son los pares mínimos de arriba, que aíslan el
+    // rasgo por el oído.
+    ...(isIntro
+      ? []
+      : [
+          {
+            slotId: 'acc-lexico',
+            stage: 'selectiva' as const,
+            skill: 'variacion_dialectal' as const,
+            format: 'classification' as const,
+            items: 6,
+            brief:
+              '6 palabras o expresiones DIALECTALES realmente dichas en el audio; 2 columnas, una por hablante, identificadas como "Hablante A" y "Hablante B" sin revelar el país.'
+          }
+        ]),
     {
       slotId: 'acc-origen-a',
       stage: 'selectiva',
@@ -991,7 +979,12 @@ function isFormatAllowed(format: ExerciseType, level: Level, textType: TextType)
  * → resolución del brief para el tipo de audio → filtrado estructural por
  * `FORMAT_RULES` y por número de hablantes.
  */
-export function getBlueprint(level: Level, textType: TextType, mode: AppMode): ExerciseSlot[] {
+export function getBlueprint(
+  level: Level,
+  textType: TextType,
+  mode: AppMode,
+  dataPoint?: DataPointKind
+): ExerciseSlot[] {
   let templates: SlotTemplate[];
 
   if (mode === AppMode.AccentChallenge) {
@@ -1022,7 +1015,7 @@ export function getBlueprint(level: Level, textType: TextType, mode: AppMode): E
       seen.add(slot.slotId);
       return true;
     })
-    .map(slot => resolve(slot, textType))
+    .map(slot => resolve(slot, textType, dataPoint))
     .sort((a, b) => STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage));
 }
 

@@ -2,6 +2,7 @@
 import { GoogleGenAI, GenerateContentResponse, Modality } from "@google/genai";
 import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from "../types";
 import { ExerciseSlot, FORMAT_RULES, getBlueprint, STAGE_META } from "../data/listeningSyllabus";
+import { DATA_POINTS, inferDataPoint } from "../data/dataPoints";
 import { fillMissingSlots } from "./exerciseEngines";
 import { verifyExercises } from "./exerciseVerification";
 
@@ -684,42 +685,27 @@ export const generateLessonPlan = async (
 
   // REGLAS ESPECÍFICAS DE NIVEL
   let constraint = "";
+  // El dato obligatorio de la situación se decide UNA vez y viaja a los dos
+  // sitios que lo necesitan: el prompt del diálogo (para que se diga) y el
+  // blueprint (para que los ejercicios pregunten por él y no por otra cosa).
+  const isLowLevel = level === Level.Intro || level === Level.Beginner;
+  const dataPoint = isLowLevel ? inferDataPoint(topic) : undefined;
+  const dataPointInstruction = dataPoint ? DATA_POINTS[dataPoint].instruction : "";
+
   if (level === Level.Intro) {
-    // DYNAMIC A0 INJECTION
-    const t = topic.toLowerCase();
-    let mandatoryInclusion = "";
-
-    if (t.includes("correo") || t.includes("email") || t.includes("arroba")) {
-      mandatoryInclusion = "MANDATORY: Dictate an email address using 'arroba', 'punto', 'guion bajo'.";
-    } else if (t.includes("deletre") || t.includes("apellido") || t.includes("letra por letra") || t.includes("usuario")) {
-      mandatoryInclusion = "MANDATORY: One speaker MUST SPELL a name/surname/username letter by letter (e.g., 'G-A-R-C-I-A'). It must be clear.";
-    } else if (t.includes("teléfono") || t.includes("telefono") || t.includes("whatsapp") || t.includes("celular") || t.includes("móvil") || t.includes("movil")) {
-      mandatoryInclusion = "MANDATORY: One speaker MUST dictate a phone number digit by digit (e.g., '6-5-4...').";
-    } else if (t.includes("precio") || t.includes("cuenta") || t.includes("cuesta") || t.includes("pagar") || t.includes("total")) {
-      mandatoryInclusion = "MANDATORY: Mention a specific price with decimals in the local currency of the chosen accent (e.g., '14 con 95'). Do NOT force euros.";
-    } else if (t.includes("dirección") || t.includes("direccion") || t.includes("calle") || t.includes("dirección exacta")) {
-      mandatoryInclusion = "MANDATORY: Mention a specific street name and building number.";
-    } else if (t.includes("código") || t.includes("codigo") || t.includes("postal") || t.includes("matrícula") || t.includes("matricula") || t.includes("documento")) {
-      mandatoryInclusion = "MANDATORY: Dictate a specific alphanumeric code/postal code digit by digit.";
-    } else if (t.includes("fecha") || t.includes("nacimiento") || t.includes("día") || t.includes("dia ")) {
-      mandatoryInclusion = "MANDATORY: State a specific date (day, month, year) clearly.";
-    } else if (t.includes("hora") || t.includes("cita") || t.includes("horario") || t.includes("reservar")) {
-      mandatoryInclusion = "MANDATORY: Mention specific times (e.g., 'A las 5 y media').";
-    } else if (t.includes("número") || t.includes("numero") || t.includes("dígito") || t.includes("digito") || t.includes("talla") || t.includes("cantidad")) {
-      mandatoryInclusion = "MANDATORY: One speaker MUST state a specific number/quantity clearly (e.g., a bus line, a size, a room number).";
-    } else {
-      mandatoryInclusion = "MANDATORY: One speaker MUST state a concrete literal datum (a number, time, price, code or spelled name) clearly, so the learner can extract it.";
-    }
-
     constraint = `
       NIVEL A0 (REALISTA - INMERSIÓN TOTAL):
       - Genera un diálogo 100% NATURAL y FLUIDO entre nativos.
       - VELOCIDAD NORMAL. NO hables lento. NO simplifiques las frases. NO limites el vocabulario.
-      - ${mandatoryInclusion}
+      - ${dataPointInstruction}
       - El objetivo es que el estudiante capture ese dato específico en un entorno ruidoso/rápido.
       `;
   } else if (level === Level.Beginner) {
-    constraint = `NIVEL A1-A2: Frases de longitud media, vocabulario frecuente.`;
+    constraint = `
+      NIVEL A1-A2: Frases de longitud media, vocabulario frecuente.
+      - ${dataPointInstruction}
+      - Ese dato tiene que oírse con claridad dentro de la conversación, sin subrayarlo ni repetirlo de forma artificial.
+      `;
   } else {
     constraint = `NIVEL MCER: ${level}. Naturalidad y coherencia con el nivel.`;
   }
@@ -749,7 +735,7 @@ export const generateLessonPlan = async (
     profileInstruction = `${baseProfile}. CONSISTENCIA: AMBOS HABLANTES SON NATIVOS DE ESTA REGIÓN. Prohibido mezclar con neutro.`;
   }
 
-  const blueprint = getBlueprint(level, textType, mode);
+  const blueprint = getBlueprint(level, textType, mode, dataPoint);
   const exerciseLogic = buildExercisePrompt(blueprint);
   const registerInstruction = getRegisterInstruction(textType);
 
