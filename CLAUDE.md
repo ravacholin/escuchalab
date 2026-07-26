@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**EscuchaLAB** is an AI-powered Spanish listening practice application that generates level-appropriate dialogues, audio, and exercises based on the CEFR framework. The app uses Google's Gemini API for content generation and text-to-speech, and a bundled, scenario-aware ambient sound engine (real recorded/rendered textures + live synthetic events) to make dialogues feel situated in their context.
+**EscuchaLAB** is an AI-powered Spanish listening practice application that generates level-appropriate dialogues, audio, and exercises based on the CEFR framework. The app uses Google's Gemini API for content generation and text-to-speech, and a bundled, scenario-aware ambient sound engine (12 reusable rendered stems mixed per scene, plus live synthesised events) to make dialogues feel situated in their context.
 
 Built with: React 19, TypeScript, Vite, Google GenAI SDK, Tailwind CSS (via CDN in index.html)
 
@@ -51,7 +51,7 @@ The app uses a single `AppState` object managed in `App.tsx` with the following 
 1. User configures lesson parameters (level, mode, topic, accent, length, format)
 2. `generateLessonPlan()` in `geminiService.ts` creates structured lesson content
 3. `generateAudio()` converts dialogue to speech with appropriate voice profiles
-4. AudioPlayer resolves an `AmbiencePreset` (`services/ambiencePresets.ts`) from the scenario/topic and layers a bundled ambient bed with live synthetic events
+4. AudioPlayer resolves a `SceneRecipe` (`services/ambiencePresets.ts`) from the scenario label, text type, topic and the model's scene hint, and `services/ambienceEngine.ts` mixes the recipe's bundled stems in a synthetic room with live synthesised events
 5. User interacts with transcript, comprehension, and vocabulary tabs
 
 ### App Modes (AppMode enum)
@@ -92,15 +92,89 @@ Key implementation notes:
 - **Chunked at turn boundaries** (`chunkDialogueLines`): the phonetic profile prepended to every request eats 2196-3407 of the 5000-character budget, and the old code just did `substring(0, 5000)` — a `Largo` dialogue in Buenos Aires or Lima silently lost its last turns mid-sentence while the exercises kept asking about them. `ttsDialogueBudget(accent)` computes what is actually left, and no turn is ever dropped. Chunks are also used for speed above `TURNS_BEFORE_SPLITTING` turns, generated with `TTS_CONCURRENCY = 2` (three in parallel gets 429/503 from the API) and concatenated with a 5 ms fade at each seam (`concatPcmChunks`). **Each chunk is one more request against the TTS quota**, so short lessons deliberately stay in a single call. The chunking is internal to `generateAudio()`: it still takes the same arguments, still reports through `ProgressReporter`, and still returns one base64 PCM track.
 
 ### Ambient Sound System
-A hybrid, fully self-contained system — no external API calls, no CORS/rate-limit/key-exposure risk in production:
-- `services/ambiencePresets.ts`: maps each `ScenarioContext.label` (from `data/scenarios.ts`, ~145 entries) to an `EnvironmentProfile` (`CITY | CAFE | OFFICE | NATURE | ROOM`) and a list of `AmbienceTag`s (crowd, traffic, kitchen, footsteps, door, rain, market, etc.), with a keyword-regex fallback (`inferFallbackProfile`) for custom topics/Vocabulary/AccentChallenge modes where no scenario label exists.
-- `services/ambienceLibrary.ts`: resolves each `EnvironmentProfile` to a bundled, same-origin audio file under `public/ambience/*.wav` and fetch+decodes it into an `AudioBuffer` (cached per URL).
-- `scripts/generate-ambience-beds.mjs`: offline Node script that renders those five `.wav` beds (long, seamlessly-looping, layered/filtered noise textures per profile). Re-run it to regenerate or retune the beds — nothing at runtime depends on this script.
-- `components/AudioPlayer.tsx`: at playback start, loads the resolved bed as a looping `AudioBufferSourceNode` layered under a rich set of live, tag-driven synthetic event generators (footsteps, door chimes, crowd babble, sirens, honks, printer bursts, rain drops, bird chirps, etc. — see the file for the full list) built with the Web Audio API. When the real bed loads, the purely-synthetic continuous "hum/air" layers are attenuated (not removed) to avoid doubling, while all discrete events stay at full richness. If the bed fails to load for any reason, playback silently continues with the (now clearly audible) synthetic-only bed — there is no user-facing failure mode.
-- **Mix bus & levels**: the synthetic layers are authored at tiny amplitudes and lifted by two makeup gains — `EVENT_MAKEUP` (discrete one-shots) and `BED_MAKEUP` (continuous textures) — into separate `eventBus`/`bedBus` nodes so discrete "life" is never buried under the continuous air. Both feed a persistent chain `userGain → limiter → duckGain → destination`, where `limiter` is a brickwall `DynamicsCompressor` that lets the makeup gains be driven hard without ever clipping. The bundled bed bypasses the makeup buses and sits directly on `userGain` at `REAL_BED_GAIN`. Tune everything from those constants near the top of the file.
-- **Non-repetitive**: each playback reseeds the event RNG with a random per-play salt, and the bundled bed enters its loop at a random offset with a slight detune, so the same scenario never sounds identical twice.
-- **Robust lifecycle & fail-safes**: `ensureAudioGraph()` creates/resumes the single `AudioContext` on the first user gesture (never born "suspended"), probes Web Audio support once, and self-heals via `onstatechange` if the context is re-suspended. If Web Audio is unavailable, speech falls back to the plain `<audio>` element (no `createMediaElementSource`, no ambience, no crash). All ambience node creation is wrapped so failures only `console.warn`.
-- Real-time ducking (lowers ambience under speech) and light reverb/delay tied to the dialogue audio are also handled in `AudioPlayer.tsx`, via an `AnalyserNode` on the speech track and a `duckGain` node wrapping the whole ambience mix.
+
+Fully self-contained — no external API calls, no CORS/rate-limit/key-exposure risk in
+production. The design unit is a **scene recipe**, not an audio file.
+
+**Why it was rebuilt.** The previous system baked one monolithic bed per
+`EnvironmentProfile`: five files, and the result was that every scenario sounded like
+rain regardless of context. Three independent causes, all measurable:
+- The five beds were the same recipe — 2-3 layers of *stationary* filtered noise summed
+  at fixed gains and normalised **by peak**, which let the brown-noise layer set the
+  level. 62-77% of their energy sat below 250 Hz and their short-term loudness range
+  was 2.2-3.7 dB, where a real field recording spans 15-25 dB. Statistically they were
+  indistinguishable from stationary noise, which is exactly what rain is. The `nature`
+  bed in particular (lowpassed pink + bandpassed white, no amplitude modulation) *was*
+  the textbook rain synthesis recipe.
+- 30 of the 40 curated scenarios resolved to `OFFICE` and played the identical file — a
+  workshop, an art gallery, a wine tasting and a gym all shared one texture. `NATURE`
+  was unreachable, and the 108 RadioNews/Podcast/Monologue labels fell through a
+  keyword regex to `ROOM`, the emptiest bed of the five.
+- 23 of the 38 `AmbienceTag`s had no generator at all, so a café carried a `kitchen` tag
+  and never produced a plate. The live "crowd babble" filtered one shared noise buffer
+  through several wide bandpasses, so the voices were perfectly correlated and summed
+  to one hiss; its syllabic envelope modulated a gain into negative values, so syllables
+  never articulated.
+
+**Architecture.** 12 reusable stems, mixed per scene at runtime:
+- `public/ambience/*.wav` — 12 bundled stems (~8.9 MB total, less than the 5 old beds):
+  `babble_close`, `babble_hall`, `babble_open`, `traffic_near`, `traffic_far`,
+  `kitchen`, `hvac_office`, `room_tone`, `studio_tone`, `transit_hum`, `rain`,
+  `wind_leaves`. Sample rate and channel count are chosen per stem by content (8-24 kHz,
+  mono except the two that carry the most spatial information).
+- `services/ambiencePresets.ts` — ~40 `SceneRecipe`s (stems + gains + room + events) and
+  the mapping from all **148** `ScenarioContext.label`s, layered by `TextType`: a radio
+  bulletin is heard from a studio, not from the place it is about. `bedLevel()` computes
+  a scene's nominal bed amplitude from `STEM_LEVELS_DBFS`.
+- `services/ambienceEngine.ts` — framework-free runtime engine. Mixes the recipe's stems
+  (each shaped, stereo-widened, entering its loop at a random offset), builds a room
+  impulse response with early reflections and frequency-dependent decay, and schedules
+  ~39 synthesised event kinds.
+- `scripts/ambience/{dsp,voice,events,stems,preview}.mjs` — the offline synthesis
+  toolkit. `voice.mjs` is the highest-leverage piece: a source-filter voice (Rosenberg
+  glottal pulses with jitter → 4 resonant formants on real Spanish vowels → syllable
+  envelopes that reach true silence → phrase structure with pauses). Its modulation
+  spectrum peaks at ~5.9 Hz, the syllable rate — that rhythm is what makes a listener
+  hear people rather than noise.
+
+**Key invariants**
+- **Events are scaled against the scene's bed** (`bedLevel() * EVENT_OVER_BED`), never by
+  a fixed makeup gain. Beds span ~20 dB across scenes, so a global gain puts the same
+  footstep 11 dB over a café and 25 dB over a therapy room.
+- **The limiter is a safety device, not a program compressor.** The old settings
+  (−6 dB, 20:1, 250 ms release, events driven ×42) meant every clink ducked the whole
+  bed for a quarter second.
+- **Near/far event buses.** Far events are lowpassed and pushed into the reverb; near
+  events stay dry and panned. That split is what creates depth.
+- **Outdoor scenes get almost no reverb tail** (`ROOM_PARAMS.outdoor`). Giving a street a
+  1.1 s tail is one of the reasons everything used to sound like an interior.
+- **Every `EventKind` has a synth**, asserted by `check:ambience` — tags can no longer be
+  dead code.
+- **Node lifecycle**: event nodes are released on completion rather than accumulating
+  for the whole lesson; events are scheduled against `ctx.currentTime` with a lookahead
+  rather than fired from `setTimeout`, which browsers throttle to ≥1 s in background tabs.
+- **Ducking is asymmetric** (~12 ms attack, ~420 ms release) so the bed stops pumping
+  between syllables.
+- **Fail-safes**: `ensureAudioContext()` creates/resumes one `AudioContext` on the first
+  user gesture (never born suspended) and self-heals via `onstatechange`. If Web Audio is
+  unavailable, speech falls back to the plain `<audio>` element. A stem that fails to
+  load is skipped; the scene plays with the rest.
+- **Non-repetitive**: per-playback RNG salt, and each stem enters its loop at an
+  independent random offset, so stems of different lengths never phase-lock.
+- Ambience volume / intensity / ducking and a mute toggle persist in `localStorage`
+  (`ambience_prefs_v1`) — `App.tsx` remounts the player per lesson, so plain state reset
+  them every time.
+
+**Working on it**
+- `npm run ambience:build` regenerates all 12 stems (deterministic — re-running gives
+  byte-identical files). Pass stem names to rebuild a subset. It prints each stem's
+  measurements and flags any that miss their targets.
+- `npm run ambience:preview -- cafe street station` renders complete scene mixes to
+  `.ambience-preview/*.wav` so you can **listen** without a browser or an API key. Run
+  with no arguments to list the scenes, or `--all`.
+- Adding a scene costs a recipe, not another 2 MB of audio. Adding a stem means adding it
+  to `STEMS` (stems.mjs), `StemId` + `STEM_LEVELS_DBFS` (ambiencePresets.ts), and
+  referencing it from at least one recipe — `check:ambience` enforces all three.
 
 ### Exercise System
 
@@ -168,7 +242,7 @@ measurement.
 
 ### Component Structure
 - `App.tsx`: Main orchestrator (580 lines) - handles all state and screen rendering
-- `AudioPlayer.tsx`: Integrated audio playback with bundled ambient bed + synthetic event mixing (see Ambient Sound System above)
+- `AudioPlayer.tsx`: Transport, speech routing and ambience UI. The ambience engine itself lives in `services/ambienceEngine.ts` (see Ambient Sound System above); the component was 1529 lines when ~900 of them were the engine.
 - `ExerciseCard.tsx`: Polymorphic renderer for the 12 formats; shows the skill badge, and on submit reveals the `sourceTurns` lines as proof of the key
 - `MatrixSelector.tsx`: Locus × Modus grid interface for Standard mode
 - `AuthScreen.tsx`: API key entry with localStorage persistence
@@ -213,7 +287,7 @@ The Intro (A0) level uses a unique "realistic immersion" approach:
 ### Adding a New Dialect
 1. Add enum value to `Accent` in `types.ts`
 2. Create profile in `DIALECT_PROFILES` (geminiService.ts) with grammar/pragmatics/lexicon
-3. Update AudioPlayer topic mapping if region-specific ambient sounds needed
+3. Ambience is chosen by scenario/text type, not by accent, so nothing to change there unless the region needs its own scene
 
 ### Adding a New Exercise Format
 1. Add the value to `ExerciseType` in `types.ts` (plus any format-specific field).
@@ -240,7 +314,8 @@ Models defined as constants in `geminiService.ts`:
 - **API Key Security**: Keys stored in localStorage and injected via Vite config; never commit `.env.local`
 - **Audio Sanitization**: TTS will reject text with stage directions - always sanitize before sending
 - **Speaker Mapping**: TTS requires consistent internal speaker IDs; use "SpeakerA"/"SpeakerB" mapping for robustness
-- **Ambient Beds Are Bundled Assets**: `public/ambience/*.wav` ship with the app; there is no external ambient-audio API call, so there's nothing to rate-limit or fail at runtime. Regenerate/retune them with `node scripts/generate-ambience-beds.mjs`.
+- **Ambient Stems Are Bundled Assets**: `public/ambience/*.wav` ship with the app; there is no external ambient-audio API call, so there's nothing to rate-limit or fail at runtime. Regenerate/retune them with `npm run ambience:build`, and audition scenes with `npm run ambience:preview -- <scene>`.
+- **Ambience is judged by ear, floored by measurement**: `check:ambience` asserts the numbers that separate "a place" from "noise" (energy below 250 Hz, short-term loudness range, spectral+dynamic distance between scenes). It cannot tell you a café sounds like a café — use `ambience:preview` for that.
 - **Answer keys are verified, not trusted**: every exercise (model-generated *and* engine-generated) goes through `verifyExercise()` before rendering. It checks internal coherence and fidelity to the transcript. Prefer shipping one exercise fewer over one that teaches something false.
 - **Never display normalised text**: accent-stripped, lowercased forms are for comparison only. Options shown to learners keep their real spelling.
 - **Distractors must require listening**: phonetic neighbours of words actually said, never topic-adjacent words (those get discarded by plausibility) and never options that are ungrammatical in context (those get discarded by reading).
@@ -252,6 +327,7 @@ Automated checks (no API key or network needed) — run all with `npm test`:
 - `npm run typecheck` — `tsc --noEmit`.
 - `npm run check:audio` — asserts the TTS chunking never exceeds the per-accent character budget, never loses a turn (the `substring(0, 5000)` bug), keeps short dialogues in a single request, splits an oversized single turn by sentence instead of truncating it, and that the PCM concatenation preserves every sample while fading only the seam.
 - `npm run check:syllabus` — walks `getBlueprint()` across the 42 valid level × text-type × mode combinations and asserts the pedagogical invariants: the per-level exercise budget, no format outside its level or text-type range, nothing presupposing two speakers in single-voice audio, A0 free of ordering/matching/scale/V-F-NG/spot-the-difference, C1 free of basic decoding formats, every lesson covering at least two stages and three distinct skills, stage order preserved, unique slot ids, existing engine fallbacks, and Vocabulary/text-type variants genuinely differing from one another.
+- `npm run check:ambience` — asserts that all 148 scenario labels resolve to a curated scene (none falling through to the generic fallback, which is how 108 of them behaved before), that no scene monopolises the place-based dialogue catalogue (max 15%, where the old `OFFICE` profile held 75%), that each non-dialogue format has its own default scene, that every stem a recipe names exists and none is orphaned, that every `EventKind` has a registered synth, that the runtime's stem-level table matches what was baked, and the acoustic floor: per stem, energy below 250 Hz and short-term loudness range within the targets declared in `stems.mjs`, plus a minimum spectral+dynamic distance between the character stems. It cannot tell you whether a café *sounds* like a café — `npm run ambience:preview` is for that.
 - `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text. It also pins the dictated-datum path: a phone said in words and a phone said as `654 32 18` must both yield one `Teléfono` field, and focused minimal pairs must contrast the digits rather than the greeting.
 
 Manual checklist (needs an API key):
@@ -261,3 +337,4 @@ Manual checklist (needs an API key):
 4. Vocabulary at A0 vs. C1: confirm they are no longer identical.
 5. Rendering and submit/feedback for the newer formats (`data_capture`, `minimal_pairs`, `spot_the_difference`, `matching`, `scale`, `true_false_notgiven`, `chunk_order`), including the `sourceTurns` reveal.
 6. Audio generation across accent/gender combinations; localStorage persistence; error handling for invalid keys.
+7. Ambience: play a `Café / Restaurante`, a `Taxi / Transporte`, a `Taller Mecánico`, an `Aeropuerto / Aerolínea`, an `El Tiempo` (RadioNews) and a `Mi Rutina Diaria` (Podcast) — they should be recognisable blind and clearly different from one another. Check that the bed ducks under speech without pumping between syllables, that the volume/intensity/ducking/mute settings survive generating a new lesson, and that deleting `public/ambience/` degrades to a working player rather than an error.

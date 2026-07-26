@@ -11,7 +11,10 @@
     "check:syllabus": "node scripts/check-syllabus.mjs",
     "check:exercises": "node scripts/check-exercises.mjs",
     "check:audio": "node scripts/check-audio.mjs",
-    "test": "npm run typecheck && npm run check:syllabus && npm run check:exercises && npm run check:audio"
+    "check:ambience": "node scripts/check-ambience.mjs",
+    "ambience:build": "node scripts/generate-ambience-beds.mjs",
+    "ambience:preview": "node scripts/ambience/preview.mjs",
+    "test": "npm run typecheck && npm run check:syllabus && npm run check:exercises && npm run check:audio && npm run check:ambience"
   },
   "dependencies": {
     "@google/genai": "^2.13.0",

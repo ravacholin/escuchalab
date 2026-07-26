@@ -609,6 +609,8 @@ const App: React.FC = () => {
                                 recommendedSpeed={getSpeedForLevel(state.config.level)}
                                 topic={getAmbienceContext()}
                                 explicitQuery={state.lessonPlan?.ambientKeywords}
+                                sceneHint={state.lessonPlan?.ambientScene}
+                                textType={state.config.textType}
                                 scenarioLabel={state.config.mode === AppMode.Standard && !isCustomMode ? selectedLocus.label : undefined}
                                 scenarioActionLabel={state.config.mode === AppMode.Standard && !isCustomMode ? selectedModus.label : undefined}
                                 hideTrackInfo={state.config.mode === AppMode.AccentChallenge}
