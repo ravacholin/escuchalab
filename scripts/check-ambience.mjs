@@ -23,7 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   decodeWav, lowEnergyRatio, loudnessRangeDb, bandProfile, spectralDistance,
-  octaveConcentration,
+  octaveConcentration, loopDiscontinuity,
 } from './ambience/dsp.mjs';
 import { STEMS, STEM_IDS } from './ambience/stems.mjs';
 
@@ -399,6 +399,19 @@ for (const id of STEM_IDS) {
       `(max ${(spec.expect.maxLowRatio * 100).toFixed(0)}%) — rumble is masking the detail`,
     );
   }
+  // Every stem is played on loop for the length of a lesson, so a step at the splice
+  // is a click every 14-24 seconds. makeSeamlessLoop crossfades to prevent it; this
+  // asserts the crossfade is actually doing its job, per channel.
+  for (let ch = 0; ch < channels.length; ch++) {
+    const disc = loopDiscontinuity(channels[ch]);
+    if (disc > 8) {
+      fail(
+        `stem "${id}" channel ${ch}: loop point steps ${disc.toFixed(1)}x the typical ` +
+        `sample delta — audible click once per loop`,
+      );
+    }
+  }
+
   // Too little loudness variation means nothing is happening. The old beds measured
   // 2.2-3.7 dB; real field recordings span 15-25 dB.
   if (lra < spec.expect.minLoudnessRange) {

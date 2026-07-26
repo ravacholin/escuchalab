@@ -74,6 +74,12 @@ const REVERB_RETURN = 0.9;
  *  return, and applying it here too is what left the bed dry. */
 export const BED_REVERB_SEND = 0.7;
 
+/**
+ * Playheads per stem. See attachStem: two offset heads at slightly different rates
+ * stop a 14-24 s buffer from being heard as a loop over a three-minute lesson.
+ */
+export const PLAYHEADS_PER_STEM = 2;
+
 /** Side-signal scale for stereo stems at width 1. See attachStem for the measurement. */
 const STEREO_SIDE_SCALE = 0.7;
 
@@ -1620,11 +1626,40 @@ export class AmbienceEngine {
 
   private attachStem(id: StemId, layer: SceneRecipe['stems'][number], buffer: AudioBuffer) {
     const { ctx } = this;
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.loop = true;
 
-    let node: AudioNode = src;
+    // Two playheads per stem, offset from each other and running at slightly
+    // different rates.
+    //
+    // The stems are 14-24 seconds and used to play from a single source at exactly
+    // 1.0, so a three-minute lesson replayed the identical 18 seconds of crowd about
+    // ten times. Once a listener has heard a loop twice they hear it as a loop
+    // forever, and no amount of spectral work fixes that — it is the one artefact
+    // that says "recording" rather than "place".
+    //
+    // Two heads with an irrational-ish rate ratio means the composite never repeats
+    // within any plausible lesson: the beat period between them is minutes long. It
+    // costs one extra buffer source per layer and not a single byte of asset, which
+    // is the only reason it is done here rather than by baking longer stems (there is
+    // ~1 MB of headroom in the budget, nowhere near enough).
+    const heads: AudioBufferSourceNode[] = [];
+    const merge = ctx.createGain();
+    // Decorrelated copies sum in power, so compensate to keep the layer at its gain.
+    merge.gain.value = 1 / Math.sqrt(PLAYHEADS_PER_STEM);
+    this.liveNodes.add(merge);
+
+    for (let h = 0; h < PLAYHEADS_PER_STEM; h++) {
+      const head = ctx.createBufferSource();
+      head.buffer = buffer;
+      head.loop = true;
+      // A fraction of a percent: inaudible as pitch, but it detunes the loop period
+      // enough that the two heads never line up again.
+      head.playbackRate.value = h === 0 ? 1 : 1 + (this.rng() < 0.5 ? -1 : 1) * (0.004 + this.rng() * 0.004);
+      head.connect(merge);
+      heads.push(head);
+    }
+
+    const src = heads[0];
+    let node: AudioNode = merge;
 
     if (layer.highpass) {
       const hp = ctx.createBiquadFilter();
@@ -1733,10 +1768,17 @@ export class AmbienceEngine {
     this.liveNodes.add(send);
 
     // Random entry point so repeated plays of the same scene don't line up, and so
-    // stems of different lengths never phase-lock into an audible super-loop.
-    src.start(ctx.currentTime, this.rng() * buffer.duration);
-    this.liveNodes.add(src);
-    this.stemSources.push(src);
+    // stems of different lengths never phase-lock into an audible super-loop. The two
+    // heads enter at points well apart from each other, so at any instant they are
+    // playing different material.
+    const entry = this.rng() * buffer.duration;
+    heads.forEach((head, h) => {
+      const offset = (entry + (h * buffer.duration) / heads.length) % buffer.duration;
+      head.start(ctx.currentTime, offset);
+      this.liveNodes.add(head);
+      this.stemSources.push(head);
+    });
+    void src;
   }
 
   // -------------------------------------------------------------------------

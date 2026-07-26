@@ -595,13 +595,22 @@ export function rain(sampleRate, { rng, durationS, intensity = 1 }) {
   // Rain arrives in squalls. Without this the drop density is constant and the result
   // measures as stationary noise — the very thing we're trying to get away from, even
   // though here it would at least be the *right* stationary noise.
+  //
+  // The squall periods are expressed in cycles per loop rather than in seconds, so the
+  // contour lands back on its own phase at the loop point. makeSeamlessLoop already
+  // crossfades the waveform, so this is not about clicks — it is that a listener who
+  // has heard two passes hears the third coming, and a squall that half-completes and
+  // jumps is the most identifiable thing in the stem. 1.5 and 4 cycles per loop keep
+  // the two-rate character while staying commensurate.
   const squall = new Float32Array(n);
   const squallPhases = [rng() * TWO_PI, rng() * TWO_PI];
+  const slowHz = 1.5 / durationS;
+  const fastHz = 4 / durationS;
   for (let i = 0; i < n; i++) {
     const t = i / sampleRate;
     squall[i] = 0.55
-      + 0.3 * Math.sin(TWO_PI * (1 / 13.7) * t + squallPhases[0])
-      + 0.15 * Math.sin(TWO_PI * (1 / 5.3) * t + squallPhases[1]);
+      + 0.3 * Math.sin(TWO_PI * slowHz * t + squallPhases[0])
+      + 0.15 * Math.sin(TWO_PI * fastHz * t + squallPhases[1]);
   }
 
   const drops = Math.floor(durationS * 900 * intensity);

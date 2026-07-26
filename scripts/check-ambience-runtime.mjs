@@ -42,7 +42,7 @@ async function bundle() {
   writeFileSync(entry, `
     export {
       AmbienceEngine, STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST,
-      MAX_EVENT_ONSETS_PER_MIN, onsetsPerMinute, eventRateScale,
+      MAX_EVENT_ONSETS_PER_MIN, onsetsPerMinute, eventRateScale, PLAYHEADS_PER_STEM,
     } from '${enginePath}';
     export { SCENE_RECIPES, SCENE_IDS, bedLevel } from '${presetsPath}';
   `);
@@ -60,7 +60,7 @@ async function bundle() {
 const {
   AmbienceEngine, SCENE_RECIPES, SCENE_IDS, bedLevel,
   STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST,
-  MAX_EVENT_ONSETS_PER_MIN, onsetsPerMinute, eventRateScale,
+  MAX_EVENT_ONSETS_PER_MIN, onsetsPerMinute, eventRateScale, PLAYHEADS_PER_STEM,
 } = await bundle();
 
 const restore = installBrowserGlobals();
@@ -94,10 +94,11 @@ try {
       const recipe = SCENE_RECIPES[sceneId];
       const { ctx } = await run(sceneId);
       const started = startedStemSources(ctx).length;
+      const expected = recipe.stems.length * PLAYHEADS_PER_STEM;
       checked++;
-      if (started !== recipe.stems.length) {
+      if (started !== expected) {
         fail(
-          `scene "${sceneId}": ${started}/${recipe.stems.length} stem sources started — ` +
+          `scene "${sceneId}": ${started}/${expected} stem sources started — ` +
           `the bed is silent, so only the synthesised one-shots are audible`,
         );
         worstScene ??= sceneId;
@@ -114,9 +115,10 @@ try {
   {
     const { ctx, engine } = await run('cafe', { start: false });
     const before = startedStemSources(ctx).length;
-    if (before !== SCENE_RECIPES.cafe.stems.length) {
+    const expected = SCENE_RECIPES.cafe.stems.length * PLAYHEADS_PER_STEM;
+    if (before !== expected) {
       fail(
-        `stems loaded before start() attached ${before}/${SCENE_RECIPES.cafe.stems.length} sources — ` +
+        `stems loaded before start() attached ${before}/${expected} sources — ` +
         `load must not be gated on the running flag`,
       );
     } else {

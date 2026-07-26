@@ -928,6 +928,26 @@ export function octaveConcentration(buf, sampleRate) {
   return best;
 }
 
+/**
+ * How discontinuous a stem is at its loop point, as a multiple of the typical
+ * sample-to-sample delta.
+ *
+ * The obvious measurement — energy in a short window either side — is useless on
+ * impulsive content: a 5 ms window on rain is dominated by whether a drop happened to
+ * land in it, and reports double-digit dB "jumps" on a splice that is in fact sample
+ * accurate. Comparing the step across the seam against the material's own average
+ * step is scale-free and says the thing that matters: would you hear a click.
+ */
+export function loopDiscontinuity(buf) {
+  if (buf.length < 2) return 0;
+  const step = Math.abs(buf[0] - buf[buf.length - 1]);
+  const window = Math.min(buf.length - 1, 20000);
+  let sum = 0;
+  for (let i = 1; i <= window; i++) sum += Math.abs(buf[i] - buf[i - 1]);
+  const typical = sum / window;
+  return typical > 0 ? step / typical : 0;
+}
+
 /** Short-term loudness range in dB (p5..p95 over 250 ms windows).
  *  Field recordings: 15-25 dB. The old beds: 2.2-3.7 dB. */
 export function loudnessRangeDb(buf, sampleRate, windowS = 0.25) {
