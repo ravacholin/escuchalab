@@ -133,19 +133,54 @@ rain regardless of context. Three independent causes, all measurable:
 - `scripts/ambience/{dsp,voice,events,stems,preview}.mjs` — the offline synthesis
   toolkit. `voice.mjs` is the highest-leverage piece: a source-filter voice (Rosenberg
   glottal pulses with jitter → 4 resonant formants on real Spanish vowels → syllable
-  envelopes that reach true silence → phrase structure with pauses). Its modulation
-  spectrum peaks at ~5.9 Hz, the syllable rate — that rhythm is what makes a listener
-  hear people rather than noise.
+  envelopes that reach true silence → phrase structure with pauses), plus a **separate
+  frication path**. That separation matters: frication used to be summed into the
+  source and pushed through the vowel formant bank, whose loud resonators sit at
+  300-900 Hz, so /s/ and /f/ were filtered away before they existed and the crowd
+  stems ended up with 53-77% of their whole spectrum inside the single 250-500 Hz
+  octave. `renderBabble` also splits the crowd into a near foreground (2-3 voices,
+  taking turns) and a genuinely distant wash — summing a dozen equally-close voices
+  averages their syllable envelopes away (depth falls as 1/√N) and the result measures
+  as stationary noise.
 
 **Key invariants**
+- **The bed has to actually play.** For one release it did not, in any scene:
+  `loadStems()` captured a generation counter in the constructor and `start()`
+  incremented it synchronously before any fetch could resolve, so the guard was always
+  unequal and every layer was dropped. All a learner heard were the synthesised
+  one-shots over silence — "little noises that have nothing to do with a bar".
+  `check:ambience:runtime` now instantiates the real engine against a fake
+  `AudioContext` and asserts a source starts per layer, in all 42 scenes.
+- **`gain` means the same thing in every synth.** Noise buffers are normalised to a
+  common RMS and modal stacks are renormalised so they peak at their loudest partial
+  rather than at the sum of four. Without this a `gain` of 1 spanned ~15 dB depending
+  on which synth read it, and it was biased the wrong way: the pingy sine-stack events
+  came out loudest, the naturalistic noise ones quietest.
 - **Events are scaled against the scene's bed** (`bedLevel() * EVENT_OVER_BED`), never by
   a fixed makeup gain. Beds span ~20 dB across scenes, so a global gain puts the same
-  footstep 11 dB over a café and 25 dB over a therapy room.
+  footstep 11 dB over a café and 25 dB over a therapy room. The loudest spec in the
+  catalogue lands +6 dB over the bed; the typical one within a couple of dB.
+- **A density budget, not per-recipe restraint.** `MAX_EVENT_ONSETS_PER_MIN` caps how
+  often a scene puts a discrete sound in front of the listener, and the engine stretches
+  every interval to fit. Recipes were authored at up to ~92 occurrences/minute, and the
+  naive count hid the worst of it because several synths are clusters — one `typing`
+  occurrence is 16 key hits — so `EVENT_CLUSTER_SIZE` weights each kind by the root of
+  its cluster size.
 - **The limiter is a safety device, not a program compressor.** The old settings
   (−6 dB, 20:1, 250 ms release, events driven ×42) meant every clink ducked the whole
   bed for a quarter second.
-- **Near/far event buses.** Far events are lowpassed and pushed into the reverb; near
-  events stay dry and panned. That split is what creates depth.
+- **Near/mid/far event buses.** Each is a real distance — lowpass plus reverb send —
+  not a gain trim. `mid` used to be a bare ×0.7 with no filtering, and two thirds of all
+  specs are `mid`, so the depth system was mostly bypassed. Nothing is bone dry: a
+  perfectly dry clink inside a room is impossible and is the strongest cue that an event
+  is pasted on top rather than happening in the same place as the bed.
+- **`room.wet` is applied once, at the return.** Applying it at the sends too (which it
+  was) returns the bed at wet² — −39 dB in a café — so the bed was dry while the events
+  got the room.
+- **Events are band-limited to the scene's bed.** Stems are baked at 8-24 kHz and carry
+  nothing above 4-12 kHz; events synthesise to the context rate. Events living in a band
+  where the bed does not exist can never be masked by it, so they float on top as a
+  separate layer.
 - **Outdoor scenes get almost no reverb tail** (`ROOM_PARAMS.outdoor`). Giving a street a
   1.1 s tail is one of the reasons everything used to sound like an interior.
 - **Every `EventKind` has a synth**, asserted by `check:ambience` — tags can no longer be
@@ -159,8 +194,10 @@ rain regardless of context. Three independent causes, all measurable:
   user gesture (never born suspended) and self-heals via `onstatechange`. If Web Audio is
   unavailable, speech falls back to the plain `<audio>` element. A stem that fails to
   load is skipped; the scene plays with the rest.
-- **Non-repetitive**: per-playback RNG salt, and each stem enters its loop at an
-  independent random offset, so stems of different lengths never phase-lock.
+- **Non-repetitive**: per-playback RNG salt, and each stem plays from
+  `PLAYHEADS_PER_STEM` offset heads at slightly different rates, so a 14-24 s buffer is
+  never heard as a loop across a three-minute lesson. Once a listener has heard a loop
+  twice they hear it as a loop forever, and no amount of spectral work fixes that.
 - Ambience volume / intensity / ducking and a mute toggle persist in `localStorage`
   (`ambience_prefs_v1`) — `App.tsx` remounts the player per lesson, so plain state reset
   them every time.
@@ -172,6 +209,9 @@ rain regardless of context. Three independent causes, all measurable:
 - `npm run ambience:preview -- cafe street station` renders complete scene mixes to
   `.ambience-preview/*.wav` so you can **listen** without a browser or an API key. Run
   with no arguments to list the scenes, or `--all`.
+- Beware when tuning a near-stationary support stem: raising its event *rate* fills in
+  the quiet windows and so **reduces** the measured loudness range. That range has to
+  come from the slow swell.
 - Adding a scene costs a recipe, not another 2 MB of audio. Adding a stem means adding it
   to `STEMS` (stems.mjs), `StemId` + `STEM_LEVELS_DBFS` (ambiencePresets.ts), and
   referencing it from at least one recipe — `check:ambience` enforces all three.
@@ -327,7 +367,8 @@ Automated checks (no API key or network needed) — run all with `npm test`:
 - `npm run typecheck` — `tsc --noEmit`.
 - `npm run check:audio` — asserts the TTS chunking never exceeds the per-accent character budget, never loses a turn (the `substring(0, 5000)` bug), keeps short dialogues in a single request, splits an oversized single turn by sentence instead of truncating it, and that the PCM concatenation preserves every sample while fading only the seam.
 - `npm run check:syllabus` — walks `getBlueprint()` across the 42 valid level × text-type × mode combinations and asserts the pedagogical invariants: the per-level exercise budget, no format outside its level or text-type range, nothing presupposing two speakers in single-voice audio, A0 free of ordering/matching/scale/V-F-NG/spot-the-difference, C1 free of basic decoding formats, every lesson covering at least two stages and three distinct skills, stage order preserved, unique slot ids, existing engine fallbacks, and Vocabulary/text-type variants genuinely differing from one another.
-- `npm run check:ambience` — asserts that all 148 scenario labels resolve to a curated scene (none falling through to the generic fallback, which is how 108 of them behaved before), that no scene monopolises the place-based dialogue catalogue (max 15%, where the old `OFFICE` profile held 75%), that each non-dialogue format has its own default scene, that every stem a recipe names exists and none is orphaned, that every `EventKind` has a registered synth, that the runtime's stem-level table matches what was baked, and the acoustic floor: per stem, energy below 250 Hz and short-term loudness range within the targets declared in `stems.mjs`, plus a minimum spectral+dynamic distance between the character stems. It cannot tell you whether a café *sounds* like a café — `npm run ambience:preview` is for that.
+- `npm run check:ambience` — asserts that all 148 scenario labels resolve to a curated scene (none falling through to the generic fallback, which is how 108 of them behaved before), that no scene monopolises the place-based dialogue catalogue (max 15%, where the old `OFFICE` profile held 75%), that each non-dialogue format has its own default scene, that every stem a recipe names exists and none is orphaned, that every `EventKind` has a registered synth, that the runtime's stem-level table matches what was baked, and the acoustic floor: per stem, energy below 250 Hz and short-term loudness range within the targets declared in `stems.mjs`, plus a minimum spectral+dynamic distance between the character stems, how much of each stem's energy falls in its single fullest octave (the crowd stems once held 53-77% in one octave and passed every other bound), and that no stem steps at its loop point. It cannot tell you whether a café *sounds* like a café — `npm run ambience:preview` is for that.
+- `npm run check:ambience:runtime` — instantiates the **real** `AmbienceEngine` against a fake `AudioContext` (`scripts/ambience/fakeWebAudio.mjs`, with virtual timers so minutes of scene time run deterministically) and asserts what the tables alone cannot: that a source actually starts for every layer of all 42 scenes, that loading does not depend on `start()` having been called, that `stop()` cancels an in-flight load, that every bed source reaches the destination, that the scheduler keeps firing over minutes, and the mix contract — every bed lands in −40..−22 dBFS and no event sits more than 8 dB over its bed. This check exists because a 100% reproducible "no stem ever plays" bug shipped while all of `check:ambience` was green: it inspects tables and baked WAVs, and nothing exercised the engine.
 - `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text. It also pins the dictated-datum path: a phone said in words and a phone said as `654 32 18` must both yield one `Teléfono` field, and focused minimal pairs must contrast the digits rather than the greeting.
 
 Manual checklist (needs an API key):
@@ -337,4 +378,4 @@ Manual checklist (needs an API key):
 4. Vocabulary at A0 vs. C1: confirm they are no longer identical.
 5. Rendering and submit/feedback for the newer formats (`data_capture`, `minimal_pairs`, `spot_the_difference`, `matching`, `scale`, `true_false_notgiven`, `chunk_order`), including the `sourceTurns` reveal.
 6. Audio generation across accent/gender combinations; localStorage persistence; error handling for invalid keys.
-7. Ambience: play a `Café / Restaurante`, a `Taxi / Transporte`, a `Taller Mecánico`, an `Aeropuerto / Aerolínea`, an `El Tiempo` (RadioNews) and a `Mi Rutina Diaria` (Podcast) — they should be recognisable blind and clearly different from one another. Check that the bed ducks under speech without pumping between syllables, that the volume/intensity/ducking/mute settings survive generating a new lesson, and that deleting `public/ambience/` degrades to a working player rather than an error.
+7. Ambience: confirm the player's `N/M capas` counter reaches the total (it is the tell for a silent bed). Play a `Café / Restaurante`, a `Taxi / Transporte`, a `Taller Mecánico`, an `Aeropuerto / Aerolínea`, an `El Tiempo` (RadioNews) and a `Mi Rutina Diaria` (Podcast) — they should be recognisable blind and clearly different from one another. Check that the bed ducks under speech without pumping between syllables, that the volume/intensity/ducking/mute settings survive generating a new lesson, and that deleting `public/ambience/` degrades to a working player rather than an error.
