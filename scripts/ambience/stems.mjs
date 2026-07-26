@@ -104,7 +104,7 @@ export const STEMS = {
     targetRms: -26,
     // A café/restaurant/open-office interior: conversations at your table and a few
     // more around it, in a small live room.
-    expect: { maxLowRatio: 0.25, minLoudnessRange: 6 },
+    expect: { maxLowRatio: 0.25, minLoudnessRange: 6, maxOctaveShare: 0.48 },
     render(n, rng, sampleRate) {
       const durationS = n / sampleRate;
       const ir = renderIR(sampleRate, { size: 'small', rt60: 0.62, rng });
@@ -147,7 +147,7 @@ export const STEMS = {
     // Station concourse, airport, hospital lobby: many distant voices smeared by a
     // long reverberant tail. Individual words are never resolvable — that diffuseness
     // is exactly the cue for "large hard room".
-    expect: { maxLowRatio: 0.3, minLoudnessRange: 5 },
+    expect: { maxLowRatio: 0.3, minLoudnessRange: 5, maxOctaveShare: 0.48 },
     render(n, rng, sampleRate) {
       const durationS = n / sampleRate;
       const ir = renderIR(sampleRate, { size: 'hall', rt60: 2.4, damping: 0.25, rng });
@@ -190,7 +190,7 @@ export const STEMS = {
     targetRms: -26,
     // Market, plaza, terrace: voices outdoors. Almost no tail, so voices stay dry and
     // separate, and some of them are projecting rather than conversing.
-    expect: { maxLowRatio: 0.28, minLoudnessRange: 6 },
+    expect: { maxLowRatio: 0.28, minLoudnessRange: 6, maxOctaveShare: 0.48 },
     render(n, rng, sampleRate) {
       const durationS = n / sampleRate;
       const ir = renderIR(sampleRate, { size: 'outdoor', rt60: 0.35, rng });
@@ -362,9 +362,33 @@ export const STEMS = {
         gain: 0.4, distanceRange: [2, 6],
       });
 
-      // Extractor hood runs continuously underneath everything.
+      // Pans, pot lids and the chopping board.
+      //
+      // Without these the stem measured a 21-26 dB hole right across 250-1300 Hz,
+      // with 45% of its energy at 2-4 kHz sitting on top of a lone 50 Hz motor. Every
+      // object in it was a bright one — porcelain from 1400 Hz, cutlery from 2600,
+      // glass from 2100 — so there was nothing in the register where a kitchen has
+      // its body, and it read as tinkling rather than as a place where food is being
+      // cooked.
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.3, burst: 0.4,
+        make: (r) => impact(sampleRate, { material: 'metal', rng: r, strength: rand(r, 0.35, 0.85) }),
+        gain: 0.5, distanceRange: [2, 6],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.45, burst: 0.6,
+        make: (r) => impact(sampleRate, { material: 'wood', rng: r, strength: rand(r, 0.3, 0.75) }),
+        gain: 0.45, distanceRange: [2, 5],
+      });
+
+      // Extractor hood runs continuously underneath everything. The motor alone was a
+      // 50 Hz hum with no air in it; a real hood is mostly the sound of moving air.
       const extractor = motorCycle(sampleRate, { rng, durationS, hz: rand(rng, 44, 62) });
-      for (let i = 0; i < n; i++) out[i] += extractor[i] * 0.45;
+      const airflow = filterChain(pinkNoise(n, forkRng(rng, 'hood-air')), [
+        { type: 'bandpass', freq: 520, q: 0.5 },
+        { type: 'highpass', freq: 130, q: 0.6 },
+      ], sampleRate);
+      for (let i = 0; i < n; i++) out[i] += extractor[i] * 0.4 + airflow[i] * 0.25;
 
       return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 6, rng }));
     },
@@ -396,7 +420,11 @@ export const STEMS = {
         make: (r) => typingBurst(sampleRate, { rng: r, keys: randInt(r, 4, 12) }),
         gain: 0.1, distanceRange: [6, 16],
       });
-      return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 2.5, rng }));
+      // Depth raised from 2.5: shortening the material decays (a plate should not
+      // ring for half a second) took the little variation these support stems had
+      // with it, and their loudness-range margin was already the tightest in the set.
+      // A real plant room's level does drift; this is that drift, not decoration.
+      return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 4, rng }));
     },
   },
 
@@ -419,12 +447,16 @@ export const STEMS = {
       const fridge = mainsHum(sampleRate, { durationS, fundamental: 50, level: 0.35 });
       const out = mix([air, outside, fridge], [0.5, 0.5, 0.4]);
 
+      // The building settling. Deliberately sparse: raising the rate fills in the
+      // quiet windows and so REDUCES the measured loudness range, which is the
+      // opposite of what this stem needs — the range comes from the slow swell below.
       scatterMono(out, sampleRate, {
         rng, durationS, ratePerSecond: 0.07,
-        make: (r) => impact(sampleRate, { material: 'wood', rng: r, strength: rand(r, 0.05, 0.16) }),
+        make: (r) => impact(sampleRate, { material: 'wood', rng: r, strength: rand(r, 0.08, 0.22) }),
         gain: 1, distanceRange: [3, 9],
       });
-      return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 3, rng }));
+      // See the note on hvac_office: raised from 3 for the same reason.
+      return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 7, rng }));
     },
   },
 

@@ -27,55 +27,66 @@ import {
 // Materials — partial ratios and decay times measured off real objects' behaviour.
 // `decay` is a multiplier on the fundamental's decay; note how fast the highs go.
 // ---------------------------------------------------------------------------
+// Kept in step with MATERIALS in services/ambienceEngine.ts, so a baked kitchen and a
+// live cup are the same object. The decays were 3-5x longer here too: pure sines
+// ringing for half a second are mallet percussion, not crockery. `body` is the
+// broadband layer of the strike, which carries more of a real impact than the modes do.
 const MATERIALS = {
   porcelain: {
     base: [1400, 2600],
     ratios: [1, 2.13, 3.41, 5.02],
     decays: [1, 0.42, 0.19, 0.08],
-    baseDecayS: [0.28, 0.5],
-    noise: 0.45, noiseHz: 4200,
+    baseDecayS: [0.09, 0.18],
+    noise: 0.6, noiseHz: 4200,
+    body: 0.7, bodyHz: 2000, bodyMs: 28,
   },
   glass: {
     base: [2100, 3800],
     ratios: [1, 2.76, 4.19, 6.83],
     decays: [1, 0.55, 0.3, 0.14],
-    baseDecayS: [0.5, 0.95],
-    noise: 0.3, noiseHz: 5200,
+    baseDecayS: [0.18, 0.35],
+    noise: 0.45, noiseHz: 5200,
+    body: 0.55, bodyHz: 2600, bodyMs: 24,
   },
   cutlery: {
     base: [2600, 4600],
     ratios: [1, 1.87, 3.05, 4.62, 6.1],
     decays: [1, 0.7, 0.45, 0.25, 0.12],
-    baseDecayS: [0.16, 0.34],
-    noise: 0.7, noiseHz: 5600,
+    baseDecayS: [0.07, 0.15],
+    noise: 0.85, noiseHz: 5600,
+    body: 0.8, bodyHz: 3200, bodyMs: 20,
   },
   metal: { // tool, weight plate, shutter
     base: [190, 420],
     ratios: [1, 2.31, 3.12, 4.55, 6.4],
     decays: [1, 0.72, 0.5, 0.3, 0.15],
-    baseDecayS: [0.6, 1.4],
-    noise: 0.8, noiseHz: 1800,
+    baseDecayS: [0.3, 0.7],
+    noise: 0.9, noiseHz: 1800,
+    body: 0.75, bodyHz: 900, bodyMs: 45,
   },
   coin: {
     base: [3200, 5200],
     ratios: [1, 2.4, 3.9],
     decays: [1, 0.5, 0.22],
-    baseDecayS: [0.12, 0.26],
-    noise: 0.6, noiseHz: 6000,
+    baseDecayS: [0.06, 0.14],
+    noise: 0.75, noiseHz: 6000,
+    body: 0.6, bodyHz: 3600, bodyMs: 16,
   },
   wood: {
     base: [340, 720],
     ratios: [1, 1.61, 2.44, 3.8],
     decays: [1, 0.35, 0.16, 0.07],
-    baseDecayS: [0.08, 0.18],
-    noise: 0.9, noiseHz: 1400,
+    baseDecayS: [0.05, 0.12],
+    noise: 1, noiseHz: 1400,
+    body: 0.95, bodyHz: 620, bodyMs: 30,
   },
   plastic: {
     base: [900, 1900],
     ratios: [1, 1.94, 3.2],
     decays: [1, 0.3, 0.12],
-    baseDecayS: [0.04, 0.09],
-    noise: 0.85, noiseHz: 3000,
+    baseDecayS: [0.03, 0.07],
+    noise: 0.95, noiseHz: 3000,
+    body: 0.9, bodyHz: 1500, bodyMs: 18,
   },
 };
 
@@ -98,6 +109,9 @@ export function impact(sampleRate, { material = 'porcelain', rng, strength = 1 }
     rng,
     noiseAmount: m.noise * strength,
     noiseFreq: m.noiseHz,
+    bodyAmount: (m.body ?? 0) * strength,
+    bodyFreq: (m.bodyHz ?? 1200) * rand(rng, 0.85, 1.18),
+    bodyMs: (m.bodyMs ?? 30) * rand(rng, 0.8, 1.3),
   });
   // Peak-normalise to `strength` so a gain of 0.3 means the same loudness whether the
   // material is porcelain (4 partials) or metal (5) — otherwise every recipe gain has

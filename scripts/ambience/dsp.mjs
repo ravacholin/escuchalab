@@ -127,6 +127,30 @@ function biquadCoeffs(type, freq, q, sampleRate, gainDb = 0) {
       a0 = 1 + alpha / A; a1 = -2 * cosw0; a2 = 1 - alpha / A;
       break;
     }
+    // RBJ shelves. A shelf, unlike a peak, changes the balance between two whole
+    // regions of the spectrum, which is what you want for a broad tonal correction.
+    case 'highshelf': {
+      const A = Math.pow(10, gainDb / 40);
+      const twoSqrtAlpha = 2 * Math.sqrt(A) * alpha;
+      b0 = A * ((A + 1) + (A - 1) * cosw0 + twoSqrtAlpha);
+      b1 = -2 * A * ((A - 1) + (A + 1) * cosw0);
+      b2 = A * ((A + 1) + (A - 1) * cosw0 - twoSqrtAlpha);
+      a0 = (A + 1) - (A - 1) * cosw0 + twoSqrtAlpha;
+      a1 = 2 * ((A - 1) - (A + 1) * cosw0);
+      a2 = (A + 1) - (A - 1) * cosw0 - twoSqrtAlpha;
+      break;
+    }
+    case 'lowshelf': {
+      const A = Math.pow(10, gainDb / 40);
+      const twoSqrtAlpha = 2 * Math.sqrt(A) * alpha;
+      b0 = A * ((A + 1) - (A - 1) * cosw0 + twoSqrtAlpha);
+      b1 = 2 * A * ((A - 1) - (A + 1) * cosw0);
+      b2 = A * ((A + 1) - (A - 1) * cosw0 - twoSqrtAlpha);
+      a0 = (A + 1) + (A - 1) * cosw0 + twoSqrtAlpha;
+      a1 = -2 * ((A - 1) + (A + 1) * cosw0);
+      a2 = (A + 1) + (A - 1) * cosw0 - twoSqrtAlpha;
+      break;
+    }
     default:
       throw new Error(`unknown biquad type: ${type}`);
   }
@@ -377,7 +401,10 @@ export function gustEnv(n, { risePortion = 0.3 }) {
 /**
  * @param partials array of { freq, decayS, amp, detune? }
  */
-export function modalHit(sampleRate, { partials, durationS, rng, noiseAmount = 0, noiseFreq = 3000 }) {
+export function modalHit(sampleRate, {
+  partials, durationS, rng, noiseAmount = 0, noiseFreq = 3000,
+  bodyAmount = 0, bodyFreq = 1200, bodyMs = 35,
+}) {
   const n = Math.max(1, Math.floor(durationS * sampleRate));
   const out = new Float32Array(n);
 
@@ -402,6 +429,18 @@ export function modalHit(sampleRate, { partials, durationS, rng, noiseAmount = 0
     const burst = filter(whiteNoise(tn, rng), { type: 'highpass', freq: noiseFreq, q: 0.7, sampleRate });
     const env = percussiveEnv(tn, sampleRate, { attackMs: 0.2, decayS: 0.004 });
     for (let i = 0; i < tn; i++) out[i] += burst[i] * env[i] * noiseAmount;
+  }
+
+  // The body of the strike: a short band of noise around the object's own resonance.
+  // A 4 ms click plus decaying sines is a mallet instrument — the click is the beater
+  // and the sines are the bar. A struck object rings in hundreds of closely spaced,
+  // heavily damped modes, and that is what this layer stands in for. Mirrors the
+  // `bodyAmount` path in services/ambienceEngine.ts.
+  if (bodyAmount > 0 && rng) {
+    const tb = Math.max(2, Math.floor((bodyMs / 1000) * sampleRate));
+    const burst = filter(whiteNoise(tb, rng), { type: 'bandpass', freq: bodyFreq, q: 1.1, sampleRate });
+    const env = percussiveEnv(tb, sampleRate, { attackMs: 0.6, decayS: bodyMs / 3000 });
+    for (let i = 0; i < Math.min(tb, n); i++) out[i] += burst[i] * env[i] * bodyAmount;
   }
 
   return out;
@@ -848,6 +887,45 @@ export function lowEnergyRatio(buf, sampleRate, hz = 250) {
     }
   }
   return total > 0 ? low / total : 0;
+}
+
+/**
+ * The single fullest octave, and what fraction of the total energy it holds.
+ *
+ * A companion to lowEnergyRatio: that one catches "buried under rumble", this one
+ * catches "all of it is in one narrow place". The crowd stems used to hold 53-77% of
+ * their entire spectrum inside 250-500 Hz and passed every other bound, which is how
+ * a boxy hum shipped as babble. Running speech puts roughly 30% in its fullest
+ * octave; broadband textures much less.
+ */
+export function octaveConcentration(buf, sampleRate) {
+  const N = 4096;
+  const bins = new Float64Array(N / 2);
+  for (let start = 0; start + N < buf.length; start += N * 3) {
+    const re = new Float64Array(N);
+    const im = new Float64Array(N);
+    for (let i = 0; i < N; i++) re[i] = buf[start + i] * (0.5 - 0.5 * Math.cos(TWO_PI * i / N));
+    fft(re, im);
+    for (let k = 1; k < N / 2; k++) bins[k] += re[k] * re[k] + im[k] * im[k];
+  }
+  let total = 0;
+  for (let k = 1; k < N / 2; k++) total += bins[k];
+  if (total <= 0) return { share: 0, lo: 0, hi: 0 };
+
+  // Slide a one-octave window in third-octave steps.
+  let best = { share: 0, lo: 0, hi: 0 };
+  const step = Math.pow(2, 1 / 3);
+  for (let lo = 31.25; lo * 2 < sampleRate / 2; lo *= step) {
+    const hi = lo * 2;
+    let sum = 0;
+    for (let k = 1; k < N / 2; k++) {
+      const f = (k * sampleRate) / N;
+      if (f >= lo && f < hi) sum += bins[k];
+    }
+    const share = sum / total;
+    if (share > best.share) best = { share, lo, hi };
+  }
+  return best;
 }
 
 /** Short-term loudness range in dB (p5..p95 over 250 ms windows).

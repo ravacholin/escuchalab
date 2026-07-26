@@ -23,6 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   decodeWav, lowEnergyRatio, loudnessRangeDb, bandProfile, spectralDistance,
+  octaveConcentration,
 } from './ambience/dsp.mjs';
 import { STEMS, STEM_IDS } from './ambience/stems.mjs';
 
@@ -369,7 +370,26 @@ for (const id of STEM_IDS) {
   const mono = channels[0];
   const low = lowEnergyRatio(mono, sampleRate);
   const lra = loudnessRangeDb(mono, sampleRate);
-  measurements.set(id, { low, lra, profile: bandProfile(mono, sampleRate) });
+  const concentration = octaveConcentration(mono, sampleRate);
+  measurements.set(id, { low, lra, concentration, profile: bandProfile(mono, sampleRate) });
+
+  // Spectral concentration: how much of the total sits in the single fullest octave.
+  //
+  // This is the check that was missing while the crowd stems sounded like a boxy hum.
+  // They passed the low-energy and loudness-range bounds comfortably and still had
+  // 53-77% of their entire spectrum inside 250-500 Hz alone, because frication was
+  // being routed through the vowel formant bank and gutted. Nothing real is that
+  // narrow: running speech puts about 30% in its fullest octave, traffic less. A
+  // single number cannot say "this sounds like a cafe", but it can say "this cannot
+  // possibly sound like anything", which is what a one-octave spectrum means.
+  const maxOctave = spec.expect.maxOctaveShare ?? 0.5;
+  if (concentration.share > maxOctave) {
+    fail(
+      `stem "${id}": ${(concentration.share * 100).toFixed(0)}% of energy in one octave ` +
+      `(${concentration.lo.toFixed(0)}-${concentration.hi.toFixed(0)} Hz, max ${(maxOctave * 100).toFixed(0)}%) ` +
+      `— too narrow to read as a real texture`,
+    );
+  }
 
   // Too much sub-250 Hz means the audible detail is buried under rumble. The five
   // old beds measured 0.62-0.77 here.
@@ -392,9 +412,11 @@ for (const id of STEM_IDS) {
 if (measurements.size === STEM_IDS.length) {
   const worstLow = [...measurements.entries()].sort((a, b) => b[1].low - a[1].low)[0];
   const worstLra = [...measurements.entries()].sort((a, b) => a[1].lra - b[1].lra)[0];
+  const worstConc = [...measurements.entries()].sort((a, b) => b[1].concentration.share - a[1].concentration.share)[0];
   ok(`all ${STEM_IDS.length} stems within acoustic targets ` +
      `(most low-heavy: ${worstLow[0]} ${(worstLow[1].low * 100).toFixed(0)}%; ` +
-     `flattest: ${worstLra[0]} ${worstLra[1].lra.toFixed(1)} dB)`);
+     `flattest: ${worstLra[0]} ${worstLra[1].lra.toFixed(1)} dB; ` +
+     `narrowest: ${worstConc[0]} ${(worstConc[1].concentration.share * 100).toFixed(0)}% in one octave)`);
 }
 
 // ---------------------------------------------------------------------------
