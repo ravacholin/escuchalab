@@ -42,6 +42,23 @@ const getSpeedForLevel = (level: Level): number => {
     return 1.0;
 };
 
+// Recuerda el último nivel elegido por el usuario para que sea el default la próxima vez.
+const DEFAULT_LEVEL_KEY = 'escuchalab_default_level';
+const getStoredDefaultLevel = (): Level => {
+    try {
+        const stored = localStorage.getItem(DEFAULT_LEVEL_KEY);
+        if (stored && (Object.values(Level) as string[]).includes(stored)) {
+            return stored as Level;
+        }
+    } catch (e) { /* localStorage unavailable */ }
+    return Level.Intro;
+};
+const storeDefaultLevel = (level: Level): void => {
+    try {
+        localStorage.setItem(DEFAULT_LEVEL_KEY, level);
+    } catch (e) { /* localStorage unavailable */ }
+};
+
 const App: React.FC = () => {
     // Lazy initialization to check localStorage immediately prevents the "Auth" flash
     const [state, setState] = useState<AppState>(() => {
@@ -52,7 +69,7 @@ const App: React.FC = () => {
                 status: (storedKey && storedKey.startsWith('AIza')) ? 'idle' : 'auth',
                 config: {
                     mode: AppMode.Standard,
-                    level: Level.Intro,
+                    level: getStoredDefaultLevel(),
                     topic: "",
                     length: Length.Short,
                     textType: TextType.Dialogue,
@@ -67,7 +84,7 @@ const App: React.FC = () => {
                 status: 'auth',
                 config: {
                     mode: AppMode.Standard,
-                    level: Level.Intro,
+                    level: getStoredDefaultLevel(),
                     topic: "",
                     length: Length.Short,
                     textType: TextType.Dialogue,
@@ -442,7 +459,11 @@ const App: React.FC = () => {
                                     value={state.config.level}
                                     options={availableLevels(state.config.textType)}
                                     highlight={true}
-                                    onChange={(e: any) => setState({ ...state, config: { ...state.config, level: e.target.value } })}
+                                    onChange={(e: any) => {
+                                        const newLevel = e.target.value as Level;
+                                        storeDefaultLevel(newLevel);
+                                        setState({ ...state, config: { ...state.config, level: newLevel } });
+                                    }}
                                 />
                                 <SelectInput
                                     label="Formato"
