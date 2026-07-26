@@ -23,6 +23,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   decodeWav, lowEnergyRatio, loudnessRangeDb, bandProfile, spectralDistance,
+  octaveConcentration, loopDiscontinuity,
 } from './ambience/dsp.mjs';
 import { STEMS, STEM_IDS } from './ambience/stems.mjs';
 
@@ -57,23 +58,19 @@ const stubUiDeps = {
 
 async function bundle(entryContents) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'check-ambience-'));
-  const entry = path.join(ROOT, `.check-ambience-entry-${process.pid}.ts`);
   const outfile = path.join(dir, 'bundle.mjs');
-  const { writeFileSync, rmSync } = await import('node:fs');
-  writeFileSync(entry, entryContents);
-  try {
-    await build({
-      entryPoints: [entry],
-      bundle: true,
-      format: 'esm',
-      platform: 'neutral',
-      outfile,
-      plugins: [stubUiDeps],
-      logLevel: 'silent',
-    });
-  } finally {
-    rmSync(entry, { force: true });
-  }
+  // Fed through stdin with resolveDir rather than written to a real file: an entry
+  // file at the repo root survives a crash between write and cleanup, and tsc then
+  // tries to compile the leftover.
+  await build({
+    stdin: { contents: entryContents, resolveDir: ROOT, sourcefile: 'entry.ts', loader: 'ts' },
+    bundle: true,
+    format: 'esm',
+    platform: 'neutral',
+    outfile,
+    plugins: [stubUiDeps],
+    logLevel: 'silent',
+  });
   return import(pathToFileURL(outfile).href);
 }
 
@@ -83,13 +80,13 @@ const mod = await bundle(`
     SCENE_RECIPES, SCENE_IDS, STEM_IDS, MODEL_SELECTABLE_SCENES, STEM_LEVELS_DBFS,
     resolveAmbienceScene, isSceneId, bedLevel,
   } from './services/ambiencePresets';
-  export { EVENT_SYNTHS } from './services/ambienceEngine';
+  export { EVENT_SYNTHS, EVENT_CLUSTER_SIZE } from './services/ambienceEngine';
   export { TextType } from './types';
 `);
 
 const {
   SCENARIO_DATABASE, SCENE_RECIPES, SCENE_IDS, MODEL_SELECTABLE_SCENES, STEM_LEVELS_DBFS,
-  resolveAmbienceScene, isSceneId, EVENT_SYNTHS, TextType,
+  resolveAmbienceScene, isSceneId, EVENT_SYNTHS, EVENT_CLUSTER_SIZE, TextType,
 } = mod;
 
 // ---------------------------------------------------------------------------
@@ -284,6 +281,12 @@ for (const [sceneId, recipe] of Object.entries(SCENE_RECIPES)) {
     if (typeof EVENT_SYNTHS[spec.kind] !== 'function') {
       fail(`scene "${sceneId}" schedules event "${spec.kind}" but no synth is registered for it`);
     }
+    // Same principle: a kind missing from the cluster table weighs nothing against
+    // the density budget, so an office could schedule 200 keystrokes a minute while
+    // nominally counting as a handful of events.
+    if (!(EVENT_CLUSTER_SIZE[spec.kind] >= 1)) {
+      fail(`scene "${sceneId}" schedules event "${spec.kind}" but it has no EVENT_CLUSTER_SIZE entry`);
+    }
     if (!(spec.everyS > 0)) fail(`scene "${sceneId}" event "${spec.kind}" has a non-positive interval`);
     if (!(spec.gain > 0)) fail(`scene "${sceneId}" event "${spec.kind}" has a non-positive gain`);
   }
@@ -315,6 +318,13 @@ if (unusedKinds.length > 0) {
   fail(`event synth(s) registered but never scheduled by any scene: ${unusedKinds.join(', ')}`);
 } else {
   ok(`all ${Object.keys(EVENT_SYNTHS).length} event synths are scheduled by at least one scene`);
+}
+
+const missingCluster = Object.keys(EVENT_SYNTHS).filter((k) => !(EVENT_CLUSTER_SIZE[k] >= 1));
+if (missingCluster.length > 0) {
+  fail(`event kind(s) with no EVENT_CLUSTER_SIZE entry: ${missingCluster.join(', ')}`);
+} else {
+  ok(`all ${Object.keys(EVENT_SYNTHS).length} event kinds carry a density weight`);
 }
 
 // ---------------------------------------------------------------------------
@@ -360,7 +370,26 @@ for (const id of STEM_IDS) {
   const mono = channels[0];
   const low = lowEnergyRatio(mono, sampleRate);
   const lra = loudnessRangeDb(mono, sampleRate);
-  measurements.set(id, { low, lra, profile: bandProfile(mono, sampleRate) });
+  const concentration = octaveConcentration(mono, sampleRate);
+  measurements.set(id, { low, lra, concentration, profile: bandProfile(mono, sampleRate) });
+
+  // Spectral concentration: how much of the total sits in the single fullest octave.
+  //
+  // This is the check that was missing while the crowd stems sounded like a boxy hum.
+  // They passed the low-energy and loudness-range bounds comfortably and still had
+  // 53-77% of their entire spectrum inside 250-500 Hz alone, because frication was
+  // being routed through the vowel formant bank and gutted. Nothing real is that
+  // narrow: running speech puts about 30% in its fullest octave, traffic less. A
+  // single number cannot say "this sounds like a cafe", but it can say "this cannot
+  // possibly sound like anything", which is what a one-octave spectrum means.
+  const maxOctave = spec.expect.maxOctaveShare ?? 0.5;
+  if (concentration.share > maxOctave) {
+    fail(
+      `stem "${id}": ${(concentration.share * 100).toFixed(0)}% of energy in one octave ` +
+      `(${concentration.lo.toFixed(0)}-${concentration.hi.toFixed(0)} Hz, max ${(maxOctave * 100).toFixed(0)}%) ` +
+      `— too narrow to read as a real texture`,
+    );
+  }
 
   // Too much sub-250 Hz means the audible detail is buried under rumble. The five
   // old beds measured 0.62-0.77 here.
@@ -370,6 +399,19 @@ for (const id of STEM_IDS) {
       `(max ${(spec.expect.maxLowRatio * 100).toFixed(0)}%) — rumble is masking the detail`,
     );
   }
+  // Every stem is played on loop for the length of a lesson, so a step at the splice
+  // is a click every 14-24 seconds. makeSeamlessLoop crossfades to prevent it; this
+  // asserts the crossfade is actually doing its job, per channel.
+  for (let ch = 0; ch < channels.length; ch++) {
+    const disc = loopDiscontinuity(channels[ch]);
+    if (disc > 8) {
+      fail(
+        `stem "${id}" channel ${ch}: loop point steps ${disc.toFixed(1)}x the typical ` +
+        `sample delta — audible click once per loop`,
+      );
+    }
+  }
+
   // Too little loudness variation means nothing is happening. The old beds measured
   // 2.2-3.7 dB; real field recordings span 15-25 dB.
   if (lra < spec.expect.minLoudnessRange) {
@@ -383,9 +425,11 @@ for (const id of STEM_IDS) {
 if (measurements.size === STEM_IDS.length) {
   const worstLow = [...measurements.entries()].sort((a, b) => b[1].low - a[1].low)[0];
   const worstLra = [...measurements.entries()].sort((a, b) => a[1].lra - b[1].lra)[0];
+  const worstConc = [...measurements.entries()].sort((a, b) => b[1].concentration.share - a[1].concentration.share)[0];
   ok(`all ${STEM_IDS.length} stems within acoustic targets ` +
      `(most low-heavy: ${worstLow[0]} ${(worstLow[1].low * 100).toFixed(0)}%; ` +
-     `flattest: ${worstLra[0]} ${worstLra[1].lra.toFixed(1)} dB)`);
+     `flattest: ${worstLra[0]} ${worstLra[1].lra.toFixed(1)} dB; ` +
+     `narrowest: ${worstConc[0]} ${(worstConc[1].concentration.share * 100).toFixed(0)}% in one octave)`);
 }
 
 // ---------------------------------------------------------------------------

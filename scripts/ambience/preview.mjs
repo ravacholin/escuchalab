@@ -39,9 +39,16 @@ const AMBIENCE_DIR = path.join(ROOT, 'public', 'ambience');
 const OUT_DIR = path.join(ROOT, '.ambience-preview');
 const SAMPLE_RATE = 24000;
 
-// Kept in step with services/ambienceEngine.ts.
-const STEM_MAKEUP = 1.6;
-const EVENT_OVER_BED = 12;
+// Read from services/ambienceEngine.ts at load time (see loadRecipes) rather than
+// hand-copied. Keeping two sets of mix constants in step by convention is how the
+// preview quietly stops representing what the browser actually plays.
+let STEM_MAKEUP = 1;
+let EVENT_OVER_BED = 1;
+let BED_FLOOR = 0;
+let MAX_BED_BOOST = 1;
+let BED_REVERB_SEND = 0;
+let eventRateScale = () => 1;
+let onsetsPerMinute = () => 0;
 
 // ---------------------------------------------------------------------------
 // EventKind -> offline generator.
@@ -121,17 +128,24 @@ function surfaceForRoom(size) {
 // ---------------------------------------------------------------------------
 async function loadRecipes() {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'ambience-preview-'));
-  const entry = path.join(ROOT, `.ambience-preview-entry-${process.pid}.ts`);
   const outfile = path.join(dir, 'bundle.mjs');
-  writeFileSync(entry, `export { SCENE_RECIPES, SCENE_IDS, bedLevel } from './services/ambiencePresets';\n`);
-  try {
-    await build({
-      entryPoints: [entry], bundle: true, format: 'esm', platform: 'neutral',
-      outfile, logLevel: 'silent',
-    });
-  } finally {
-    rmSync(entry, { force: true });
-  }
+  // stdin + resolveDir, so no entry file is ever written into the repo root where a
+  // crash could strand it for tsc to pick up.
+  await build({
+    stdin: {
+      contents: `
+        export { SCENE_RECIPES, SCENE_IDS, bedLevel } from './services/ambiencePresets';
+        export {
+          STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST, BED_REVERB_SEND,
+          eventRateScale, onsetsPerMinute,
+        } from './services/ambienceEngine';
+      `,
+      resolveDir: ROOT,
+      sourcefile: 'entry.ts',
+      loader: 'ts',
+    },
+    bundle: true, format: 'esm', platform: 'neutral', outfile, logLevel: 'silent',
+  });
   return import(pathToFileURL(outfile).href);
 }
 
@@ -162,11 +176,17 @@ function renderScene(sceneId, recipe, seconds, seed, bedLevel) {
   const n = Math.floor(seconds * SAMPLE_RATE);
   const rng = mulberry32(hashStringToSeed(`preview:${sceneId}:${seed}`));
   // Mirrors services/ambienceEngine.ts: events are scaled against the scene's bed,
-  // so the same event sits the same distance above the bed in every scene.
-  const eventScale = bedLevel(recipe) * EVENT_OVER_BED;
+  // so the same event sits the same distance above the bed in every scene. Quiet
+  // scenes get the same lift the engine applies, to bed and events together.
+  const rawBed = bedLevel(recipe);
+  const bedBoost = Math.min(MAX_BED_BOOST, Math.max(1, rawBed > 0 ? BED_FLOOR / rawBed : 1));
+  const eventScale = rawBed * bedBoost * EVENT_OVER_BED;
+  const bedGain = STEM_MAKEUP * bedBoost;
+  const rateScale = eventRateScale(recipe, 0.6);
   const left = new Float32Array(n);
   const right = new Float32Array(n);
   const missing = [];
+  const stemLayers = [];
 
   // --- stems ---
   for (const layer of recipe.stems) {
@@ -194,6 +214,7 @@ function renderScene(sceneId, recipe, seconds, seed, bedLevel) {
       left[i] += sl[(i + offset) % sl.length] * layer.gain;
       right[i] += sr2[(i + offset) % sr2.length] * layer.gain;
     }
+    stemLayers.push({ sl, sr2, offset, gain: layer.gain });
   }
 
   // --- events ---
@@ -203,13 +224,28 @@ function renderScene(sceneId, recipe, seconds, seed, bedLevel) {
   const wetR = new Float32Array(n);
   const counts = {};
 
+  // The bed goes to the room too, so bed and events share an acoustic. The engine
+  // used to apply room.wet both here and at the return, which left the bed at
+  // wet^2 and effectively dry while the events got the full room.
+  for (const { sl, sr2, offset, gain } of stemLayers) {
+    for (let i = 0; i < n; i++) {
+      wetL[i] += sl[(i + offset) % sl.length] * gain * BED_REVERB_SEND * bedGain;
+      wetR[i] += sr2[(i + offset) % sr2.length] * gain * BED_REVERB_SEND * bedGain;
+    }
+  }
+
   for (const spec of recipe.events ?? []) {
     const render = EVENT_RENDERERS[spec.kind];
     if (!render) { missing.push(`event:${spec.kind}`); continue; }
     const far = spec.distance === 'far';
-    const midScale = spec.distance === 'mid' ? 0.7 : 1;
+    const mid = spec.distance === 'mid';
 
-    const times = poissonTimes(seconds, 1 / spec.everyS, rng, { burst: spec.burst ?? 0, burstGapS: [0.12, 0.7] });
+    // The engine holds each scene under a density budget by stretching every
+    // interval; without mirroring it the preview auditions a busier scene than the
+    // browser plays.
+    const times = poissonTimes(seconds, 1 / (spec.everyS * rateScale), rng, {
+      burst: spec.burst ?? 0, burstGapS: [0.12, 0.7],
+    });
     counts[spec.kind] = times.length;
 
     for (const t of times) {
@@ -220,13 +256,16 @@ function renderScene(sceneId, recipe, seconds, seed, bedLevel) {
 
       // Far events are lowpassed and go mostly to the room; near events stay dry.
       // That split is what produces depth.
-      if (far) {
-        const cut = recipe.room.size === 'outdoor' ? 2600 : 1900;
+      if (far || mid) {
+        const outdoor = recipe.room.size === 'outdoor';
+        const cut = far ? (outdoor ? 2600 : 1900) : (outdoor ? 6500 : 5000);
         bl = filter(bl, { type: 'lowpass', freq: cut, q: 0.7, sampleRate: SAMPLE_RATE });
         br = filter(br, { type: 'lowpass', freq: cut, q: 0.7, sampleRate: SAMPLE_RATE });
       }
-      const dryGain = spec.gain * eventScale * midScale * (far ? 0.5 : 1);
-      const sendGain = spec.gain * eventScale * midScale * (far ? 0.75 : 0.18);
+      const busGain = far ? 0.5 : mid ? 0.62 : 1;
+      const busSend = far ? 0.75 : mid ? 0.95 : 0.5;
+      const dryGain = spec.gain * eventScale * busGain;
+      const sendGain = spec.gain * eventScale * busSend;
       const at = Math.floor(t * SAMPLE_RATE);
       addAt(dryL, bl, at, dryGain);
       addAt(dryR, br, at, dryGain);
@@ -241,8 +280,8 @@ function renderScene(sceneId, recipe, seconds, seed, bedLevel) {
   const revR = convolve(wetR, ir[1] ?? ir[0], { circular: true });
 
   for (let i = 0; i < n; i++) {
-    left[i] = left[i] * STEM_MAKEUP + dryL[i] + revL[i] * recipe.room.wet * 0.9;
-    right[i] = right[i] * STEM_MAKEUP + dryR[i] + revR[i] * recipe.room.wet * 0.9;
+    left[i] = left[i] * bedGain + dryL[i] + revL[i] * recipe.room.wet * 0.9;
+    right[i] = right[i] * bedGain + dryR[i] + revR[i] * recipe.room.wet * 0.9;
   }
 
   const level = Math.max(rms(left), rms(right));
@@ -271,7 +310,12 @@ for (let i = 0; i < argv.length; i++) {
   wanted.push(a);
 }
 
-const { SCENE_RECIPES, SCENE_IDS, bedLevel } = await loadRecipes();
+const mixMod = await loadRecipes();
+const { SCENE_RECIPES, SCENE_IDS, bedLevel } = mixMod;
+({
+  STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST, BED_REVERB_SEND,
+  eventRateScale, onsetsPerMinute,
+} = mixMod);
 
 let targets = wanted.filter((w) => w !== '--all');
 if (wanted.includes('--all') || targets.length === 0) {

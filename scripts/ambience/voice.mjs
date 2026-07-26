@@ -29,6 +29,12 @@ import {
   VOWEL_FORMANTS, VOWELS,
 } from './dsp.mjs';
 
+/** Level of the frication path relative to the voiced path. */
+const FRICATION_GAIN = 0.09;
+
+/** Broad high-shelf that corrects the F1 pile-up. See the note in renderVoice. */
+const TILT_DB = 15;
+
 // ---------------------------------------------------------------------------
 // Glottal source
 // ---------------------------------------------------------------------------
@@ -262,17 +268,37 @@ export function renderVoice(sampleRate, {
   }
 
   // --- source-filter synthesis ---
+  //
+  // Voicing and frication take SEPARATE paths, which they did not before.
+  //
+  // Frication used to be summed into the source and pushed through the vowel formant
+  // bank — resonators sitting at F1-F4 (300-900 Hz for the loud ones) with Q 11-19.
+  // Noise high-passed at 2.2 kHz has almost nothing those bands can pass, so /s/ and
+  // /f/ were gutted: the comment said "/s/ lives at 4-8 kHz" while the filter after it
+  // guaranteed that it did not. The measurable consequence was a crowd whose energy
+  // piled into the single 250-500 Hz octave (53-77% of the total), which is not a
+  // spectrum any real room full of people has — it is a boxy hum.
+  //
+  // Physically the two are shaped by different things: voicing excites the whole
+  // tract, but frication is generated at a constriction near the front and is coloured
+  // mostly by the small cavity ahead of it — a broad, high resonance. So it gets its
+  // own filter.
   const glottal = glottalTrain(n, f0Sig, sampleRate, { rng });
   const noise = whiteNoise(n, forkRng(rng, 'aspiration'));
-  // Fricative noise is shaped high; /s/ lives at 4-8 kHz.
-  const shapedNoise = filter(noise, { type: 'highpass', freq: 2200, q: 0.6, sampleRate });
 
-  const source = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    source[i] = glottal[i] * voiced[i] + shapedNoise[i] * aspir[i] * 0.55;
-  }
+  const voicedSource = new Float32Array(n);
+  for (let i = 0; i < n; i++) voicedSource[i] = glottal[i] * voiced[i];
+  let out = formantBank(voicedSource, fmt, sampleRate, { q: 11, amps: [1, 0.72, 0.32, 0.16] });
+  // Tilt corrects the formant bank's F1 pile-up, so it belongs on the voiced path
+  // only — applying it after the frication is summed in would just make the /s/
+  // louder, which is the opposite of the problem.
+  out = filter(out, { type: 'highshelf', freq: 650, gainDb: TILT_DB, sampleRate });
 
-  let out = formantBank(source, fmt, sampleRate, { q: 11, amps: [1, 0.72, 0.32, 0.16] });
+  // The front-cavity resonance, per speaker (a shorter tract sits higher).
+  const fricCentre = Math.min(sampleRate * 0.42, rand(rng, 3600, 5200) * formantScale);
+  let frication = filter(noise, { type: 'bandpass', freq: fricCentre, q: 0.8, sampleRate });
+  frication = filter(frication, { type: 'highpass', freq: 1800, q: 0.7, sampleRate });
+  for (let i = 0; i < n; i++) out[i] += frication[i] * aspir[i] * FRICATION_GAIN;
 
   // Lip radiation: roughly a differentiator (+6 dB/octave). Without it a synthetic
   // voice sounds muffled and chest-heavy.
@@ -283,6 +309,22 @@ export function renderVoice(sampleRate, {
     prevSample = out[i];
   }
 
+  // Spectral balance.
+  //
+  // The formant amplitudes above are the physically sensible ones and are left alone
+  // on purpose: the F1/F2 amplitude ratio is a vowel cue, so flattening the bank to
+  // spread the energy would buy a better spectrum by making the vowels wrong.
+  //
+  // But a bank of narrow resonators driven by a source falling at -12 dB/octave puts
+  // an enormous share of its output under F1, and Spanish makes that worse — three of
+  // the five vowels (e, i, u) have F1 between 300 and 420 Hz. Measured, the crowd
+  // stems had 53-77% of their total energy inside the single 250-500 Hz octave, where
+  // running speech has about 30%. That is not a subtle colouration; it is why the
+  // babble read as a boxy hum rather than as people.
+  //
+  // So the correction is applied where it belongs — as a broad tilt over the whole
+  // voice, which shifts the balance between formant regions without touching the
+  // ratios inside any of them.
   // Keep the band a human voice actually occupies.
   return filter(
     filter(radiated, { type: 'highpass', freq: 90, q: 0.7, sampleRate }),
@@ -340,11 +382,30 @@ export function renderBabble(sampleRate, {
   const left = new Float32Array(n);
   const right = new Float32Array(n);
 
+  // A crowd is a FEW conversations you could almost follow, over a wash of many you
+  // could not. That structure is not decoration — it is what makes the sum read as
+  // people at all.
+  //
+  // The previous version placed every voice with `distanceRange[0] + span * u*u`,
+  // claiming in its comment to bias toward the far end. It does the opposite: u*u
+  // with u uniform has mean 1/3 and piles up at ZERO, so all 11-15 voices sat in the
+  // near third of the range at nearly equal level. Summing that many independent
+  // syllable envelopes averages them out — modulation depth falls as 1/sqrt(N) — and
+  // the result measured as a stationary wash whose envelope peaked at 0.6-1.2 Hz
+  // instead of at the ~5 Hz syllable rate, with only 5-7% of its modulation energy in
+  // that peak. Statistically it was noise, and it sounded like it.
+  //
+  // So: a small foreground held near and given room to breathe (a lower talk ratio,
+  // so its pauses are real and the envelope actually reaches down), and everyone else
+  // pushed genuinely far.
+  const foreground = Math.max(1, Math.min(3, Math.round(voices * 0.2)));
+
   for (let v = 0; v < voices; v++) {
     // Every speaker gets an INDEPENDENT rng stream. This is the fix for the central
     // flaw of the old generator: correlated voices sum to one voice, not a crowd.
     const vrng = forkRng(rng, `voice-${v}`);
     const archetype = pickSpeaker(vrng, { childRatio });
+    const isForeground = v < foreground;
 
     const mono = renderVoice(sampleRate, {
       durationS,
@@ -352,14 +413,23 @@ export function renderBabble(sampleRate, {
       f0: rand(vrng, archetype.f0[0], archetype.f0[1]),
       formantScale: rand(vrng, archetype.formantScale[0], archetype.formantScale[1]),
       rateHz: rand(vrng, rateRange[0], rateRange[1]),
-      startOffsetS: rand(vrng, 0, durationS * 0.4),
-      talkRatio,
+      // Foreground speakers are staggered across the whole loop so they take turns
+      // rather than talking over each other for its entire length.
+      startOffsetS: isForeground
+        ? (v / Math.max(1, foreground)) * durationS + rand(vrng, 0, durationS * 0.2)
+        : rand(vrng, 0, durationS * 0.9),
+      talkRatio: isForeground ? talkRatio * 0.62 : talkRatio,
     });
 
-    // Nearer speakers are fewer and louder; the crowd is mostly background. Squaring
-    // a uniform draw biases toward the far end of the range.
-    const u = vrng();
-    const meters = distanceRange[0] + (distanceRange[1] - distanceRange[0]) * (u * u);
+    const span = distanceRange[1] - distanceRange[0];
+    let meters;
+    if (isForeground) {
+      meters = distanceRange[0] + span * rand(vrng, 0, 0.12);
+    } else {
+      // Bias toward the far end, which is what the old comment intended.
+      const u = vrng();
+      meters = distanceRange[0] + span * (1 - (1 - u) * (1 - u)) * 0.92 + span * 0.08;
+    }
     const placed = applyDistance(mono, meters, sampleRate);
 
     // Distant voices also drift toward the centre, as real diffuse sound does.
