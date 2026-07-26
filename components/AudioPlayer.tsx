@@ -466,7 +466,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
               {isPlaying ? <Sparkles size={14} className="text-zinc-300 animate-pulse" /> : <Activity size={14} className="text-zinc-500" />}
               <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-300">
                 Ambiente: {scene.recipe.label}
-                {isPlaying && stemsLoaded > 0 ? ` · ${stemsLoaded}/${totalStems} capas` : ''}
+                {/* Shown even at 0: a silent bed used to be indistinguishable from a
+                    quiet one, which is how "no stem ever loads" went unnoticed. */}
+                {isPlaying ? ` · ${stemsLoaded}/${totalStems} capas` : ''}
               </span>
             </div>
             <div className="flex items-center gap-4">

@@ -1029,7 +1029,19 @@ export class AmbienceEngine {
   private cleanupTimer: number | null = null;
   private pendingCleanup: Array<{ node: AudioNode; at: number }> = [];
   private running = false;
-  private generation = 0;
+  /**
+   * Set once by `stop()`. This used to be a `generation` counter compared against a
+   * value captured at the top of `loadStems()` — but the constructor starts the load
+   * (capturing 0) and the caller calls `start()` synchronously in the same tick, which
+   * bumped the counter to 1 before any fetch could resolve. The comparison was
+   * therefore ALWAYS unequal and every stem was dropped: the bed never played in any
+   * scene, and all a learner heard was the synthesised one-shots over silence.
+   *
+   * An engine is built per scene (AudioPlayer calls stopAmbience() first), so there is
+   * no second generation to invalidate. A one-way disposed flag is both correct and
+   * impossible to get out of step.
+   */
+  private disposed = false;
 
   private duckAmount = DEFAULT_AMBIENCE_DUCKING;
   private intensity: number;
@@ -1129,13 +1141,14 @@ export class AmbienceEngine {
 
   private async loadStems(onReady?: (loaded: number, total: number) => void) {
     const recipe = this.scene.recipe;
-    const myGeneration = this.generation;
     const layers = recipe.stems;
     let loaded = 0;
 
     await Promise.all(layers.map(async (layer) => {
       const buffer = await loadStem(this.ctx, layer.stem);
-      if (myGeneration !== this.generation || !this.running) return;
+      // Deliberately NOT gated on `running`: loading begins in the constructor, before
+      // the caller has had a chance to call start(). Only disposal cancels it.
+      if (this.disposed) return;
       if (!buffer) return;
       try {
         this.attachStem(layer.stem, layer, buffer);
@@ -1294,9 +1307,8 @@ export class AmbienceEngine {
 
   // -------------------------------------------------------------------------
   start(volume: number) {
-    if (this.running) return;
+    if (this.running || this.disposed) return;
     this.running = true;
-    this.generation++;
     this.setVolume(volume, 2.5);
     this.runScheduler();
     this.cleanupTimer = window.setInterval(() => this.collect(), 2000);
@@ -1331,7 +1343,7 @@ export class AmbienceEngine {
 
   stop() {
     this.running = false;
-    this.generation++;
+    this.disposed = true;
 
     if (this.schedulerTimer !== null) { window.clearTimeout(this.schedulerTimer); this.schedulerTimer = null; }
     if (this.cleanupTimer !== null) { window.clearInterval(this.cleanupTimer); this.cleanupTimer = null; }

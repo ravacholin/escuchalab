@@ -57,23 +57,19 @@ const stubUiDeps = {
 
 async function bundle(entryContents) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'check-ambience-'));
-  const entry = path.join(ROOT, `.check-ambience-entry-${process.pid}.ts`);
   const outfile = path.join(dir, 'bundle.mjs');
-  const { writeFileSync, rmSync } = await import('node:fs');
-  writeFileSync(entry, entryContents);
-  try {
-    await build({
-      entryPoints: [entry],
-      bundle: true,
-      format: 'esm',
-      platform: 'neutral',
-      outfile,
-      plugins: [stubUiDeps],
-      logLevel: 'silent',
-    });
-  } finally {
-    rmSync(entry, { force: true });
-  }
+  // Fed through stdin with resolveDir rather than written to a real file: an entry
+  // file at the repo root survives a crash between write and cleanup, and tsc then
+  // tries to compile the leftover.
+  await build({
+    stdin: { contents: entryContents, resolveDir: ROOT, sourcefile: 'entry.ts', loader: 'ts' },
+    bundle: true,
+    format: 'esm',
+    platform: 'neutral',
+    outfile,
+    plugins: [stubUiDeps],
+    logLevel: 'silent',
+  });
   return import(pathToFileURL(outfile).href);
 }
 

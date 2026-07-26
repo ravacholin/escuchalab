@@ -121,17 +121,18 @@ function surfaceForRoom(size) {
 // ---------------------------------------------------------------------------
 async function loadRecipes() {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'ambience-preview-'));
-  const entry = path.join(ROOT, `.ambience-preview-entry-${process.pid}.ts`);
   const outfile = path.join(dir, 'bundle.mjs');
-  writeFileSync(entry, `export { SCENE_RECIPES, SCENE_IDS, bedLevel } from './services/ambiencePresets';\n`);
-  try {
-    await build({
-      entryPoints: [entry], bundle: true, format: 'esm', platform: 'neutral',
-      outfile, logLevel: 'silent',
-    });
-  } finally {
-    rmSync(entry, { force: true });
-  }
+  // stdin + resolveDir, so no entry file is ever written into the repo root where a
+  // crash could strand it for tsc to pick up.
+  await build({
+    stdin: {
+      contents: `export { SCENE_RECIPES, SCENE_IDS, bedLevel } from './services/ambiencePresets';\n`,
+      resolveDir: ROOT,
+      sourcefile: 'entry.ts',
+      loader: 'ts',
+    },
+    bundle: true, format: 'esm', platform: 'neutral', outfile, logLevel: 'silent',
+  });
   return import(pathToFileURL(outfile).href);
 }
 
