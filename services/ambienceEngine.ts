@@ -117,6 +117,7 @@ const SCHEDULER_INTERVAL_MS = 400;
 // ---------------------------------------------------------------------------
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+const clampPan = (v: number) => Math.max(-1, Math.min(1, v));
 
 function hashStringToSeed(input: string): number {
   let hash = 2166136261;
@@ -244,6 +245,102 @@ const ROOM_PARAMS: Record<RoomSize, { rt60: number; preDelayMs: number; damping:
   outdoor: { rt60: 0.22, preDelayMs: 4,  damping: 0.8,  reflections: [0.012, 0.026] },
 };
 
+/**
+ * Nyquist of each baked stem, from the sample rate it was rendered at
+ * (scripts/ambience/stems.mjs). A stem baked at 8 kHz carries nothing above 4 kHz no
+ * matter how the browser resamples it.
+ */
+const STEM_BANDWIDTH_HZ: Record<StemId, number> = {
+  babble_close: 8000, babble_hall: 8000, babble_open: 8000,
+  traffic_near: 8000, traffic_far: 4000,
+  kitchen: 12000, hvac_office: 4000, room_tone: 4000, studio_tone: 4000,
+  transit_hum: 6000, rain: 12000, wind_leaves: 12000,
+};
+
+/**
+ * The top of the band this scene's bed actually occupies, used to keep the events
+ * inside the same acoustic world. A little above the widest stem, not exactly at it:
+ * clamping events hard to the bed's ceiling dulls transients that legitimately carry
+ * their identity up there (cutlery, coins, keys).
+ */
+function sceneBandwidthHz(recipe: SceneRecipe): number {
+  let widest = 4000;
+  for (const layer of recipe.stems) {
+    const stemTop = Math.min(STEM_BANDWIDTH_HZ[layer.stem], layer.lowpass ?? Infinity);
+    widest = Math.max(widest, stemTop);
+  }
+  return Math.min(14000, widest * 1.5);
+}
+
+/**
+ * Ceiling on how often a scene may put a discrete sound in front of the listener,
+ * counted in perceptual onsets per minute (a run of footsteps or a burst of typing is
+ * one onset, not eight).
+ *
+ * The recipes were authored well past this. A restaurant scheduled ~60 onsets/minute
+ * and a cafe ~42 — one distinct noise every one to one-and-a-half seconds, forever.
+ * Even with each one now sitting properly inside the room, that rate alone reads as a
+ * sound-effects reel rather than as a place; in a real cafe something specific catches
+ * your attention every five or ten seconds, and the rest is bed.
+ *
+ * Enforced here rather than by rewriting ~200 numbers across 42 recipes, so that the
+ * relative mix each recipe declares (mostly cups, some cutlery, the occasional door)
+ * is preserved as authored while the total is capped, and so a new recipe cannot
+ * reintroduce the problem.
+ */
+export const MAX_EVENT_ONSETS_PER_MIN = 26;
+
+/**
+ * Mean discrete hits each EventKind produces per scheduled occurrence.
+ *
+ * Several synths are clusters, and the spread is enormous: one `typing` occurrence is
+ * 4-12 keys with a release click each, so 16 hits; one `footstep` is 2-5 steps; one
+ * `luggage` rolls out up to 63 wheel clicks. Counting each occurrence as one event —
+ * which is what a naive budget does — lets an office schedule 220 key clicks a minute
+ * while nominally sitting at 19 "events".
+ *
+ * scripts/check-ambience.mjs asserts every EventKind appears here, on the same
+ * principle as EVENT_SYNTHS: an unlisted kind would silently weigh nothing.
+ */
+export const EVENT_CLUSTER_SIZE: Record<EventKind, number> = {
+  porcelain: 1.45, cutlery: 2, glass: 1, coin: 2.5, metalClank: 1, woodKnock: 1, plasticTap: 1,
+  footstep: 3.5, footstepRun: 7.5, chairScrape: 1, cough: 1.5, laugh: 4.5,
+  doorLatch: 2, doorChime: 3, registerBeep: 1, cashDrawer: 5.5,
+  typing: 16, paperRustle: 1, printer: 1, phoneRing: 16,
+  vehiclePass: 1, honk: 1, siren: 1,
+  sizzle: 1, steam: 1, grinder: 1,
+  announcement: 1, luggage: 1,
+  monitorBeep: 1, weightClank: 1.6, impactWrench: 1, compressor: 1, hairDryer: 1,
+  bird: 3.5, windGust: 1, rainDrip: 1,
+  creak: 1, pageTurn: 1, applause: 1,
+};
+
+/**
+ * Attention cost of a scene's event schedule, per minute.
+ *
+ * Cluster size counts as its square root, not linearly: eight keystrokes in a row are
+ * more than one event and much less than eight, because after the first couple the ear
+ * fuses them into a texture. The units are therefore "onsets" only loosely — what
+ * matters is that the number is comparable across scenes and bounded.
+ */
+export const onsetsPerMinute = (recipe: SceneRecipe, intensity: number): number => {
+  const intervalScale = 1.6 - intensity;
+  let total = 0;
+  for (const spec of recipe.events) {
+    // A burst spawns randInt(1, 2) extras, so mean 1.5, with probability `burst`.
+    const perOccurrence = 1 + (spec.burst ?? 0) * 1.5;
+    const cluster = Math.sqrt(EVENT_CLUSTER_SIZE[spec.kind] ?? 1);
+    total += (60 / (spec.everyS * intervalScale)) * perOccurrence * cluster;
+  }
+  return total;
+};
+
+/** Factor to stretch every `everyS` by so the scene fits under the budget. 1 = as authored. */
+export function eventRateScale(recipe: SceneRecipe, intensity: number): number {
+  const rate = onsetsPerMinute(recipe, intensity);
+  return rate > MAX_EVENT_ONSETS_PER_MIN ? rate / MAX_EVENT_ONSETS_PER_MIN : 1;
+}
+
 function createRoomImpulse(ctx: AudioContext, size: RoomSize, rng: Rng): AudioBuffer {
   const params = ROOM_PARAMS[size];
   const sampleRate = ctx.sampleRate;
@@ -311,7 +408,15 @@ interface EventContext {
 function modalHit(
   c: EventContext,
   partials: Array<{ freq: number; decayS: number; amp: number }>,
-  opts: { pan: number; noiseAmount?: number; noiseHz?: number } = { pan: 0 },
+  opts: {
+    pan: number;
+    noiseAmount?: number;
+    noiseHz?: number;
+    /** Broadband body of the strike: level, centre frequency and length in ms. */
+    bodyAmount?: number;
+    bodyHz?: number;
+    bodyMs?: number;
+  } = { pan: 0 },
 ) {
   const { ctx, at } = c;
   const panner = ctx.createStereoPanner();
@@ -369,6 +474,25 @@ function modalHit(
     });
   }
 
+  // The body of the strike: a short band of noise around the object's own resonance.
+  //
+  // A 5 ms click plus decaying sines is a mallet instrument — the click is the beater
+  // and the sines are the bar. Real crockery, wood and metal put most of their energy
+  // into a brief NOISY resonance, because a struck object rings in hundreds of closely
+  // spaced, quickly-damped modes rather than four clean ones. This layer is what makes
+  // a cup read as a cup instead of a glockenspiel note.
+  if (opts.bodyAmount) {
+    noiseBurst(c, {
+      durationMs: opts.bodyMs ?? 35,
+      filterType: 'bandpass',
+      freq: opts.bodyHz ?? 1200,
+      q: 1.1,
+      gain: c.gain * opts.bodyAmount,
+      pan: opts.pan,
+      attackMs: 0.6,
+    });
+  }
+
   c.track(panner, at + longest + 0.1);
   c.track(out, at + longest + 0.1);
 }
@@ -422,16 +546,113 @@ function noiseBurst(
   c.track(src, done); c.track(flt, done); c.track(panner, done); c.track(env, done);
 }
 
+/**
+ * A short voiced sound: a pitched source through two vowel formants.
+ *
+ * `laugh`, `cough` and `announcement` were all band-passed noise with a speech-like
+ * rhythm and no pitch at all. Rhythm alone does not read as a person — a listener
+ * hears rhythmic hiss, which is a good part of why the events sounded like "little
+ * noises" rather than like a place with people in it. A sawtooth is a crude stand-in
+ * for a glottal pulse train, but it is harmonically rich in the same way, and putting
+ * it through formants is what makes the ear commit to "voice".
+ *
+ * (The offline baker has a much better source-filter model in scripts/ambience/
+ * voice.mjs. It cannot be used here: this builds Web Audio graphs in real time,
+ * that one fills sample buffers.)
+ */
+function voicedBurst(
+  c: EventContext,
+  opts: {
+    f0: number;
+    f0End?: number;
+    durationMs: number;
+    formants: [number, number];
+    gain: number;
+    pan: number;
+    breath?: number;
+    attackMs?: number;
+  },
+) {
+  const { ctx, at } = c;
+  const dur = opts.durationMs / 1000;
+
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.setValueAtTime(opts.f0, at);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(40, opts.f0End ?? opts.f0 * 0.85), at + dur);
+
+  const f1 = ctx.createBiquadFilter();
+  f1.type = 'bandpass';
+  f1.frequency.value = opts.formants[0];
+  f1.Q.value = 3.2;
+  const f2 = ctx.createBiquadFilter();
+  f2.type = 'peaking';
+  f2.frequency.value = opts.formants[1];
+  f2.Q.value = 2.4;
+  f2.gain.value = 9;
+  // Lips radiate, which tilts the spectrum up; without it a sawtooth reads as a buzz.
+  const tilt = ctx.createBiquadFilter();
+  tilt.type = 'highshelf';
+  tilt.frequency.value = 1200;
+  tilt.gain.value = 4;
+
+  const panner = ctx.createStereoPanner();
+  panner.pan.value = opts.pan;
+
+  const env = ctx.createGain();
+  const attack = Math.min(dur * 0.4, (opts.attackMs ?? 6) / 1000);
+  env.gain.setValueAtTime(0.0001, at);
+  env.gain.exponentialRampToValueAtTime(Math.max(0.0002, opts.gain), at + attack);
+  env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+
+  osc.connect(f1); f1.connect(f2); f2.connect(tilt); tilt.connect(panner);
+  panner.connect(env);
+  env.connect(c.dest); env.connect(c.send);
+
+  osc.start(at); osc.stop(at + dur + 0.02);
+  const done = at + dur + 0.06;
+  [osc, f1, f2, tilt, panner, env].forEach((n) => c.track(n, done));
+
+  // Aspiration riding along with the voicing.
+  if (opts.breath) {
+    noiseBurst({ ...c, at }, {
+      durationMs: opts.durationMs,
+      filterType: 'bandpass',
+      freq: opts.formants[1],
+      q: 1.2,
+      gain: opts.gain * opts.breath,
+      pan: opts.pan,
+      attackMs: opts.attackMs ?? 6,
+      color: 'pink',
+    });
+  }
+}
+
 /** Material definitions mirroring scripts/ambience/events.mjs, so a baked kitchen
  *  and a live cup sound like the same world. */
-const MATERIALS: Record<string, { base: [number, number]; ratios: number[]; decays: number[]; baseDecay: [number, number]; noise: number; noiseHz: number }> = {
-  porcelain: { base: [1400, 2600], ratios: [1, 2.13, 3.41, 5.02], decays: [1, 0.42, 0.19, 0.08], baseDecay: [0.28, 0.5], noise: 0.45, noiseHz: 4200 },
-  glass:     { base: [2100, 3800], ratios: [1, 2.76, 4.19, 6.83], decays: [1, 0.55, 0.3, 0.14], baseDecay: [0.5, 0.95], noise: 0.3, noiseHz: 5200 },
-  cutlery:   { base: [2600, 4600], ratios: [1, 1.87, 3.05, 4.62], decays: [1, 0.7, 0.45, 0.25], baseDecay: [0.16, 0.34], noise: 0.7, noiseHz: 5600 },
-  metal:     { base: [190, 420],   ratios: [1, 2.31, 3.12, 4.55], decays: [1, 0.72, 0.5, 0.3],  baseDecay: [0.6, 1.4],  noise: 0.8, noiseHz: 1800 },
-  coin:      { base: [3200, 5200], ratios: [1, 2.4, 3.9],         decays: [1, 0.5, 0.22],       baseDecay: [0.12, 0.26], noise: 0.6, noiseHz: 6000 },
-  wood:      { base: [340, 720],   ratios: [1, 1.61, 2.44, 3.8],  decays: [1, 0.35, 0.16, 0.07], baseDecay: [0.08, 0.18], noise: 0.9, noiseHz: 1400 },
-  plastic:   { base: [900, 1900],  ratios: [1, 1.94, 3.2],        decays: [1, 0.3, 0.12],       baseDecay: [0.04, 0.09], noise: 0.85, noiseHz: 3000 },
+/**
+ * Struck-object recipes.
+ *
+ * `baseDecay` used to be 3-5x longer across the board: glass rang for 0.5-0.95 s and
+ * porcelain for 0.28-0.5 s, as pure inharmonic sines with a 1.5 ms attack. That is a
+ * description of a vibraphone, not of crockery — and a bar fired one every 1.6 s. A
+ * cup meeting a saucer is a ~100 ms mostly-noisy tick with a faint ring after it.
+ *
+ * `body` is the new broadband layer (see modalHit); `noise` is the contact click.
+ * Between them they now carry more of each hit than the sine partials do, which is
+ * the right way round for every one of these materials.
+ */
+const MATERIALS: Record<string, {
+  base: [number, number]; ratios: number[]; decays: number[]; baseDecay: [number, number];
+  noise: number; noiseHz: number; body: number; bodyHz: number; bodyMs: number;
+}> = {
+  porcelain: { base: [1400, 2600], ratios: [1, 2.13, 3.41, 5.02], decays: [1, 0.42, 0.19, 0.08], baseDecay: [0.09, 0.18], noise: 0.6, noiseHz: 4200, body: 0.7, bodyHz: 2000, bodyMs: 28 },
+  glass:     { base: [2100, 3800], ratios: [1, 2.76, 4.19, 6.83], decays: [1, 0.55, 0.3, 0.14], baseDecay: [0.18, 0.35], noise: 0.45, noiseHz: 5200, body: 0.55, bodyHz: 2600, bodyMs: 24 },
+  cutlery:   { base: [2600, 4600], ratios: [1, 1.87, 3.05, 4.62], decays: [1, 0.7, 0.45, 0.25], baseDecay: [0.07, 0.15], noise: 0.85, noiseHz: 5600, body: 0.8, bodyHz: 3200, bodyMs: 20 },
+  metal:     { base: [190, 420],   ratios: [1, 2.31, 3.12, 4.55], decays: [1, 0.72, 0.5, 0.3],  baseDecay: [0.3, 0.7],  noise: 0.9, noiseHz: 1800, body: 0.75, bodyHz: 900, bodyMs: 45 },
+  coin:      { base: [3200, 5200], ratios: [1, 2.4, 3.9],         decays: [1, 0.5, 0.22],       baseDecay: [0.06, 0.14], noise: 0.75, noiseHz: 6000, body: 0.6, bodyHz: 3600, bodyMs: 16 },
+  wood:      { base: [340, 720],   ratios: [1, 1.61, 2.44, 3.8],  decays: [1, 0.35, 0.16, 0.07], baseDecay: [0.05, 0.12], noise: 1, noiseHz: 1400, body: 0.95, bodyHz: 620, bodyMs: 30 },
+  plastic:   { base: [900, 1900],  ratios: [1, 1.94, 3.2],        decays: [1, 0.3, 0.12],       baseDecay: [0.03, 0.07], noise: 0.95, noiseHz: 3000, body: 0.9, bodyHz: 1500, bodyMs: 18 },
 };
 
 function material(c: EventContext, name: keyof typeof MATERIALS, strength: number, pan: number) {
@@ -445,7 +666,14 @@ function material(c: EventContext, name: keyof typeof MATERIALS, strength: numbe
       decayS: baseDecay * m.decays[i],
       amp: (strength / (1 + i * 0.9)),
     })),
-    { pan, noiseAmount: m.noise * strength, noiseHz: m.noiseHz },
+    {
+      pan,
+      noiseAmount: m.noise * strength,
+      noiseHz: m.noiseHz,
+      bodyAmount: m.body * strength,
+      bodyHz: m.bodyHz * rand(c.rng, 0.85, 1.18),
+      bodyMs: m.bodyMs * rand(c.rng, 0.8, 1.3),
+    },
   );
 }
 
@@ -514,7 +742,10 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     const pan = rand(c.rng, -0.8, 0.8);
     const hits = randInt(c.rng, 1, 3);
     for (let i = 0; i < hits; i++) {
-      material({ ...c, at: c.at + i * rand(c.rng, 0.04, 0.13) }, 'cutlery', rand(c.rng, 0.4, 1), pan);
+      material(
+        { ...c, at: c.at + i * rand(c.rng, 0.04, 0.13) },
+        'cutlery', rand(c.rng, 0.4, 1), clampPan(pan + rand(c.rng, -0.1, 0.1)),
+      );
     }
   },
   glass: (c) => material(c, 'glass', rand(c.rng, 0.4, 1), rand(c.rng, -0.7, 0.7)),
@@ -537,7 +768,11 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     const pan = rand(c.rng, -0.6, 0.6);
     for (let i = 0; i < steps; i++) {
       const asym = i % 2 === 0 ? 1 : rand(c.rng, 0.78, 0.95);
-      oneFootstep(c, surface, asym, pan, c.at + i * interval + rand(c.rng, -0.012, 0.012));
+      // Drift across the run: somebody taking four steps has moved by the fourth.
+      // A cluster pinned to one azimuth is one of the tells that these are scheduled
+      // effects rather than things happening in a room.
+      const drift = pan + (i / Math.max(1, steps - 1)) * rand(c.rng, -0.25, 0.25);
+      oneFootstep(c, surface, asym, clampPan(drift), c.at + i * interval + rand(c.rng, -0.012, 0.012));
     }
   },
   footstepRun: (c, scene) => {
@@ -564,33 +799,44 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     });
   },
   cough: (c) => {
+    // A cough is a glottal release, not a puff: a hard noisy burst with a voiced
+    // body under it that pitches down as the airway closes.
     const pan = rand(c.rng, -0.8, 0.8);
-    noiseBurst(c, {
-      durationMs: rand(c.rng, 90, 170), filterType: 'bandpass', freq: rand(c.rng, 500, 1100),
-      q: 1.1, gain: c.gain, pan, attackMs: 4, color: 'pink',
-    });
-    if (c.rng() < 0.5) {
-      noiseBurst({ ...c, at: c.at + rand(c.rng, 0.35, 0.7), gain: c.gain * 0.7 }, {
-        durationMs: rand(c.rng, 80, 150), filterType: 'bandpass', freq: rand(c.rng, 500, 1100),
-        q: 1.1, gain: c.gain * 0.7, pan, attackMs: 4, color: 'pink',
+    const f0 = rand(c.rng, 130, 230);
+    const one = (at: number, gain: number) => {
+      // The plosive release.
+      noiseBurst({ ...c, at }, {
+        durationMs: rand(c.rng, 22, 38), filterType: 'bandpass', freq: rand(c.rng, 900, 1700),
+        q: 0.8, gain: gain * 1.1, pan, attackMs: 0.8, color: 'pink',
       });
-    }
+      voicedBurst({ ...c, at: at + 0.012 }, {
+        f0, f0End: f0 * 0.62, durationMs: rand(c.rng, 80, 140),
+        formants: [rand(c.rng, 520, 700), rand(c.rng, 1150, 1500)],
+        gain, pan, breath: 0.5, attackMs: 3,
+      });
+    };
+    one(c.at, c.gain);
+    if (c.rng() < 0.5) one(c.at + rand(c.rng, 0.35, 0.7), c.gain * 0.7);
   },
   laugh: (c) => {
-    // Syllabic bursts on a falling pitch — the shape is what reads as laughter.
+    // Syllabic bursts on a falling pitch — the shape is what reads as laughter, but
+    // only once the bursts are voiced. As band-passed noise this was rhythmic hiss.
     const pan = rand(c.rng, -0.8, 0.8);
     const pulses = randInt(c.rng, 3, 6);
     const f0 = rand(c.rng, 180, 340);
+    const vowel: [number, number] = c.rng() < 0.5 ? [800, 1200] : [500, 900]; // /a/ or /o/
     for (let i = 0; i < pulses; i++) {
-      noiseBurst({ ...c, at: c.at + i * rand(c.rng, 0.11, 0.18) }, {
-        durationMs: rand(c.rng, 55, 95),
-        filterType: 'bandpass',
-        freq: f0 * (3 + i * 0.2) * rand(c.rng, 0.9, 1.1),
-        q: 2.5,
+      // Pitch and level both decline across the run, as breath runs out.
+      const decline = 1 - i * 0.06;
+      voicedBurst({ ...c, at: c.at + i * rand(c.rng, 0.13, 0.2) }, {
+        f0: f0 * decline * rand(c.rng, 0.96, 1.04),
+        f0End: f0 * decline * 0.8,
+        durationMs: rand(c.rng, 60, 105),
+        formants: vowel,
         gain: c.gain * (1 - i / (pulses + 2)),
         pan,
+        breath: 0.35,
         attackMs: 5,
-        color: 'pink',
       });
     }
   },
@@ -617,22 +863,35 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     }
   },
   registerBeep: (c) => {
+    // A barcode scanner's confirmation tone. It was a raw square wave at 2.1-2.9 kHz
+    // with a 2 ms attack — the harshest possible thing to put in a mix, and audible
+    // as a pure electronic artefact rather than as a shop. A real one comes out of a
+    // small plastic transducer: band-limited, with a body resonance and a soft edge.
     const { ctx, at } = c;
     const osc = ctx.createOscillator();
     osc.type = 'square';
     osc.frequency.value = rand(c.rng, 2100, 2900);
+
+    // The transducer: no energy either side of what a tiny piezo can reproduce.
+    const body = ctx.createBiquadFilter();
+    body.type = 'bandpass';
+    body.frequency.value = rand(c.rng, 2400, 3000);
+    body.Q.value = 2.6;
     const flt = ctx.createBiquadFilter();
     flt.type = 'lowpass';
-    flt.frequency.value = 5000;
+    flt.frequency.value = 4200;
+
     const env = ctx.createGain();
     const dur = rand(c.rng, 0.06, 0.12);
     env.gain.setValueAtTime(0.0001, at);
-    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.5), at + 0.002);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.5), at + 0.006);
     env.gain.setValueAtTime(c.gain * 0.5, at + dur * 0.7);
     env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-    osc.connect(flt); flt.connect(env); env.connect(c.dest); env.connect(c.send);
+    osc.connect(body); body.connect(flt); flt.connect(env);
+    env.connect(c.dest); env.connect(c.send);
     osc.start(at); osc.stop(at + dur + 0.02);
-    c.track(osc, at + dur + 0.05); c.track(flt, at + dur + 0.05); c.track(env, at + dur + 0.05);
+    const done = at + dur + 0.05;
+    c.track(osc, done); c.track(body, done); c.track(flt, done); c.track(env, done);
   },
   cashDrawer: (c) => {
     const pan = rand(c.rng, -0.4, 0.4);
@@ -652,9 +911,11 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     const pan = rand(c.rng, -0.5, 0.5);
     for (let i = 0; i < keys; i++) {
       const at = c.at + i * interval + rand(c.rng, -0.02, 0.02);
-      material({ ...c, at, gain: c.gain * rand(c.rng, 0.6, 1) }, 'plastic', 0.7, pan);
+      // Keys are spread across a board, so successive strokes are not co-located.
+      const keyPan = clampPan(pan + rand(c.rng, -0.12, 0.12));
+      material({ ...c, at, gain: c.gain * rand(c.rng, 0.6, 1) }, 'plastic', 0.7, keyPan);
       // The key coming back up.
-      material({ ...c, at: at + rand(c.rng, 0.045, 0.09), gain: c.gain * 0.3 }, 'plastic', 0.3, pan);
+      material({ ...c, at: at + rand(c.rng, 0.045, 0.09), gain: c.gain * 0.3 }, 'plastic', 0.3, keyPan);
     }
   },
   paperRustle: (c) => {
@@ -860,22 +1121,34 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
   },
 
   announcement: (c) => {
-    // A PA voice: syllabic bursts through a narrow band with a horn resonance. The
-    // channel is the cue — nobody needs to make out the words to know what it is.
+    // A PA voice: voiced syllables through a narrow band with a horn resonance. The
+    // channel is the cue — nobody needs to make out the words to know what it is. But
+    // the syllables have to be VOICED: as band-passed noise (which is what this was)
+    // it had speech rhythm and no pitch, and read as static rather than as a person.
     const syllables = randInt(c.rng, 6, 14);
     const pan = rand(c.rng, -0.3, 0.3);
+    const f0 = rand(c.rng, 105, 210);
+    // Spanish vowels, so the syllable stream has somewhere to move between.
+    const VOWELS: Array<[number, number]> = [
+      [800, 1200], [420, 2000], [300, 2300], [500, 900], [325, 750], // a e i o u
+    ];
+    // Declination across the announcement, as in a real read.
     let t = c.at;
     for (let i = 0; i < syllables; i++) {
       const dur = rand(c.rng, 0.09, 0.2);
-      noiseBurst({ ...c, at: t }, {
+      const decl = 1 - (i / syllables) * 0.22;
+      const vowel = VOWELS[Math.floor(c.rng() * VOWELS.length)];
+      voicedBurst({ ...c, at: t }, {
+        f0: f0 * decl * rand(c.rng, 0.94, 1.08),
+        f0End: f0 * decl * 0.92,
         durationMs: dur * 1000,
-        filterType: 'bandpass',
-        freq: rand(c.rng, 700, 2000),
-        q: 2.2,
+        // Telephone/PA band: the formants are pushed into 700-2000 Hz, which is the
+        // horn's passband, rather than sitting where they naturally would.
+        formants: [Math.max(700, vowel[0] * 1.6), Math.min(2400, vowel[1] * 1.15)],
         gain: c.gain * rand(c.rng, 0.5, 1),
         pan,
-        attackMs: 14,
-        color: 'pink',
+        breath: 0.18,
+        attackMs: 12,
       });
       t += dur + rand(c.rng, 0.03, 0.1);
       // Phrase break.
@@ -914,7 +1187,18 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
   },
 
   monitorBeep: (c) => {
-    modalHit(c, [{ freq: rand(c.rng, 980, 1160), decayS: 0.1, amp: 0.6 }], { pan: rand(c.rng, -0.4, 0.4) });
+    // A single bare sine was the most synthetic object in the whole registry. A ward
+    // monitor's beep comes out of a small speaker: a second partial, a body
+    // resonance, and an attack slow enough not to click.
+    const f = rand(c.rng, 980, 1160);
+    modalHit(
+      c,
+      [
+        { freq: f, decayS: 0.11, amp: 0.6 },
+        { freq: f * 2.02, decayS: 0.05, amp: 0.18 },
+      ],
+      { pan: rand(c.rng, -0.4, 0.4), bodyAmount: 0.22, bodyHz: f * 1.5, bodyMs: 14 },
+    );
   },
   weightClank: (c) => {
     const pan = rand(c.rng, -0.7, 0.7);
@@ -973,29 +1257,54 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
   },
 
   bird: (c) => {
+    // Was a bare sine gliding between two frequencies, which is a slide whistle, not
+    // a bird. Three things separate them: a real call has harmonics (a syrinx is not
+    // a sine), it is frequency-modulated several times within a single note rather
+    // than sliding once, and it carries a little breath noise at onset.
     const { ctx } = c;
     const notes = randInt(c.rng, 2, 5);
-    const baseHz = rand(c.rng, 2200, 4800);
+    const baseHz = rand(c.rng, 2200, 4400);
     const pan = rand(c.rng, -0.9, 0.9);
     const rising = c.rng() < 0.5;
     for (let k = 0; k < notes; k++) {
       const at = c.at + k * rand(c.rng, 0.12, 0.3);
-      const dur = rand(c.rng, 0.05, 0.16);
+      const dur = rand(c.rng, 0.06, 0.18);
       const f0 = baseHz * rand(c.rng, 0.92, 1.08);
-      const osc = ctx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(f0, at);
-      osc.frequency.exponentialRampToValueAtTime(rising ? f0 * 1.7 : f0 * 0.62, at + dur);
+      const end = rising ? f0 * rand(c.rng, 1.35, 1.8) : f0 * rand(c.rng, 0.55, 0.75);
+
       const panner = ctx.createStereoPanner();
       panner.pan.value = pan;
       const env = ctx.createGain();
       env.gain.setValueAtTime(0.0001, at);
-      env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.5), at + dur * 0.25);
+      env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.5), at + dur * 0.22);
       env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-      osc.connect(panner); panner.connect(env); env.connect(c.dest); env.connect(c.send);
-      osc.start(at); osc.stop(at + dur + 0.02);
+      panner.connect(env); env.connect(c.dest); env.connect(c.send);
+
+      // Fundamental plus two decaying harmonics — a whistled call is not quite pure.
+      for (const [mult, amp] of [[1, 1], [2, 0.3], [3, 0.12]] as const) {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(f0 * mult, at);
+        // Warble through the note rather than a single monotonic slide.
+        const mid = (f0 + end) * 0.5 * mult;
+        osc.frequency.exponentialRampToValueAtTime(Math.max(40, end * mult), at + dur * 0.45);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(40, mid * rand(c.rng, 0.9, 1.1)), at + dur * 0.75);
+        osc.frequency.exponentialRampToValueAtTime(Math.max(40, end * mult), at + dur);
+        const partial = ctx.createGain();
+        partial.gain.value = amp;
+        osc.connect(partial); partial.connect(panner);
+        osc.start(at); osc.stop(at + dur + 0.02);
+        c.track(osc, at + dur + 0.05); c.track(partial, at + dur + 0.05);
+      }
+
+      // Breath at the onset.
+      noiseBurst({ ...c, at }, {
+        durationMs: dur * 1000 * 0.3, filterType: 'bandpass', freq: f0 * 1.4, q: 1.4,
+        gain: c.gain * 0.12, pan, attackMs: 1,
+      });
+
       const done = at + dur + 0.05;
-      c.track(osc, done); c.track(panner, done); c.track(env, done);
+      c.track(panner, done); c.track(env, done);
     }
   },
   windGust: (c) => {
@@ -1041,9 +1350,35 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     }
   },
   applause: (c) => {
-    // Many independent claps, dense at the start and thinning out.
+    // A crowd clapping is a dense wash with a few near claps standing out of it, not
+    // 140-630 individually scheduled bursts: that version built up to ~2,500 nodes
+    // inside one 400 ms scheduler tick, which is a real risk of an audible dropout on
+    // the audio thread. A continuous band-limited noise layer carries the mass, and a
+    // couple of dozen discrete claps sit on top for the texture.
+    const { ctx } = c;
     const dur = rand(c.rng, 3.5, 7);
-    const claps = Math.floor(dur * rand(c.rng, 40, 90));
+
+    const wash = ctx.createBufferSource();
+    wash.buffer = c.noise.get('white');
+    wash.loop = true;
+    const washFilter = ctx.createBiquadFilter();
+    washFilter.type = 'bandpass';
+    washFilter.frequency.value = rand(c.rng, 1300, 2000);
+    washFilter.Q.value = 0.7;
+    const washEnv = ctx.createGain();
+    washEnv.gain.setValueAtTime(0.0001, c.at);
+    washEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.9), c.at + 0.25);
+    washEnv.gain.setValueAtTime(c.gain * 0.9, c.at + dur * 0.35);
+    washEnv.gain.exponentialRampToValueAtTime(0.0001, c.at + dur);
+    wash.connect(washFilter); washFilter.connect(washEnv);
+    washEnv.connect(c.dest); washEnv.connect(c.send);
+    wash.start(c.at, c.rng() * 4);
+    wash.stop(c.at + dur + 0.05);
+    const washDone = c.at + dur + 0.1;
+    c.track(wash, washDone); c.track(washFilter, washDone); c.track(washEnv, washDone);
+
+    // A handful of nearby hands, so the wash has grain.
+    const claps = randInt(c.rng, 14, 26);
     for (let i = 0; i < claps; i++) {
       const t = Math.pow(c.rng(), 0.7) * dur;
       noiseBurst({ ...c, at: c.at + t }, {
@@ -1051,7 +1386,7 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
         filterType: 'bandpass',
         freq: rand(c.rng, 900, 2600),
         q: 0.9,
-        gain: c.gain * rand(c.rng, 0.1, 0.45) * (1 - t / (dur * 1.4)),
+        gain: c.gain * rand(c.rng, 0.15, 0.5) * (1 - t / (dur * 1.4)),
         pan: rand(c.rng, -0.95, 0.95),
         attackMs: 0.5,
       });
@@ -1094,6 +1429,7 @@ export class AmbienceEngine {
   private eventMidFilter!: BiquadFilterNode;
   private eventFar!: GainNode;
   private eventFarFilter!: BiquadFilterNode;
+  private eventTop!: BiquadFilterNode;
   private stemBus!: GainNode;
   private stemHighpass!: BiquadFilterNode;
   private convolver!: ConvolverNode;
@@ -1129,6 +1465,8 @@ export class AmbienceEngine {
   private eventScale: number;
   /** Makeup applied to the stem bus, including the quiet-scene lift. */
   private bedGain: number;
+  /** Stretch applied to every `everyS` to hold the scene under the onset budget. */
+  private rateScale = 1;
 
   constructor(ctx: AudioContext, destination: AudioNode, scene: ResolvedAmbience, seedSalt: string, opts: AmbienceEngineOptions) {
     this.ctx = ctx;
@@ -1182,6 +1520,21 @@ export class AmbienceEngine {
     this.convolver.connect(this.reverbReturn);
     this.reverbReturn.connect(this.userGain);
 
+    // Air absorption / bandwidth match for the whole event side.
+    //
+    // Events are synthesised at the context rate (44.1-48 kHz) with contact clicks
+    // high-passed at 4.2-6 kHz and cutlery partials reaching past 15 kHz, while the
+    // beds are baked at 8-24 kHz and so carry literally nothing above 4-12 kHz. The
+    // events therefore live in a band where the bed does not exist, which means they
+    // can never be masked by it or integrate with it: acoustically they are a
+    // separate layer floating on top, and that is a large part of why they read as
+    // "little noises" rather than as part of the place.
+    this.eventTop = ctx.createBiquadFilter();
+    this.eventTop.type = 'lowpass';
+    this.eventTop.frequency.value = sceneBandwidthHz(recipe);
+    this.eventTop.Q.value = 0.7;
+    this.eventTop.connect(this.userGain);
+
     // Near events: mostly dry, panned wide, but never BONE dry. `wet` is already
     // applied once at the return, so the sends below are pure distance ratios. A
     // perfectly dry clink inside a room is physically impossible, and it is the
@@ -1189,7 +1542,7 @@ export class AmbienceEngine {
     // the same place as the bed.
     this.eventNear = ctx.createGain();
     this.eventNear.gain.value = 1;
-    this.eventNear.connect(this.userGain);
+    this.eventNear.connect(this.eventTop);
     this.nearSend = ctx.createGain();
     this.nearSend.gain.value = 0.5;
     this.nearSend.connect(this.convolver);
@@ -1203,7 +1556,7 @@ export class AmbienceEngine {
     this.eventMid = ctx.createGain();
     this.eventMid.gain.value = 0.62;
     this.eventMidFilter.connect(this.eventMid);
-    this.eventMid.connect(this.userGain);
+    this.eventMid.connect(this.eventTop);
     this.midSend = ctx.createGain();
     this.midSend.gain.value = 0.95;
     this.midSend.connect(this.convolver);
@@ -1217,7 +1570,7 @@ export class AmbienceEngine {
     this.eventFar = ctx.createGain();
     this.eventFar.gain.value = 0.5;
     this.eventFarFilter.connect(this.eventFar);
-    this.eventFar.connect(this.userGain);
+    this.eventFar.connect(this.eventTop);
     this.farSend = ctx.createGain();
     this.farSend.gain.value = 0.75;
     this.farSend.connect(this.convolver);
@@ -1236,9 +1589,10 @@ export class AmbienceEngine {
     // with everything firing at once.
     const effIntensity = clamp01(this.intensity + (recipe.intensityBias ?? 0));
     const now = ctx.currentTime;
+    this.rateScale = eventRateScale(recipe, effIntensity);
     this.schedule = recipe.events.map((spec) => ({
       spec,
-      nextAt: now + rand(this.rng, 0.4, Math.max(1.2, spec.everyS)),
+      nextAt: now + rand(this.rng, 0.4, Math.max(1.2, spec.everyS * this.rateScale)),
     }));
     this.intensity = effIntensity;
   }
@@ -1422,14 +1776,16 @@ export class AmbienceEngine {
 
         // Bursts: real events clump. A run of steps, two cups, a knot of cars.
         if (entry.spec.burst && this.rng() < entry.spec.burst) {
-          const extra = randInt(this.rng, 1, 3);
+          // Was randInt(1, 3). Clusters are real, but three extras on top of a
+          // cluster-type synth (typing is already 4-12 keys) is a pile-up.
+          const extra = randInt(this.rng, 1, 2);
           for (let i = 1; i <= extra; i++) {
             this.fire(entry.spec, at + i * rand(this.rng, 0.12, 0.7));
           }
         }
 
         // Higher intensity means more often, not just louder.
-        const scale = 1.6 - this.intensity;
+        const scale = (1.6 - this.intensity) * this.rateScale;
         entry.nextAt = at + poissonInterval(this.rng, entry.spec.everyS * scale);
       }
     }

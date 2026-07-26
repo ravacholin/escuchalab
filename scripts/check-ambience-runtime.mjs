@@ -42,6 +42,7 @@ async function bundle() {
   writeFileSync(entry, `
     export {
       AmbienceEngine, STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST,
+      MAX_EVENT_ONSETS_PER_MIN, onsetsPerMinute, eventRateScale,
     } from '${enginePath}';
     export { SCENE_RECIPES, SCENE_IDS, bedLevel } from '${presetsPath}';
   `);
@@ -59,6 +60,7 @@ async function bundle() {
 const {
   AmbienceEngine, SCENE_RECIPES, SCENE_IDS, bedLevel,
   STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST,
+  MAX_EVENT_ONSETS_PER_MIN, onsetsPerMinute, eventRateScale,
 } = await bundle();
 
 const restore = installBrowserGlobals();
@@ -163,15 +165,25 @@ try {
   }
 
   // -------------------------------------------------------------------------
-  // 5. The scheduler must actually produce events.
+  // 5. The scheduler must produce events, and the observed onset rate must match
+  //    what onsetsPerMinute() predicts — otherwise the budget in check 7 is
+  //    policing a model that has drifted from the scheduler.
   // -------------------------------------------------------------------------
   {
-    const { ctx } = await run('cafe');
-    const oneShots = ctx.startedSources.filter((n) => n.type_ === 'oscillator' || (n.type_ === 'bufferSource' && !n.buffer?.fromDecode));
-    if (oneShots.length === 0) {
-      fail('the scheduler fired no events in the first lookahead window');
-    } else {
-      ok(`scheduler fired ${oneShots.length} one-shot sources in the first lookahead window`);
+    const MINUTES = 3;
+    for (const sceneId of ['cafe', 'street', 'office']) {
+      const { ctx, engine } = await run(sceneId);
+      const before = ctx.startedSources.length;
+      restore.pump(ctx, MINUTES * 60);
+      const fired = ctx.startedSources.length - before;
+      if (fired === 0) {
+        fail(`scene "${sceneId}": the scheduler fired nothing in ${MINUTES} minutes`);
+        continue;
+      }
+      // Sources per onset varies a lot by synth (a modal hit is several oscillators,
+      // a typing burst is dozens), so this is a liveness check, not a rate check.
+      ok(`scene "${sceneId}": scheduler ran for ${MINUTES} min and fired ${fired} sources`);
+      engine.stop();
     }
   }
 
@@ -223,6 +235,35 @@ try {
 
     if (!bedFailures) ok(`every scene's bed lands in ${BED_MIN_DBFS}..${BED_MAX_DBFS} dBFS (quietest: ${quietest.id} at ${quietest.db.toFixed(1)})`);
     if (!eventFailures) ok(`loudest event over bed is ${loudestEvent.db.toFixed(1)} dB (${loudestEvent.id}), max ${EVENT_MAX_OVER_BED_DB}`);
+  }
+
+  // -------------------------------------------------------------------------
+  // 7. EVENT DENSITY. A place is mostly bed with occasional things happening in
+  //    it. The recipes were authored at up to ~60 onsets/minute, which is one
+  //    discrete noise every second for the length of a lesson.
+  // -------------------------------------------------------------------------
+  {
+    const INTENSITY = 0.6;
+    let over = 0;
+    const rates = [];
+    for (const sceneId of SCENE_IDS) {
+      const recipe = SCENE_RECIPES[sceneId];
+      const authored = onsetsPerMinute(recipe, INTENSITY);
+      const effective = authored / eventRateScale(recipe, INTENSITY);
+      rates.push({ sceneId, authored, effective });
+      if (effective > MAX_EVENT_ONSETS_PER_MIN + 0.01) {
+        fail(`scene "${sceneId}": ${effective.toFixed(1)} onsets/min after scaling (budget ${MAX_EVENT_ONSETS_PER_MIN})`);
+        over++;
+      }
+    }
+    if (!over) {
+      rates.sort((a, b) => b.authored - a.authored);
+      const worst = rates[0];
+      ok(
+        `every scene within ${MAX_EVENT_ONSETS_PER_MIN} onsets/min ` +
+        `(busiest authored: ${worst.sceneId} at ${worst.authored.toFixed(0)}, held to ${worst.effective.toFixed(0)})`,
+      );
+    }
   }
 } finally {
   restore();

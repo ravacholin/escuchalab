@@ -195,7 +195,13 @@ export class FakeAudioContext {
 export function installBrowserGlobals({ stemBytes = new ArrayBuffer(64) } = {}) {
   const g = globalThis;
   const saved = {};
-  const timers = { timeouts: new Set(), intervals: new Set() };
+
+  // Virtual timers, so a test can run the event scheduler over minutes of scene time
+  // without waiting for them. Real timers would make anything that samples the
+  // schedule flaky, and the point of these checks is to be deterministic.
+  let nowMs = 0;
+  let nextTimerId = 1;
+  const pending = new Map();
 
   const remember = (key, value) => {
     saved[key] = { had: key in g, value: g[key] };
@@ -203,22 +209,50 @@ export function installBrowserGlobals({ stemBytes = new ArrayBuffer(64) } = {}) 
   };
 
   remember('window', {
-    setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); timers.timeouts.add(t); return t; },
-    clearTimeout: (t) => { clearTimeout(t); timers.timeouts.delete(t); },
-    setInterval: (fn, ms) => { const t = setInterval(fn, ms); timers.intervals.add(t); return t; },
-    clearInterval: (t) => { clearInterval(t); timers.intervals.delete(t); },
+    setTimeout: (fn, ms = 0) => {
+      const id = nextTimerId++;
+      pending.set(id, { fn, at: nowMs + ms, every: null });
+      return id;
+    },
+    clearTimeout: (id) => pending.delete(id),
+    setInterval: (fn, ms = 0) => {
+      const id = nextTimerId++;
+      pending.set(id, { fn, at: nowMs + ms, every: Math.max(1, ms) });
+      return id;
+    },
+    clearInterval: (id) => pending.delete(id),
   });
   remember('AudioBufferSourceNode', FakeAudioBufferSourceNode);
   remember('OscillatorNode', FakeOscillatorNode);
   remember('fetch', async () => ({ ok: true, status: 200, arrayBuffer: async () => stemBytes }));
 
-  return function restore() {
-    for (const t of timers.timeouts) clearTimeout(t);
-    for (const t of timers.intervals) clearInterval(t);
+  /**
+   * Advance virtual time by `seconds`, firing due timers and keeping the given
+   * AudioContext's clock in step (the scheduler works off ctx.currentTime).
+   */
+  const pump = (ctx, seconds, stepMs = 100) => {
+    const target = nowMs + seconds * 1000;
+    let guard = 0;
+    while (nowMs < target && guard++ < 200000) {
+      nowMs = Math.min(target, nowMs + stepMs);
+      ctx.currentTime = nowMs / 1000;
+      for (const [id, timer] of [...pending]) {
+        if (timer.at > nowMs) continue;
+        if (timer.every === null) pending.delete(id);
+        else timer.at = nowMs + timer.every;
+        timer.fn();
+      }
+    }
+  };
+
+  const restore = () => {
+    pending.clear();
     for (const [key, { had, value }] of Object.entries(saved)) {
       if (had) g[key] = value; else delete g[key];
     }
   };
+  restore.pump = pump;
+  return restore;
 }
 
 /** Let every pending microtask (and the stem fetch/decode chain) settle. */

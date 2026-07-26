@@ -79,13 +79,13 @@ const mod = await bundle(`
     SCENE_RECIPES, SCENE_IDS, STEM_IDS, MODEL_SELECTABLE_SCENES, STEM_LEVELS_DBFS,
     resolveAmbienceScene, isSceneId, bedLevel,
   } from './services/ambiencePresets';
-  export { EVENT_SYNTHS } from './services/ambienceEngine';
+  export { EVENT_SYNTHS, EVENT_CLUSTER_SIZE } from './services/ambienceEngine';
   export { TextType } from './types';
 `);
 
 const {
   SCENARIO_DATABASE, SCENE_RECIPES, SCENE_IDS, MODEL_SELECTABLE_SCENES, STEM_LEVELS_DBFS,
-  resolveAmbienceScene, isSceneId, EVENT_SYNTHS, TextType,
+  resolveAmbienceScene, isSceneId, EVENT_SYNTHS, EVENT_CLUSTER_SIZE, TextType,
 } = mod;
 
 // ---------------------------------------------------------------------------
@@ -280,6 +280,12 @@ for (const [sceneId, recipe] of Object.entries(SCENE_RECIPES)) {
     if (typeof EVENT_SYNTHS[spec.kind] !== 'function') {
       fail(`scene "${sceneId}" schedules event "${spec.kind}" but no synth is registered for it`);
     }
+    // Same principle: a kind missing from the cluster table weighs nothing against
+    // the density budget, so an office could schedule 200 keystrokes a minute while
+    // nominally counting as a handful of events.
+    if (!(EVENT_CLUSTER_SIZE[spec.kind] >= 1)) {
+      fail(`scene "${sceneId}" schedules event "${spec.kind}" but it has no EVENT_CLUSTER_SIZE entry`);
+    }
     if (!(spec.everyS > 0)) fail(`scene "${sceneId}" event "${spec.kind}" has a non-positive interval`);
     if (!(spec.gain > 0)) fail(`scene "${sceneId}" event "${spec.kind}" has a non-positive gain`);
   }
@@ -311,6 +317,13 @@ if (unusedKinds.length > 0) {
   fail(`event synth(s) registered but never scheduled by any scene: ${unusedKinds.join(', ')}`);
 } else {
   ok(`all ${Object.keys(EVENT_SYNTHS).length} event synths are scheduled by at least one scene`);
+}
+
+const missingCluster = Object.keys(EVENT_SYNTHS).filter((k) => !(EVENT_CLUSTER_SIZE[k] >= 1));
+if (missingCluster.length > 0) {
+  fail(`event kind(s) with no EVENT_CLUSTER_SIZE entry: ${missingCluster.join(', ')}`);
+} else {
+  ok(`all ${Object.keys(EVENT_SYNTHS).length} event kinds carry a density weight`);
 }
 
 // ---------------------------------------------------------------------------

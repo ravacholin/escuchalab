@@ -47,6 +47,8 @@ let EVENT_OVER_BED = 1;
 let BED_FLOOR = 0;
 let MAX_BED_BOOST = 1;
 let BED_REVERB_SEND = 0;
+let eventRateScale = () => 1;
+let onsetsPerMinute = () => 0;
 
 // ---------------------------------------------------------------------------
 // EventKind -> offline generator.
@@ -135,6 +137,7 @@ async function loadRecipes() {
         export { SCENE_RECIPES, SCENE_IDS, bedLevel } from './services/ambiencePresets';
         export {
           STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST, BED_REVERB_SEND,
+          eventRateScale, onsetsPerMinute,
         } from './services/ambienceEngine';
       `,
       resolveDir: ROOT,
@@ -179,6 +182,7 @@ function renderScene(sceneId, recipe, seconds, seed, bedLevel) {
   const bedBoost = Math.min(MAX_BED_BOOST, Math.max(1, rawBed > 0 ? BED_FLOOR / rawBed : 1));
   const eventScale = rawBed * bedBoost * EVENT_OVER_BED;
   const bedGain = STEM_MAKEUP * bedBoost;
+  const rateScale = eventRateScale(recipe, 0.6);
   const left = new Float32Array(n);
   const right = new Float32Array(n);
   const missing = [];
@@ -236,7 +240,12 @@ function renderScene(sceneId, recipe, seconds, seed, bedLevel) {
     const far = spec.distance === 'far';
     const mid = spec.distance === 'mid';
 
-    const times = poissonTimes(seconds, 1 / spec.everyS, rng, { burst: spec.burst ?? 0, burstGapS: [0.12, 0.7] });
+    // The engine holds each scene under a density budget by stretching every
+    // interval; without mirroring it the preview auditions a busier scene than the
+    // browser plays.
+    const times = poissonTimes(seconds, 1 / (spec.everyS * rateScale), rng, {
+      burst: spec.burst ?? 0, burstGapS: [0.12, 0.7],
+    });
     counts[spec.kind] = times.length;
 
     for (const t of times) {
@@ -303,7 +312,10 @@ for (let i = 0; i < argv.length; i++) {
 
 const mixMod = await loadRecipes();
 const { SCENE_RECIPES, SCENE_IDS, bedLevel } = mixMod;
-({ STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST, BED_REVERB_SEND } = mixMod);
+({
+  STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST, BED_REVERB_SEND,
+  eventRateScale, onsetsPerMinute,
+} = mixMod);
 
 let targets = wanted.filter((w) => w !== '--all');
 if (wanted.includes('--all') || targets.length === 0) {
