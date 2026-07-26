@@ -47,10 +47,49 @@ import { loadStem } from './ambienceLibrary';
 // is deafening over a therapy room. Scaling by the bed keeps the event-over-bed
 // relationship — which is what the ear actually judges — constant everywhere.
 // ---------------------------------------------------------------------------
-const STEM_MAKEUP = 1.6;    // bundled continuous textures
-/** Peak of a full-gain (1.0) event, as a multiple of the scene's bed RMS. */
-const EVENT_OVER_BED = 12;
+// Exported so scripts/check-ambience-runtime.mjs and scripts/ambience/preview.mjs read
+// the real numbers instead of keeping hand-copied duplicates in step by convention.
+export const STEM_MAKEUP = 2.6;    // bundled continuous textures
+
+/**
+ * Peak of a full-gain (1.0) event, as a multiple of the scene's bed RMS.
+ *
+ * The headline number was never really the villain — it was 12, and the calibration
+ * below lands close to it again. What made a cafe's porcelain clink arrive ~19 dB over
+ * its bed was everything around it: modal hits summed their in-phase partials to a
+ * further 2.15x, a `gain` of 1 meant four different loudnesses depending on which
+ * synth read it, and the bed it was all measured against never actually played.
+ *
+ * With those fixed the value can be derived instead of guessed. A spec ends up at
+ * `gain * EVENT_OVER_BED / STEM_MAKEUP` over the bed; the loudest spec in the
+ * catalogue is gain 0.5, and a transient peaking ~6 dB over a continuous bed is
+ * clearly present without dominating, which gives 2.0 * 2.6 / 0.5 = 10.4. The typical
+ * spec (gain 0.2-0.3) then lands within a couple of dB of the bed: part of the place
+ * rather than sitting on top of it.
+ */
+export const EVENT_OVER_BED = 10.4;
 const REVERB_RETURN = 0.9;
+
+/** Reverb send for the bed. A pure distance ratio: `room.wet` is applied at the
+ *  return, and applying it here too is what left the bed dry. */
+export const BED_REVERB_SEND = 0.7;
+
+/** Side-signal scale for stereo stems at width 1. See attachStem for the measurement. */
+const STEREO_SIDE_SCALE = 0.7;
+
+/**
+ * Quiet scenes get lifted towards this nominal bed amplitude.
+ *
+ * A library's bed sits at -39.6 dBFS and a radio studio's at -42.4 before the user's
+ * volume, which on a laptop speaker is nothing at all. Because events are scaled
+ * against the bed, the scene doesn't become "only clicks" — it becomes silence, and a
+ * learner reads silence as "the ambience is broken". The boost is applied to the bed
+ * AND to the event scale together, so the event-over-bed relationship — the thing the
+ * ear actually judges — is untouched; a quiet room stays quiet relative to a cafe,
+ * just not inaudible.
+ */
+export const BED_FLOOR = 0.0101;
+export const MAX_BED_BOOST = 3;
 
 /** Below this, laptop speakers reproduce nothing but the port noise, and it eats
  *  headroom that the audible bands need. The old beds put 85-97% of their energy
@@ -117,6 +156,21 @@ const poissonInterval = (rng: Rng, meanS: number) =>
 // from a random offset, which is both cheaper and less repetitive than the old 6 s
 // looping noise sources (whose period was plainly audible).
 // ---------------------------------------------------------------------------
+/**
+ * The RMS every noise colour is normalised to.
+ *
+ * This matters more than it looks. The three generators used to be left at their
+ * natural amplitudes — white 0.231 RMS, brown 0.173, pink 0.437 (peaking at 1.965,
+ * i.e. over full scale) — so the same `gain` produced wildly different loudnesses
+ * depending on which colour an event happened to use. Combined with modal hits, whose
+ * partials summed to a peak of 2.15, `gain: 1` spanned roughly 15 dB. The systematic
+ * effect was perverse: the pingy, obviously-synthetic events (clinks, taps, beeps —
+ * all sine stacks) came out loudest, and the naturalistic ones (scuffs, scrapes, car
+ * passes, rustles, applause — all noise) came out quietest. Normalising here is what
+ * lets `EventSpec.gain` mean one thing everywhere.
+ */
+const NOISE_RMS = 0.2;
+
 class NoisePool {
   private buffers = new Map<string, AudioBuffer>();
 
@@ -133,12 +187,12 @@ class NoisePool {
     const rng = this.rng;
 
     if (color === 'white') {
-      for (let i = 0; i < length; i++) out[i] = (rng() * 2 - 1) * 0.4;
+      for (let i = 0; i < length; i++) out[i] = rng() * 2 - 1;
     } else if (color === 'brown') {
       let last = 0;
       for (let i = 0; i < length; i++) {
         last = (last + 0.02 * (rng() * 2 - 1)) / 1.02;
-        out[i] = last * 3;
+        out[i] = last;
       }
     } else {
       let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
@@ -150,10 +204,23 @@ class NoisePool {
         b3 = 0.8665 * b3 + white * 0.3104856;
         b4 = 0.55 * b4 + white * 0.5329522;
         b5 = -0.7616 * b5 - white * 0.016898;
-        out[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.25;
+        out[i] = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
         b6 = white * 0.115926;
       }
     }
+
+    // Normalise to a common RMS, then guarantee headroom. Noise is Gaussian-ish, so
+    // the peak of an 8 s buffer runs ~4.5 sigma; clamping the peak as well keeps a
+    // stray excursion from clipping once event gains are applied.
+    let sum = 0;
+    for (let i = 0; i < length; i++) sum += out[i] * out[i];
+    const rms = Math.sqrt(sum / length) || 1;
+    let scale = NOISE_RMS / rms;
+    let peak = 0;
+    for (let i = 0; i < length; i++) peak = Math.max(peak, Math.abs(out[i]));
+    if (peak * scale > 0.99) scale = 0.99 / peak;
+    for (let i = 0; i < length; i++) out[i] *= scale;
+
     this.buffers.set(color, buffer);
     return buffer;
   }
@@ -256,6 +323,16 @@ function modalHit(
   out.connect(c.dest);
   out.connect(c.send);
 
+  // Partials start in phase, so at t=0 they sum. A four-partial material stack summed
+  // to 2.15x its nominal gain, which is most of why the pingy events dominated the
+  // mix. Renormalise so the stack peaks at the LOUDEST partial's amplitude rather than
+  // at their sum, which keeps `strength` meaningful (all amps scale with it) while
+  // making `gain` mean roughly "peak amplitude", the same as it does for noiseBurst.
+  let ampSum = 0;
+  let ampMax = 0;
+  for (const p of partials) { ampSum += p.amp; ampMax = Math.max(ampMax, p.amp); }
+  const ampNorm = ampSum > 0 ? ampMax / ampSum : 1;
+
   let longest = 0;
   for (const p of partials) {
     const osc = ctx.createOscillator();
@@ -266,7 +343,7 @@ function modalHit(
 
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, at);
-    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, p.amp), at + 0.0015);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, p.amp * ampNorm), at + 0.0015);
     env.gain.exponentialRampToValueAtTime(0.0001, at + p.decayS);
 
     osc.connect(env);
@@ -1013,6 +1090,8 @@ export class AmbienceEngine {
 
   // Per-scene nodes.
   private eventNear!: GainNode;
+  private eventMid!: GainNode;
+  private eventMidFilter!: BiquadFilterNode;
   private eventFar!: GainNode;
   private eventFarFilter!: BiquadFilterNode;
   private stemBus!: GainNode;
@@ -1020,6 +1099,7 @@ export class AmbienceEngine {
   private convolver!: ConvolverNode;
   private reverbReturn!: GainNode;
   private nearSend!: GainNode;
+  private midSend!: GainNode;
   private farSend!: GainNode;
 
   private liveNodes = new Set<AudioNode>();
@@ -1047,12 +1127,18 @@ export class AmbienceEngine {
   private intensity: number;
   /** Event gain scale derived from this scene's bed level. */
   private eventScale: number;
+  /** Makeup applied to the stem bus, including the quiet-scene lift. */
+  private bedGain: number;
 
   constructor(ctx: AudioContext, destination: AudioNode, scene: ResolvedAmbience, seedSalt: string, opts: AmbienceEngineOptions) {
     this.ctx = ctx;
     this.scene = scene;
     this.intensity = opts.intensity;
-    this.eventScale = bedLevel(scene.recipe) * EVENT_OVER_BED;
+    const rawBed = bedLevel(scene.recipe);
+    const boost = Math.min(MAX_BED_BOOST, Math.max(1, rawBed > 0 ? BED_FLOOR / rawBed : 1));
+    this.bedGain = STEM_MAKEUP * boost;
+    // Boosted alongside the bed, so the event-over-bed ratio is scene-independent.
+    this.eventScale = rawBed * boost * EVENT_OVER_BED;
 
     // Scene identity seeds the character; the salt reseeds per playback so the same
     // scenario never sounds identical twice.
@@ -1096,13 +1182,31 @@ export class AmbienceEngine {
     this.convolver.connect(this.reverbReturn);
     this.reverbReturn.connect(this.userGain);
 
-    // Near events: dry, panned wide, small reverb send.
+    // Near events: mostly dry, panned wide, but never BONE dry. `wet` is already
+    // applied once at the return, so the sends below are pure distance ratios. A
+    // perfectly dry clink inside a room is physically impossible, and it is the
+    // single strongest cue that an event is pasted on top rather than happening in
+    // the same place as the bed.
     this.eventNear = ctx.createGain();
     this.eventNear.gain.value = 1;
     this.eventNear.connect(this.userGain);
     this.nearSend = ctx.createGain();
-    this.nearSend.gain.value = 0.18;
+    this.nearSend.gain.value = 0.5;
     this.nearSend.connect(this.convolver);
+
+    // Mid events: a real distance rather than a volume trim. This used to be a bare
+    // 0.7 gain multiplier in fire() with no filtering and no extra send — and two
+    // thirds of all event specs are `mid`, so the depth system was mostly bypassed.
+    this.eventMidFilter = ctx.createBiquadFilter();
+    this.eventMidFilter.type = 'lowpass';
+    this.eventMidFilter.frequency.value = recipe.room.size === 'outdoor' ? 6500 : 5000;
+    this.eventMid = ctx.createGain();
+    this.eventMid.gain.value = 0.62;
+    this.eventMidFilter.connect(this.eventMid);
+    this.eventMid.connect(this.userGain);
+    this.midSend = ctx.createGain();
+    this.midSend.gain.value = 0.95;
+    this.midSend.connect(this.convolver);
 
     // Far events: lowpassed (air absorption) and mostly reverb. This near/far split
     // is what produces depth; previously every event sat at the same distance, which
@@ -1124,7 +1228,7 @@ export class AmbienceEngine {
     this.stemHighpass.frequency.value = BED_HIGHPASS_HZ;
     this.stemHighpass.Q.value = 0.7;
     this.stemBus = ctx.createGain();
-    this.stemBus.gain.value = STEM_MAKEUP;
+    this.stemBus.gain.value = this.bedGain;
     this.stemHighpass.connect(this.stemBus);
     this.stemBus.connect(this.userGain);
 
@@ -1190,8 +1294,13 @@ export class AmbienceEngine {
     node.connect(gain);
     this.liveNodes.add(gain);
 
-    // Stereo width. Mono stems (the cheap ones) get widened here with a pair of short
-    // delays; the stereo stems already carry their own decorrelation from bake time.
+    // Stereo width.
+    //
+    // The two branches used to be one, gated on `buffer.numberOfChannels === 1` — and
+    // every stem that declares a `width` is stereo except `kitchen`. So the widening
+    // was dead code for the stems that asked for it, while `kitchen` (mono) got 2.5
+    // summed copies of itself, roughly +7 dB that `bedLevel()` does not model, which
+    // skewed the event-to-bed ratio of exactly the two busiest scenes.
     const width = layer.width ?? 0;
     if (width > 0 && buffer.numberOfChannels === 1) {
       const splitL = ctx.createDelay(0.05);
@@ -1202,20 +1311,69 @@ export class AmbienceEngine {
       const panR = ctx.createStereoPanner();
       panL.pan.value = -width;
       panR.pan.value = width;
-      gain.connect(splitL); splitL.connect(panL); panL.connect(this.stemHighpass);
-      gain.connect(splitR); splitR.connect(panR); panR.connect(this.stemHighpass);
+      // Level compensation: three decorrelated copies sum in power, so without this
+      // the layer arrives ~3.5 dB above the gain the recipe asked for.
+      const comp = ctx.createGain();
+      comp.gain.value = 1 / Math.sqrt(1 + 1 + 0.5 * 0.5);
+      gain.connect(comp);
+      comp.connect(splitL); splitL.connect(panL); panL.connect(this.stemHighpass);
+      comp.connect(splitR); splitR.connect(panR); panR.connect(this.stemHighpass);
       // Keep some centre so the widening doesn't hollow out the middle.
       const centre = ctx.createGain();
       centre.gain.value = 0.5;
-      gain.connect(centre); centre.connect(this.stemHighpass);
-      [splitL, splitR, panL, panR, centre].forEach((n) => this.liveNodes.add(n));
+      comp.connect(centre); centre.connect(this.stemHighpass);
+      [comp, splitL, splitR, panL, panR, centre].forEach((n) => this.liveNodes.add(n));
+    } else if (width > 0 && buffer.numberOfChannels > 1) {
+      // Stereo stems: mid/side, so `width` narrows rather than doing nothing.
+      //
+      // The baked babble stems measure an L/R correlation of 0.05-0.19 — effectively
+      // fully decorrelated, which the ear reads as diffuse and "inside your head"
+      // rather than as a room in front of you. Real crowd recordings sit around
+      // 0.35-0.6. Scaling the side signal pulls the correlation back into that range
+      // without rebaking a single byte.
+      const merger = ctx.createChannelMerger(2);
+      const splitter = ctx.createChannelSplitter(2);
+      const side = ctx.createGain();
+      const sideInvert = ctx.createGain();
+      side.gain.value = width * STEREO_SIDE_SCALE;
+      sideInvert.gain.value = -width * STEREO_SIDE_SCALE;
+      const midL = ctx.createGain();
+      const midR = ctx.createGain();
+      midL.gain.value = 0.5;
+      midR.gain.value = 0.5;
+
+      gain.connect(splitter);
+      // M = (L+R)/2 to both outputs; S = (L-R)/2 added to L, subtracted from R.
+      splitter.connect(midL, 0); splitter.connect(midL, 1);
+      splitter.connect(midR, 0); splitter.connect(midR, 1);
+      midL.connect(merger, 0, 0);
+      midR.connect(merger, 0, 1);
+
+      const sideSrcL = ctx.createGain(); sideSrcL.gain.value = 0.5;
+      const sideSrcR = ctx.createGain(); sideSrcR.gain.value = -0.5;
+      splitter.connect(sideSrcL, 0);
+      splitter.connect(sideSrcR, 1);
+      sideSrcL.connect(side); sideSrcR.connect(side);
+      sideSrcL.connect(sideInvert); sideSrcR.connect(sideInvert);
+      side.connect(merger, 0, 0);
+      sideInvert.connect(merger, 0, 1);
+
+      merger.connect(this.stemHighpass);
+      [splitter, merger, side, sideInvert, midL, midR, sideSrcL, sideSrcR]
+        .forEach((n) => this.liveNodes.add(n));
     } else {
       gain.connect(this.stemHighpass);
     }
 
     // Send the stem to the room too, so bed and events share an acoustic.
+    //
+    // This used to be `room.wet * 0.5` feeding a return already scaled by `room.wet`,
+    // so `wet` was applied twice and the bed came back at wet^2 * 0.45 — 0.0115, or
+    // -39 dB, in a cafe. The bed was bone dry while the events got 2-9x more room, the
+    // exact opposite of "bed and events share an acoustic". The sends are now pure
+    // distance ratios; `wet` is applied once, at the return.
     const send = ctx.createGain();
-    send.gain.value = this.scene.recipe.room.wet * 0.5;
+    send.gain.value = BED_REVERB_SEND;
     gain.connect(send);
     send.connect(this.convolver);
     this.liveNodes.add(send);
@@ -1285,17 +1443,20 @@ export class AmbienceEngine {
     if (!synth) return;
     const far = spec.distance === 'far';
     const mid = spec.distance === 'mid';
+    // Distance is now carried by the bus (filtering + reverb send), not by a gain trim.
+    const dest = far ? this.eventFarFilter : mid ? this.eventMidFilter : this.eventNear;
+    const send = far ? this.farSend : mid ? this.midSend : this.nearSend;
     try {
       synth(
         {
           ctx: this.ctx,
           rng: this.rng,
           noise: this.noise,
-          dest: far ? this.eventFarFilter : this.eventNear,
-          send: far ? this.farSend : this.nearSend,
+          dest,
+          send,
           at,
           intensity: this.intensity,
-          gain: spec.gain * this.eventScale * (0.55 + this.intensity * 0.75) * (mid ? 0.7 : 1),
+          gain: spec.gain * this.eventScale * (0.55 + this.intensity * 0.75),
           track: this.trackNode,
         },
         this.scene.recipe,

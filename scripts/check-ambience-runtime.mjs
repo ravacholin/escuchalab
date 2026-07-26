@@ -40,7 +40,9 @@ async function bundle() {
   const enginePath = path.join(ROOT, 'services', 'ambienceEngine').replace(/\\/g, '/');
   const presetsPath = path.join(ROOT, 'services', 'ambiencePresets').replace(/\\/g, '/');
   writeFileSync(entry, `
-    export { AmbienceEngine } from '${enginePath}';
+    export {
+      AmbienceEngine, STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST,
+    } from '${enginePath}';
     export { SCENE_RECIPES, SCENE_IDS, bedLevel } from '${presetsPath}';
   `);
   await build({
@@ -54,7 +56,10 @@ async function bundle() {
   return import(pathToFileURL(outfile).href);
 }
 
-const { AmbienceEngine, SCENE_RECIPES, SCENE_IDS, bedLevel } = await bundle();
+const {
+  AmbienceEngine, SCENE_RECIPES, SCENE_IDS, bedLevel,
+  STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST,
+} = await bundle();
 
 const restore = installBrowserGlobals();
 
@@ -168,6 +173,56 @@ try {
     } else {
       ok(`scheduler fired ${oneShots.length} one-shot sources in the first lookahead window`);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // 6. MIX CALIBRATION. Bed audible, events over it but not on top of it.
+  //
+  // The original complaint — "little noises that have nothing to do with a bar" —
+  // was a level relationship before it was a timbre problem: a full-gain event
+  // peaked ~19 dB over a bed that was itself inaudible. These two bounds are what
+  // keep the ambience reading as a place.
+  // -------------------------------------------------------------------------
+  {
+    const BED_MIN_DBFS = -40;   // below this a laptop speaker reproduces nothing
+    const BED_MAX_DBFS = -22;   // above this it competes with the dialogue
+    // A transient may sit clearly above a continuous bed; it may not dominate it.
+    // Before this work the loudest cafe event peaked ~19 dB over its (silent) bed.
+    const EVENT_MAX_OVER_BED_DB = 8;
+
+    const VOLUME = 0.6;
+    let bedFailures = 0;
+    let eventFailures = 0;
+    let quietest = { id: null, db: Infinity };
+    let loudestEvent = { id: null, db: -Infinity };
+
+    // eventScale = rawBed * boost * EVENT_OVER_BED and the bed bus carries
+    // STEM_MAKEUP * boost, so the event-over-bed ratio reduces to a scene-independent
+    // constant — which is the whole point of scaling events against the bed.
+    const ratioForGain = (gain) => 20 * Math.log10(gain * EVENT_OVER_BED / STEM_MAKEUP);
+
+    for (const sceneId of SCENE_IDS) {
+      const recipe = SCENE_RECIPES[sceneId];
+      const raw = bedLevel(recipe);
+      const boost = Math.min(MAX_BED_BOOST, Math.max(1, raw > 0 ? BED_FLOOR / raw : 1));
+      const bedDb = 20 * Math.log10(raw * STEM_MAKEUP * boost * VOLUME);
+
+      if (bedDb < BED_MIN_DBFS || bedDb > BED_MAX_DBFS) {
+        fail(`scene "${sceneId}": bed at ${bedDb.toFixed(1)} dBFS, outside ${BED_MIN_DBFS}..${BED_MAX_DBFS}`);
+        bedFailures++;
+      }
+      if (bedDb < quietest.db) quietest = { id: sceneId, db: bedDb };
+
+      const ratioDb = ratioForGain(Math.max(...recipe.events.map((e) => e.gain)));
+      if (ratioDb > EVENT_MAX_OVER_BED_DB) {
+        fail(`scene "${sceneId}": loudest event sits ${ratioDb.toFixed(1)} dB over the bed (max ${EVENT_MAX_OVER_BED_DB})`);
+        eventFailures++;
+      }
+      if (ratioDb > loudestEvent.db) loudestEvent = { id: sceneId, db: ratioDb };
+    }
+
+    if (!bedFailures) ok(`every scene's bed lands in ${BED_MIN_DBFS}..${BED_MAX_DBFS} dBFS (quietest: ${quietest.id} at ${quietest.db.toFixed(1)})`);
+    if (!eventFailures) ok(`loudest event over bed is ${loudestEvent.db.toFixed(1)} dB (${loudestEvent.id}), max ${EVENT_MAX_OVER_BED_DB}`);
   }
 } finally {
   restore();

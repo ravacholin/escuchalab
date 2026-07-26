@@ -38,9 +38,11 @@ class FakeAudioNode {
     ctx.nodes.push(this);
   }
 
-  connect(target) {
+  connect(target, outputIndex = 0, inputIndex = 0) {
     // Connecting to an AudioParam is legal Web Audio; record it the same way.
     this.outputs.push(target);
+    this.connections ??= [];
+    this.connections.push({ target, outputIndex, inputIndex });
     if (target instanceof FakeAudioNode) target.inputs.push(this);
     return target;
   }
@@ -77,6 +79,14 @@ class FakeConvolverNode extends FakeAudioNode {
 
 class FakeWaveShaperNode extends FakeAudioNode {
   constructor(ctx) { super(ctx, 'shaper'); this.curve = null; this.oversample = 'none'; }
+}
+
+class FakeChannelSplitterNode extends FakeAudioNode {
+  constructor(ctx, channels) { super(ctx, 'splitter'); this.numberOfOutputs = channels; }
+}
+
+class FakeChannelMergerNode extends FakeAudioNode {
+  constructor(ctx, channels) { super(ctx, 'merger'); this.numberOfInputs = channels; }
 }
 
 class FakeDynamicsCompressorNode extends FakeAudioNode {
@@ -156,6 +166,8 @@ export class FakeAudioContext {
   createConvolver() { return new FakeConvolverNode(this); }
   createWaveShaper() { return new FakeWaveShaperNode(this); }
   createDynamicsCompressor() { return new FakeDynamicsCompressorNode(this); }
+  createChannelSplitter(channels = 6) { return new FakeChannelSplitterNode(this, channels); }
+  createChannelMerger(channels = 6) { return new FakeChannelMergerNode(this, channels); }
   createBufferSource() { return new FakeAudioBufferSourceNode(this); }
   createOscillator() { return new FakeOscillatorNode(this); }
   createBuffer(ch, len, sr) { return new FakeAudioBuffer(ch, len, sr); }
