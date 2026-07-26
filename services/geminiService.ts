@@ -4,6 +4,7 @@ import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from 
 import { ExerciseSlot, FORMAT_RULES, getBlueprint, STAGE_META } from "../data/listeningSyllabus";
 import { DATA_POINTS, inferDataPoint } from "../data/dataPoints";
 import { fillMissingSlots } from "./exerciseEngines";
+import { MODEL_SELECTABLE_SCENES, isSceneId } from "./ambiencePresets";
 import { verifyExercises } from "./exerciseVerification";
 import {
   ProgressListener,
@@ -924,6 +925,7 @@ export const generateLessonPlan = async (
     "situationDescription": "String",
     "communicativeFunction": "String",
     "ambientKeywords": "String",
+    "ambientScene": "String",
     "characters": [{ "name": "String", "gender": "Male" | "Female" }],
     "dialogue": [{ "speaker": "String", "text": "String", "emotion": "String" }],
     "exercises": [
@@ -932,6 +934,18 @@ export const generateLessonPlan = async (
   }
   La forma concreta de cada ejercicio depende de su "type": usa exactamente el JSON indicado para ese formato en EXERCISES.
   `;
+
+  // El ambiente sonoro se elige de una lista cerrada de escenas, no con palabras
+  // libres. Antes se pedían "3 keywords" sin restricción y el reproductor sólo las
+  // usaba para sembrar el RNG: en modo Vocabulario, tema libre y AccentChallenge —
+  // donde no hay etiqueta de escenario que consultar — el ambiente acababa siempre
+  // en la escena por defecto. Un id validado contra el enum arregla justo esos casos,
+  // y si el modelo devuelve cualquier otra cosa se descarta sin consecuencias.
+  const ambientInstruction =
+    `Elige "ambientScene": EXACTAMENTE uno de estos ids, el que mejor describa el LUGAR donde ocurre el audio ` +
+    `(para un boletín de radio, un podcast o un monólogo el lugar es el estudio donde se graba, no aquello de lo que se habla): ` +
+    `${MODEL_SELECTABLE_SCENES.join(', ')}. ` +
+    `Añade además "ambientKeywords": 3 palabras en inglés que describan el fondo sonoro.`;
 
   // A0 prioriza la naturalidad del habla por encima del recuento de turnos: el
   // objetivo del nivel es captar un dato dentro de habla nativa real.
@@ -962,7 +976,7 @@ export const generateLessonPlan = async (
   SPEAKERS: ${speakerEmphasis}
   EXERCISES: ${exerciseLogic}
   ${lengthInstruction}
-  AMBIENT: Generate "ambientKeywords" (3 keywords).
+  AMBIENT: ${ambientInstruction}
 
   Structure: ${jsonStructure}
   `;
@@ -1070,6 +1084,14 @@ export const generateLessonPlan = async (
 
       if (!plan.dialogue) plan.dialogue = [];
       const rawExercises: unknown[] = Array.isArray(plan.exercises) ? plan.exercises : [];
+
+      // The scene id is only kept if it names a real scene. Anything else is dropped
+      // and the player falls back to the scenario label / text type, so a hallucinated
+      // id can never reach the ambience engine.
+      if (plan.ambientScene && !isSceneId(plan.ambientScene)) {
+        console.warn(`[Ambience] Model returned unknown scene "${plan.ambientScene}"; ignoring.`);
+        delete plan.ambientScene;
+      }
 
       // Validate speaker count
       const uniqueSpeakers = new Set(plan.dialogue.map(d => d.speaker?.trim()).filter(Boolean));

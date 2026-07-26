@@ -177,6 +177,15 @@ export interface LessonPlan {
   situationDescription: string;
   communicativeFunction: string;
   ambientKeywords?: string; // Keywords in English for ambient noise
+  /**
+   * A scene id from the closed list in services/ambiencePresets.ts (SceneId).
+   *
+   * Kept as a plain string because the model can return anything; it is validated
+   * with `isSceneId()` before use and ignored if it doesn't match. This is what gives
+   * Vocabulary mode, custom topics and AccentChallenge a real ambience — none of them
+   * has a scenario label to look up.
+   */
+  ambientScene?: string;
   characters: Character[];
   dialogue: DialogueLine[];
   /** Lista única ordenada por etapa de escucha (anticipación → … → reflexión). */
