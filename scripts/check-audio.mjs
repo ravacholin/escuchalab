@@ -51,7 +51,8 @@ async function loadModule(entry) {
   }
 }
 
-const { chunkDialogueLines, concatPcmChunks, ttsDialogueBudget } = await loadModule('services/geminiService.ts');
+const { chunkDialogueLines, concatPcmChunks, ttsDialogueBudget, assignSpeakerVoices } =
+  await loadModule('services/geminiService.ts');
 const { Accent } = await loadModule('types.ts');
 
 const failures = [];
@@ -142,10 +143,61 @@ for (const accent of Object.values(Accent)) {
   check('el fundido atenúa la muestra pegada a la costura', Math.abs(samples[500 - 1]) < Math.abs(samples[100]));
 }
 
+// --- 7. Dos hablantes, dos voces ----------------------------------------
+// El fallo que motiva esta sección: la asignación anterior mapeaba
+// Female→Kore y Male→Fenrir, así que dos personajes del mismo género
+// compartían timbre y el diálogo salía con una sola voz pese a tener nombres
+// distintos.
+{
+  const voicesOf = (speakers, characters) => assignSpeakerVoices(speakers, characters).map(a => a.voice);
+
+  const cases = [
+    ['dos mujeres', ['Ana', 'Lucía'], [{ name: 'Ana', gender: 'Female' }, { name: 'Lucía', gender: 'Female' }]],
+    ['dos hombres', ['Marcos', 'Diego'], [{ name: 'Marcos', gender: 'Male' }, { name: 'Diego', gender: 'Male' }]],
+    ['mujer y hombre', ['Ana', 'Diego'], [{ name: 'Ana', gender: 'Female' }, { name: 'Diego', gender: 'Male' }]],
+    ['sin fichas de personaje', ['Ana', 'Diego'], []],
+    ['una ficha suelta', ['Ana', 'Diego'], [{ name: 'Ana', gender: 'Female' }]],
+    ['etiquetas con acotación', ['Ana (cajera)', 'Sra. Díaz'], [{ name: 'Ana', gender: 'Female' }, { name: 'Díaz', gender: 'Female' }]],
+    ['nombres que se contienen', ['Ana', 'Ana María'], [{ name: 'Ana', gender: 'Female' }, { name: 'Ana María', gender: 'Female' }]]
+  ];
+
+  for (const [label, speakers, characters] of cases) {
+    const voices = voicesOf(speakers, characters);
+    check(`[${label}] las dos voces son distintas`, new Set(voices).size === 2, voices.join(' = '));
+  }
+
+  // El género sigue decidiendo de qué grupo se sirve la voz.
+  const [ana, diego] = assignSpeakerVoices(
+    ['Ana', 'Diego'],
+    [{ name: 'Ana', gender: 'Female' }, { name: 'Diego', gender: 'Male' }]
+  );
+  check('la mujer recibe una voz femenina', ana.voice === 'Kore', ana.voice);
+  check('el hombre recibe una voz masculina', diego.voice === 'Fenrir', diego.voice);
+
+  // La etiqueta que viaja al TTS tiene que ser inconfundible: si no, el modelo
+  // no sabe de quién es el turno y lo lee todo con la primera voz.
+  const acotadas = assignSpeakerVoices(['Ana (cajera)', 'Sra. Díaz'], []);
+  check('la acotación se cae de la etiqueta', acotadas[0].label === 'Ana', acotadas[0].label);
+
+  const contenidas = assignSpeakerVoices(['Ana', 'Ana María'], []);
+  check(
+    'los nombres que se contienen se numeran',
+    contenidas.map(a => a.label).join('/') === 'Hablante 1/Hablante 2',
+    contenidas.map(a => a.label).join('/')
+  );
+
+  // Una sola voz sigue siendo una sola voz.
+  const solo = assignSpeakerVoices(['Locutor'], [{ name: 'Locutor', gender: 'Male' }]);
+  check('el monólogo asigna una única voz', solo.length === 1 && solo[0].voice === 'Fenrir');
+}
+
 if (failures.length) {
   console.error(`✗ ${failures.length} fallo(s) en el troceo de audio:`);
   for (const f of failures) console.error(`  · ${f}`);
   process.exit(1);
 }
 
-console.log('✓ troceo de audio correcto en los 8 acentos (ningún turno perdido, ningún tramo fuera de presupuesto) y unión de PCM verificada');
+console.log(
+  '✓ troceo de audio correcto en los 8 acentos (ningún turno perdido, ningún tramo fuera de presupuesto), ' +
+    'unión de PCM verificada y dos voces siempre distintas para dos hablantes'
+);
