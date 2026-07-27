@@ -4,7 +4,6 @@ import { DialogueLine, Exercise, ExerciseField, ExerciseOption } from '@/types';
 import { verifyExercise } from './exerciseVerification';
 import {
   buildTranscriptIndex,
-  clampText,
   isHeard,
   normalizeText,
   shuffle,
@@ -1021,14 +1020,51 @@ const ENGINES: Record<EngineId, Engine> = {
 /** Origen final de cada slot del blueprint, para poder informarlo en la UI. */
 export interface SlotReport {
   slotId: string;
-  source: 'model' | 'engine' | 'empty';
+  source: 'model' | 'engine' | 'empty' | 'surplus';
   reason?: string;
+}
+
+/**
+ * ¿El ejercicio que devolvió el modelo para un slot con foco habla de verdad
+ * del dato dictado?
+ *
+ * El syllabus le dice al modelo que la ficha de A0 recoge "el número de teléfono
+ * que se dicta", pero nada obligaba a que lo hiciera: el verificador solo
+ * comprueba que los valores se digan en el audio, y "un café" se dice. Así, la
+ * lección de "pedir un número de teléfono" podía acabar preguntando la bebida,
+ * la hora y el nombre, que es exactamente el defecto que `DataPointKind` nació
+ * para cerrar. Si el ejercicio del modelo no toca el dato, se prefiere el motor
+ * determinista, que sí lo busca (`slot.focus`).
+ */
+function coversFocus(exercise: Exercise, focus: DataPointKind): boolean {
+  const candidates: string[] = [];
+  for (const field of exercise.fields || []) {
+    candidates.push(field.label);
+    for (const option of field.options) candidates.push(option.text);
+  }
+  for (const option of exercise.options || []) candidates.push(option.text);
+  for (const options of Object.values(exercise.gapOptions || {})) {
+    for (const option of options) candidates.push(option.text);
+  }
+
+  const fieldLabel = normalizeText(DATA_POINTS[focus].fieldLabel);
+  return candidates.some(
+    text => isFocusLiteral(text, focus) || normalizeText(text) === fieldLabel
+  );
 }
 
 /**
  * Empareja los ejercicios verificados con los slots del blueprint y rellena con
  * motores los que quedaron vacíos. El resultado sale ordenado por etapa de
  * escucha, que es el recorrido que después muestra la interfaz.
+ *
+ * EL BLUEPRINT ES LA LECCIÓN. Lo que el modelo devuelva de más se descarta:
+ * antes se conservaba al final ("ejercicios válidos añadidos de más"), y como el
+ * formato que un modelo improvisa por defecto es la opción múltiple, un nivel A0
+ * de tres slots podía presentarse al alumno con nueve ejercicios, seis de ellos
+ * opciones múltiples que nadie había pedido y que no tocaban el dato dictado. El
+ * presupuesto por nivel que `check-syllabus` defiende sobre el blueprint no
+ * servía de nada si aquí se le sumaba todo lo demás.
  */
 export function fillMissingSlots(
   verified: Exercise[],
@@ -1040,13 +1076,29 @@ export function fillMissingSlots(
   const pool = [...verified];
   const result: Exercise[] = [];
 
-  blueprint.forEach((slot, position) => {
-    // El modelo suele devolver el slotId; si no lo hace, se empareja por formato.
-    let i = pool.findIndex(ex => ex.slotId === slot.slotId);
-    if (i < 0) i = pool.findIndex(ex => ex.type === slot.format);
+  // El emparejamiento va en dos pasadas y no en una. Con una sola, un slot
+  // temprano se llevaba por FORMATO el ejercicio que otro slot posterior había
+  // reclamado por `slotId`: en A0, tres opciones múltiples improvisadas y la
+  // primera se quedaba con "a0-global" aunque la buena viniera etiquetada.
+  const claimed = new Map<string, Exercise>();
+  for (const slot of blueprint) {
+    const i = pool.findIndex(ex => ex.slotId === slot.slotId);
+    if (i >= 0) claimed.set(slot.slotId, pool.splice(i, 1)[0]);
+  }
+  for (const slot of blueprint) {
+    if (claimed.has(slot.slotId)) continue;
+    const i = pool.findIndex(ex => ex.type === slot.format);
+    if (i >= 0) claimed.set(slot.slotId, pool.splice(i, 1)[0]);
+  }
 
-    if (i >= 0) {
-      const [ex] = pool.splice(i, 1);
+  blueprint.forEach((slot, position) => {
+    const ex = claimed.get(slot.slotId);
+    // Un slot con foco solo acepta el ejercicio del modelo si de verdad va sobre
+    // el dato; si no, cae al motor, que lo construye desde la transcripción.
+    const offFocus =
+      !!ex && !!slot.focus && slot.focus !== 'generic' && !coversFocus(ex, slot.focus);
+
+    if (ex && !offFocus) {
       result.push({
         ...ex,
         id: ex.id || `${slot.slotId}_${position}`,
@@ -1058,10 +1110,33 @@ export function fillMissingSlots(
       return;
     }
 
+    if (offFocus) {
+      console.warn(
+        `[ejercicios] slot "${slot.slotId}" ignoraba el dato dictado (${slot.focus}); se reconstruye`
+      );
+    }
+
+    // Si el motor no puede reconstruir el slot desfocalizado, vale más el
+    // ejercicio del modelo —verificado, aunque no toque el dato— que un hueco.
+    const giveUp = (reason: string) => {
+      if (ex) {
+        result.push({
+          ...ex,
+          id: ex.id || `${slot.slotId}_${position}`,
+          slotId: slot.slotId,
+          stage: slot.stage,
+          skill: slot.skill
+        });
+        onSlot?.({ slotId: slot.slotId, source: 'model', reason: `sin foco: ${reason}` });
+        return;
+      }
+      onSlot?.({ slotId: slot.slotId, source: 'empty', reason });
+    };
+
     const engine = slot.engineFallback ? ENGINES[slot.engineFallback] : undefined;
     if (!engine) {
       console.warn(`[ejercicios] slot "${slot.slotId}" sin cubrir y sin motor de respaldo`);
-      onSlot?.({ slotId: slot.slotId, source: 'empty', reason: 'sin motor de respaldo' });
+      giveUp('sin motor de respaldo');
       return;
     }
 
@@ -1074,11 +1149,7 @@ export function fillMissingSlots(
       engineError = error instanceof Error ? error.message : String(error);
     }
     if (!built) {
-      onSlot?.({
-        slotId: slot.slotId,
-        source: 'empty',
-        reason: engineError || `el motor "${slot.engineFallback}" no encontró material en el audio`
-      });
+      giveUp(engineError || `el motor "${slot.engineFallback}" no encontró material en el audio`);
       return;
     }
 
@@ -1086,11 +1157,7 @@ export function fillMissingSlots(
     const check = verifyExercise(built, index);
     if (!check.ok || !check.exercise) {
       console.warn(`[ejercicios] motor "${slot.engineFallback}" descartado: ${check.reason}`);
-      onSlot?.({
-        slotId: slot.slotId,
-        source: 'empty',
-        reason: `motor descartado: ${check.reason || 'sin motivo'}`
-      });
+      giveUp(`motor descartado: ${check.reason || 'sin motivo'}`);
       return;
     }
     onSlot?.({ slotId: slot.slotId, source: 'engine' });
@@ -1104,9 +1171,17 @@ export function fillMissingSlots(
     });
   });
 
-  // Ejercicios válidos que el modelo añadió de más: se conservan al final.
-  for (const leftover of pool) {
-    result.push({ ...leftover, question: clampText(leftover.question, 300) });
+  // Lo que el modelo devolvió de más NO se muestra. El blueprint fija cuántos
+  // ejercicios tiene la lección y de qué van; todo lo demás es material que
+  // nadie pidió, casi siempre opciones múltiples improvisadas, y su único
+  // efecto era inflar la lección muy por encima del presupuesto del nivel.
+  for (const surplus of pool) {
+    console.warn(`[ejercicios] sobrante descartado (${surplus.type}): fuera del blueprint`);
+    onSlot?.({
+      slotId: surplus.slotId || surplus.type,
+      source: 'surplus',
+      reason: 'fuera del blueprint'
+    });
   }
 
   return result.sort(compareByStage);

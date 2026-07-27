@@ -454,6 +454,119 @@ if (focusedPairs) {
 }
 
 // ---------------------------------------------------------------------------
+// 6. El blueprint ES la lección: nada de ejercicios de más
+// ---------------------------------------------------------------------------
+// El modelo improvisa, y el formato que improvisa es la opción múltiple. Antes
+// esos sobrantes se añadían al final de la lección, así que un A0 de tres slots
+// podía llegar al alumno con nueve ejercicios —seis de ellos opciones múltiples
+// que nadie había pedido y que no tocaban el dato dictado— mientras el
+// presupuesto por nivel de `check-syllabus` seguía dando el visto bueno sobre un
+// blueprint de tres.
+
+const A0_LIKE_BLUEPRINT = [
+  { slotId: 'a0-global', stage: 'global', skill: 'idea_global', format: 'multiple_choice', items: 3, brief: 'x' },
+  { ...PHONE_SLOT, slotId: 'a0-ficha' },
+  { ...PAIRS_SLOT, slotId: 'a0-pares' }
+];
+
+const mcq = (id, slotId) => ({
+  id,
+  ...(slotId ? { slotId } : {}),
+  type: 'multiple_choice',
+  question: `¿Pregunta ${id}?`,
+  options: [
+    { id: `${id}a`, text: 'una farmacia' },
+    { id: `${id}b`, text: 'una panadería' },
+    { id: `${id}c`, text: 'un quiosco' }
+  ],
+  correctAnswer: `${id}a`,
+  explanation: 'x',
+  sourceTurns: [0]
+});
+
+// Seis opciones múltiples válidas para un blueprint que solo tiene una.
+const flooded = fillMissingSlots(
+  ['e1', 'e2', 'e3', 'e4', 'e5', 'e6'].map(id => mcq(id)),
+  A0_LIKE_BLUEPRINT,
+  SPOKEN_PHONE
+);
+
+check(
+  flooded.length <= A0_LIKE_BLUEPRINT.length,
+  `la lección no puede tener más ejercicios que slots el blueprint (${flooded.length} > ${A0_LIKE_BLUEPRINT.length})`
+);
+check(
+  flooded.filter(ex => ex.type === 'multiple_choice').length === 1,
+  `solo hay un slot de opción múltiple, así que solo puede salir una (salieron ${flooded.filter(ex => ex.type === 'multiple_choice').length})`
+);
+check(
+  flooded.every(ex => A0_LIKE_BLUEPRINT.some(slot => slot.slotId === ex.slotId)),
+  `todo ejercicio mostrado tiene que ocupar un slot del blueprint (${flooded.map(ex => ex.slotId).join(', ')})`
+);
+
+// El slot lo reclama quien lo declara, no quien llega antes por formato.
+const claimedByName = fillMissingSlots(
+  [mcq('libre'), mcq('propio', 'a0-global')],
+  A0_LIKE_BLUEPRINT,
+  SPOKEN_PHONE
+);
+const globalExercise = claimedByName.find(ex => ex.slotId === 'a0-global');
+check(
+  globalExercise?.question === '¿Pregunta propio?',
+  `el ejercicio que declara su slotId debe quedarse con el slot, no el primero del mismo formato (quedó "${globalExercise?.question}")`
+);
+
+// Y un slot con foco no acepta un ejercicio que ignore el dato dictado.
+const offFocusFicha = {
+  id: 'f1',
+  slotId: 'a0-ficha',
+  type: 'data_capture',
+  question: 'Completa la ficha',
+  fields: [
+    {
+      id: 'c1',
+      label: 'Aviso',
+      options: [
+        { id: 'c1a', text: 'pedido' },
+        { id: 'c1b', text: 'perdido' }
+      ]
+    }
+  ],
+  correctAnswer: { c1: 'c1a' },
+  explanation: 'x',
+  sourceTurns: [0]
+};
+
+const refocused = fillMissingSlots([offFocusFicha], [{ ...PHONE_SLOT, slotId: 'a0-ficha' }], SPOKEN_PHONE);
+const fichaSlot = refocused.find(ex => ex.slotId === 'a0-ficha');
+check(!!fichaSlot, 'el slot de la ficha no debería quedar vacío');
+check(
+  !!fichaSlot?.fields?.some(f => f.label === 'Teléfono'),
+  `una ficha que ignora el teléfono dictado debe reconstruirse sobre él (campos: ${fichaSlot?.fields?.map(f => f.label).join(', ')})`
+);
+
+// Pero si el ejercicio del modelo SÍ recoge el dato, se respeta tal cual.
+const onFocusFicha = {
+  ...offFocusFicha,
+  id: 'f2',
+  fields: [
+    {
+      id: 'c1',
+      label: 'Teléfono',
+      options: [
+        { id: 'c1a', text: 'seis cinco cuatro treinta y dos dieciocho' },
+        { id: 'c1b', text: 'seis cinco cuatro cuarenta y dos dieciocho' }
+      ]
+    }
+  ]
+};
+const kept = fillMissingSlots([onFocusFicha], [{ ...PHONE_SLOT, slotId: 'a0-ficha' }], SPOKEN_PHONE);
+check(
+  kept.find(ex => ex.slotId === 'a0-ficha')?.id === 'f2',
+  'una ficha del modelo que sí recoge el dato dictado debe conservarse'
+);
+
+// ---------------------------------------------------------------------------
 
 console.warn = realWarn;
 

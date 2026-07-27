@@ -51,8 +51,26 @@ export interface CachedLessonResult {
 export const isCacheable = (parts: LessonCacheKeyParts): boolean =>
   parts.mode !== AppMode.AccentChallenge;
 
+/**
+ * Versión del syllabus con la que se generó la lección. Forma parte de la clave
+ * porque una lección cacheada es la lección ENTERA, ejercicios incluidos: sin
+ * esto, cambiar el plan pedagógico de un nivel no tenía ningún efecto para quien
+ * ya hubiera generado esa configuración, que seguía recibiendo desde IndexedDB
+ * la lección vieja —con sus ejercicios viejos— hasta pulsar «Regenerar» una por
+ * una. Súbela cuando cambie el blueprint de algún nivel o modo.
+ */
+export const SYLLABUS_VERSION = 2;
+
 export const lessonCacheKey = (parts: LessonCacheKeyParts): string =>
-  [parts.mode, parts.level, parts.textType, parts.accent, parts.length, parts.topic.trim()].join(' :: ');
+  [
+    `v${SYLLABUS_VERSION}`,
+    parts.mode,
+    parts.level,
+    parts.textType,
+    parts.accent,
+    parts.length,
+    parts.topic.trim()
+  ].join(' :: ');
 
 // --- BASE64 <-> BYTES (el audio circula en base64, se guarda en crudo) ---
 const base64ToBytes = (base64: string): Uint8Array => {
@@ -143,7 +161,15 @@ export async function writeLesson(key: string, plan: LessonPlan, audioBase64: st
     // Se poda antes de escribir: si la entrada nueva desborda la cuota, la
     // transacción entera aborta y no se habría podado nada.
     const keys = (await asPromise(store.index('lastUsed').getAllKeys())) as IDBValidKey[];
-    const others = keys.filter(k => k !== key);
+
+    // Las entradas de una versión anterior del syllabus ya no las va a leer
+    // nadie: se borran en vez de esperar a que la política LRU las expulse,
+    // porque cada una ocupa varios megas de PCM.
+    const prefix = `v${SYLLABUS_VERSION} :: `;
+    const stale = keys.filter(k => typeof k === 'string' && !k.startsWith(prefix));
+    for (const k of stale) store.delete(k);
+
+    const others = keys.filter(k => k !== key && !stale.includes(k));
     const excess = others.length - (MAX_ENTRIES - 1);
     for (let i = 0; i < excess; i++) store.delete(others[i]);
 

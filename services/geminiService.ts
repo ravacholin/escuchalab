@@ -758,7 +758,7 @@ ${formatBlock}
 GENERA EXACTAMENTE ESTOS ${slots.length} EJERCICIOS, EN ESTE ORDEN, cada uno con su "slotId", "stage" y "skill" copiados tal cual:
 ${slotBlock}
 
-Devuélvelos en el array "exercises" en ese mismo orden.`;
+Devuélvelos en el array "exercises" en ese mismo orden. El array tiene EXACTAMENTE ${slots.length} elementos: ni uno más. No añadas ejercicios extra, ni "de repaso", ni variantes de los pedidos; todo lo que sobre se descarta. Un ejercicio bien hecho vale más que tres improvisados.`;
 };
 
 const getRegisterInstruction = (textType: TextType): string => {
@@ -1140,6 +1140,7 @@ export const generateLessonPlan = async (
       reporter.start('assemble');
       let fromEngine = 0;
       let uncovered = 0;
+      let surplus = 0;
       plan.exercises = fillMissingSlots(
         verified,
         blueprint,
@@ -1151,6 +1152,11 @@ export const generateLessonPlan = async (
           } else if (source === 'empty') {
             uncovered++;
             reporter.log(`Slot "${slotId}" sin cubrir: ${reason}`, 'warn');
+          } else if (source === 'surplus') {
+            surplus++;
+            reporter.log(`Ejercicio sobrante descartado (${slotId}): ${reason}`, 'warn');
+          } else if (source === 'model' && reason) {
+            reporter.log(`Slot "${slotId}" se queda como vino del modelo (${reason})`, 'warn');
           }
         }
       );
@@ -1158,8 +1164,9 @@ export const generateLessonPlan = async (
         'assemble',
         `${plan.exercises.length} de ${blueprint.length} slots listos` +
           (fromEngine > 0 ? ` · ${fromEngine} por motor` : '') +
-          (uncovered > 0 ? ` · ${uncovered} sin cubrir` : ''),
-        uncovered > 0 ? 'warning' : 'done'
+          (uncovered > 0 ? ` · ${uncovered} sin cubrir` : '') +
+          (surplus > 0 ? ` · ${surplus} sobrantes descartados` : ''),
+        uncovered > 0 || surplus > 0 ? 'warning' : 'done'
       );
       reporter.flush();
 
