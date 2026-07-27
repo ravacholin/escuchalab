@@ -85,18 +85,24 @@ const NARRATIVE = [TEXT_TYPES.PodcastInterview, TEXT_TYPES.Monologue];
  * lectura en una lengua que todavía no lee. El techo baja según baja el nivel
  * para que no vuelva a colarse una lección de seis ejercicios de la que sólo uno
  * trabaje el dato dictado.
+ *
+ * El techo de B1-B2 y C1 bajó de 9 y 10 a 6: esos dos niveles nunca se habían
+ * recortado, y una lección de C1 pedía ≈38 respuestas discretas repartidas en
+ * diez tarjetas, con dos clasificaciones de la MISMA habilidad sobre el mismo
+ * audio. Más ejercicios no es más escucha; a partir de cierto punto es sólo más
+ * lectura.
  */
 const MAX_SLOTS = {
-  [LEVELS.Intro]: 4,
-  [LEVELS.Beginner]: 6,
-  [LEVELS.Intermediate]: 9,
-  [LEVELS.Advanced]: 10
+  [LEVELS.Intro]: 3,
+  [LEVELS.Beginner]: 4,
+  [LEVELS.Intermediate]: 6,
+  [LEVELS.Advanced]: 6
 };
 
 /** Mecánicas cuya carga cognitiva las hace impropias de un principiante absoluto. */
 const FORBIDDEN_AT_A0 = ['ordering', 'matching', 'scale', 'true_false_notgiven', 'spot_the_difference'];
 /** Mecánicas de decodificación básica que en C1 serían trabajo perdido. */
-const FORBIDDEN_AT_C1 = ['data_capture', 'chunk_order'];
+const FORBIDDEN_AT_C1 = ['data_capture', 'dictation', 'chunk_order'];
 
 /** Formatos que se resuelven sobre filas: con menos de 3 no discriminan nada. */
 const ROW_BASED = [
@@ -171,6 +177,13 @@ for (const { level, textType, mode } of combos) {
         `${at}: engineFallback inexistente "${slot.engineFallback}"`
       );
     }
+
+    // Dar prioridad al motor sólo tiene sentido si hay motor: sin él, la marca
+    // no haría nada y el slot volvería a depender enteramente del modelo.
+    check(
+      !slot.preferEngine || !!slot.engineFallback,
+      `${at}: preferEngine sin engineFallback`
+    );
 
     // 1. El formato debe estar permitido en este nivel y en este tipo de audio.
     const rule = FORMAT_RULES[slot.format];

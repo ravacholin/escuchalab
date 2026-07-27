@@ -4,7 +4,6 @@ import { DialogueLine, Exercise, ExerciseField, ExerciseOption } from '@/types';
 import { verifyExercise } from './exerciseVerification';
 import {
   buildTranscriptIndex,
-  clampText,
   isHeard,
   normalizeText,
   shuffle,
@@ -86,7 +85,7 @@ const MINIMAL_PAIR_BANK: [string, string][] = [
   ['quince', 'cincuenta'], ['dieciséis', 'sesenta'], ['diecisiete', 'setenta'],
   ['dieciocho', 'ochenta'], ['diecinueve', 'noventa'], ['veinte', 'treinta'],
   ['sesenta', 'setenta'], ['cuatro', 'catorce'], ['cinco', 'quince'],
-  ['nueve', 'noventa'], ['cien', 'cinco'],
+  ['nueve', 'noventa'], ['cien', 'cinco'], ['media', 'cuarto'],
   // nombres de letra: el contraste propio del deletreo y de los códigos.
   ['be', 'de'], ['ese', 'efe'], ['eme', 'ene'], ['ge', 'jota'], ['pe', 'te'],
   ['ce', 'de'], ['equis', 'ese']
@@ -221,7 +220,22 @@ const NUMBER_WORDS = [
 const NUMBER_LEXICON = new Set(NUMBER_WORDS);
 
 /** Piezas que unen numerales dentro de un mismo dato ("catorce con noventa"). */
-const NUMBER_GLUE = new Set(['y', 'con']);
+const NUMBER_GLUE = new Set(['y', 'con', 'menos']);
+
+/**
+ * Fracciones de hora. No son numerales, pero son el segundo elemento de la
+ * mayoría de las horas que el prompt pide dictar ("a las cinco y media"), y sin
+ * ellas ese dato no existía para ningún motor: "cinco" sola es un numeral
+ * suelto, se queda por debajo del umbral de tramo y la lección de "reservar una
+ * cita" acababa sin un solo ejercicio sobre la hora.
+ */
+const MINUTE_WORDS = new Set(['media', 'cuarto']);
+
+/** Alternativas audibles de las fracciones de hora. */
+const MINUTE_CONFUSIONS: Record<string, string[]> = {
+  media: ['cuarto'],
+  cuarto: ['media']
+};
 
 /** Numeral confundible al oído, con su ortografía real para mostrarlo. */
 const NUMBER_CONFUSIONS: Record<string, string[]> = {
@@ -250,6 +264,42 @@ const LETTER_CONFUSIONS: Record<string, string> = {
 };
 
 /**
+ * Confusiones DENTRO de una palabra dictada (el "ruiz" de un correo, el "com"
+ * de un dominio). Se excluyen las neutralizadas en la mayoría de variantes
+ * (b/v, ll/y, c/z~s bajo seseo): un contraste que suena igual no discrimina.
+ */
+const IN_WORD_CONFUSIONS: Record<string, string> = {
+  b: 'd', d: 'b', p: 't', t: 'p', m: 'n', n: 'm', g: 'j', j: 'g',
+  f: 's', r: 'l', l: 'r', i: 'e', e: 'i', o: 'u', u: 'o'
+};
+
+/**
+ * Vecino de una palabra que no es del léxico común y para la que, por tanto, no
+ * hay par mínimo en el banco: un nombre propio, un dominio, un usuario. Se
+ * cambia UNA letra, empezando por el interior, que es donde de verdad hay que
+ * afinar el oído.
+ */
+function inWordNearMisses(word: string): string[] {
+  const chars = [...word];
+  const out: string[] = [];
+  const order = chars
+    .map((_, i) => i)
+    .sort((a, b) => Math.abs(a - chars.length / 2) - Math.abs(b - chars.length / 2));
+
+  for (const i of order) {
+    const swap = IN_WORD_CONFUSIONS[chars[i].toLowerCase()];
+    if (!swap) continue;
+    const variant = [...chars];
+    variant[i] = chars[i] === chars[i].toUpperCase() ? swap.toUpperCase() : swap;
+    const candidate = variant.join('');
+    if (candidate !== word && !out.includes(candidate)) out.push(candidate);
+    if (out.length >= 2) break;
+  }
+
+  return out;
+}
+
+/**
  * Secuencias de numerales dichas de corrido: un teléfono dictado cifra a cifra,
  * un código, un precio con decimales. Se devuelve el tramo ORIGINAL, que es el
  * que verá el alumno.
@@ -263,9 +313,12 @@ function spokenNumberRuns(dialogue: DialogueLine[]): { value: string; lineIndex:
     let numerals = 0;
     let glued = false;
 
+    /** ¿Este token cierra el tramo, o todavía es parte del dato? */
+    const isPiece = (word: string) => NUMBER_LEXICON.has(word) || MINUTE_WORDS.has(word);
+
     const flush = () => {
-      // Se recorta la cola: un tramo no puede terminar en "y" ni en "con".
-      while (run.length > 0 && !NUMBER_LEXICON.has(normalizeText(stripEdges(run[run.length - 1])))) {
+      // Se recorta la cola: un tramo no puede terminar en "y", "con" ni "menos".
+      while (run.length > 0 && !isPiece(normalizeText(stripEdges(run[run.length - 1])))) {
         run.pop();
       }
       if (numerals >= 3 || (numerals >= 2 && glued)) {
@@ -276,18 +329,33 @@ function spokenNumberRuns(dialogue: DialogueLine[]): { value: string; lineIndex:
       glued = false;
     };
 
-    for (const token of tokens) {
+    tokens.forEach((token, i) => {
       const word = normalizeText(stripEdges(token));
-      if (NUMBER_LEXICON.has(word)) {
+      // "media" y "cuarto" sólo cuentan detrás del nexo de una hora: fuera de
+      // ahí son sustantivos corrientes ("media hora", "el cuarto de baño").
+      const afterGlue = run.length > 0 && NUMBER_GLUE.has(normalizeText(stripEdges(run[run.length - 1])));
+
+      if (NUMBER_LEXICON.has(word) || (MINUTE_WORDS.has(word) && afterGlue)) {
         run.push(stripEdges(token));
         numerals += 1;
-      } else if (NUMBER_GLUE.has(word) && run.length > 0) {
+        if (MINUTE_WORDS.has(word)) glued = true;
+        return;
+      }
+
+      if (NUMBER_GLUE.has(word) && run.length > 0) {
+        // "menos" sólo une si lo que viene detrás es una fracción de hora.
+        const next = normalizeText(stripEdges(tokens[i + 1] || ''));
+        if (word === 'menos' && !MINUTE_WORDS.has(next)) {
+          flush();
+          return;
+        }
         run.push(stripEdges(token));
         if (word === 'con') glued = true;
-      } else {
-        flush();
+        return;
       }
-    }
+
+      flush();
+    });
     flush();
   });
 
@@ -308,7 +376,7 @@ function collectFocusWords(dialogue: DialogueLine[]): WordRef[] {
     for (const token of splitTokens(run.value)) {
       const original = stripEdges(token);
       const normalized = normalizeText(original);
-      if (!NUMBER_LEXICON.has(normalized)) continue;
+      if (!NUMBER_LEXICON.has(normalized) && !MINUTE_WORDS.has(normalized)) continue;
       if (normalized.length < 3) continue;
       if (seen.has(normalized)) continue;
       seen.add(normalized);
@@ -500,10 +568,17 @@ function isFocusLiteral(literal: string, focus: DataPointKind): boolean {
     case 'price':
       return /[.,]\d{2}$/.test(literal) || /\bcon\b/i.test(literal);
     case 'time':
-      return literal.includes(':');
+      // "8:15", pero también "a las cinco y media", que es como el prompt pide
+      // decir la hora y que antes no contaba como el dato de la lección.
+      return literal.includes(':') || splitTokens(literal).some(t => MINUTE_WORDS.has(normalizeText(t)));
     case 'spelling':
     case 'email':
-      return spelled;
+      // Deletreado con guiones ("G-A-R-C-Í-A") o dicho por nombres de letra.
+      return (
+        spelled ||
+        /\barroba\b/i.test(literal) ||
+        splitTokens(literal).filter(t => CLEAR_LETTER_NAMES.has(normalizeText(t))).length >= 2
+      );
     default:
       return digits > 0 || numerals >= 3;
   }
@@ -735,6 +810,309 @@ const dataCapture: Engine = (dialogue, slot) => {
     explanation:
       'Las alternativas se diferencian en una sola cifra. Es exactamente lo que hay que resolver en la vida real al anotar un precio o una hora al vuelo.'
   };
+};
+
+// --- Dictado del dato ----------------------------------------------------
+//
+// La ficha (`data_capture`) pide RECONOCER el dato entero entre tres cadenas
+// parecidas. Esto pide REPRODUCIRLO: un control por elemento, en el orden en
+// que sonó, con las confusiones audibles de esa posición y sólo de ésa. Es la
+// diferencia entre "¿cuál de estos tres teléfonos era?" y "anotá el teléfono",
+// que es lo que de verdad hay que saber hacer.
+
+/** Un dato dictado, ya partido en las piezas que el alumno tiene que reponer. */
+interface DictationRun {
+  pieces: string[];
+  /** Pieza fija que va ANTES de `pieces[i]`; `separators[0]` siempre es ''. */
+  separators: string[];
+  lineIndex: number;
+}
+
+/** Nombres de letra que no son también palabras corrientes del español. */
+const CLEAR_LETTER_NAMES = new Set([
+  'efe', 'ge', 'hache', 'jota', 'ka', 'ele', 'eme', 'ene', 'pe', 'erre',
+  'uve', 'equis', 'zeta', 'ceta', 'griega', 'doble'
+]);
+
+/** Nombres de letra que además son palabras corrientes ("de", "te", "ese"). */
+const AMBIGUOUS_LETTER_NAMES = new Set([
+  'a', 'be', 'ce', 'de', 'e', 'i', 'o', 'u', 'ese', 'te', 've', 'cu'
+]);
+
+/** Piezas fijas de un correo dictado: no se eligen, se muestran. */
+const ADDRESS_GLUE = new Set(['arroba', 'punto', 'guion', 'bajo', 'raya']);
+
+function isLetterName(word: string): boolean {
+  return CLEAR_LETTER_NAMES.has(word) || AMBIGUOUS_LETTER_NAMES.has(word);
+}
+
+/**
+ * Datos dichos con numerales. `spokenNumberRuns` ya localiza el tramo; aquí se
+ * decide dónde están las junturas. Regla: "y" entre decena compuesta y unidad
+ * PEGA ("treinta y dos" es una pieza, que es como se anota), y "con", "menos" o
+ * el "y" de una hora SEPARAN, porque son dos cifras que se oyen por separado.
+ */
+function segmentSpokenRun(value: string, lineIndex: number): DictationRun | null {
+  const tokens = splitTokens(value);
+  const keys = tokens.map(t => normalizeText(stripEdges(t)));
+
+  const pieces: string[] = [];
+  const separators: string[] = [];
+  let pendingGlue = '';
+
+  for (let i = 0; i < tokens.length; i++) {
+    const key = keys[i];
+    if (NUMBER_GLUE.has(key)) {
+      const prev = keys[i - 1] || '';
+      const next = keys[i + 1] || '';
+      const compound = key === 'y' && COMPOUND_TENS.includes(prev) && UNIT_WORDS.includes(next);
+      if (compound && pieces.length > 0) {
+        // "treinta y dos": la juntura queda dentro de la pieza.
+        pieces[pieces.length - 1] += ` ${stripEdges(tokens[i])} ${stripEdges(tokens[i + 1])}`;
+        i += 1;
+      } else {
+        pendingGlue = stripEdges(tokens[i]);
+      }
+      continue;
+    }
+    pieces.push(stripEdges(tokens[i]));
+    separators.push(pieces.length === 1 ? '' : pendingGlue);
+    pendingGlue = '';
+  }
+
+  return pieces.length >= 2 ? { pieces, separators, lineIndex } : null;
+}
+
+/** Datos escritos con cifras: "654 32 18", "14,95", "8:15". */
+function segmentDigitLiteral(value: string, lineIndex: number): DictationRun | null {
+  const parts = value.split(/([ \-,.:])/).filter(p => p !== '');
+  const pieces: string[] = [];
+  const separators: string[] = [];
+  let pendingGlue = '';
+
+  for (const part of parts) {
+    if (/^[ \-,.:]$/.test(part)) {
+      pendingGlue = part.trim();
+      continue;
+    }
+    pieces.push(part);
+    separators.push(pieces.length === 1 ? '' : pendingGlue);
+    pendingGlue = '';
+  }
+
+  return pieces.length >= 2 ? { pieces, separators, lineIndex } : null;
+}
+
+/** Nombre deletreado, tal como lo escribe el modelo: "G-A-R-C-Í-A". */
+function segmentSpelledLiteral(value: string, lineIndex: number): DictationRun | null {
+  const pieces = value.split(/[-.·]/).filter(Boolean);
+  if (pieces.length < 3) return null;
+  return { pieces, separators: pieces.map(() => ''), lineIndex };
+}
+
+/**
+ * Deletreos y correos dichos con palabras. El listón es alto a propósito: los
+ * nombres de letra ("de", "te", "ese", "a") son también palabras corrientes, y
+ * un detector laxo convertiría cualquier frase en un deletreo. Se exigen cuatro
+ * piezas seguidas y, o bien dos nombres de letra inequívocos, o bien un
+ * "arroba", que no aparece por casualidad.
+ */
+function spokenSpellingRuns(dialogue: DialogueLine[]): DictationRun[] {
+  const out: DictationRun[] = [];
+
+  (dialogue || []).forEach((line, lineIndex) => {
+    const tokens = splitTokens(line.text || '');
+    let pieces: string[] = [];
+    let separators: string[] = [];
+    let clear = 0;
+    let hasAddressGlue = false;
+    let pendingGlue: string[] = [];
+
+    const flush = () => {
+      // O es un deletreo (dos nombres de letra inequívocos) o es una dirección
+      // (un "arroba" de verdad entre sus piezas). "en punto" cumple lo de las
+      // piezas unidas por un nexo, y no es ni una cosa ni la otra.
+      const isAddress = hasAddressGlue && separators.some(s => normalizeText(s).includes('arroba'));
+      if (pieces.length >= 4 && (clear >= 2 || isAddress)) {
+        out.push({ pieces: [...pieces], separators: [...separators], lineIndex });
+      }
+      pieces = [];
+      separators = [];
+      clear = 0;
+      hasAddressGlue = false;
+      pendingGlue = [];
+    };
+
+    tokens.forEach((token, i) => {
+      const word = normalizeText(stripEdges(token));
+
+      if (ADDRESS_GLUE.has(word)) {
+        if (pieces.length > 0) {
+          pendingGlue.push(stripEdges(token));
+          hasAddressGlue = true;
+        }
+        return;
+      }
+
+      // Detrás de "arroba" o "punto" la pieza es una palabra entera ("gmail",
+      // "com"); en un deletreo, un nombre de letra. Y una palabra corriente
+      // ABRE la dirección si el nexo viene justo detrás: sin esta mirada
+      // adelante, el "ana" de "ana arroba correo punto com" se perdía y la
+      // dirección empezaba a contarse a partir del arroba.
+      const nextIsGlue = ADDRESS_GLUE.has(normalizeText(stripEdges(tokens[i + 1] || '')));
+      const acceptable =
+        isLetterName(word) || ((pendingGlue.length > 0 || nextIsGlue) && word.length >= 2);
+      if (!acceptable) {
+        flush();
+        return;
+      }
+
+      pieces.push(stripEdges(token));
+      separators.push(pieces.length === 1 ? '' : pendingGlue.join(' '));
+      if (CLEAR_LETTER_NAMES.has(word)) clear += 1;
+      pendingGlue = [];
+    });
+
+    flush();
+  });
+
+  return out;
+}
+
+/** Alternativas audibles de UNA pieza del dato, nunca de otra posición. */
+function pieceDistractors(piece: string, index: TranscriptIndex): string[] {
+  const key = normalizeText(piece);
+  const out: string[] = [];
+  const push = (candidate: string) => {
+    if (!candidate) return;
+    if (normalizeText(candidate) === key) return;
+    if (!out.some(c => normalizeText(c) === normalizeText(candidate))) out.push(candidate);
+  };
+
+  // Numeral dicho con palabras: el compuesto se recambia entero.
+  const tokens = splitTokens(piece);
+  const head = normalizeText(tokens[0] || '');
+  if (NUMBER_CONFUSIONS[key]) NUMBER_CONFUSIONS[key].forEach(push);
+  else if (MINUTE_CONFUSIONS[key]) MINUTE_CONFUSIONS[key].forEach(push);
+  else if (tokens.length === 3 && COMPOUND_TENS.includes(head)) {
+    // "treinta y dos": se cambia la decena o la unidad, nunca las dos, y
+    // siempre por otra de su clase — "treinta y doce" no existe y se
+    // descartaría leyendo. `replacementsFor` es la misma regla que usa la ficha.
+    const tail = tokens[2];
+    for (const swap of replacementsFor(head, '', 'y')) push(`${swap} ${tokens[1]} ${tail}`);
+    for (const swap of replacementsFor(normalizeText(tail), 'y', '')) push(`${tokens[0]} ${tokens[1]} ${swap}`);
+  }
+
+  // Letra suelta de un deletreo escrito con guiones.
+  if (out.length === 0 && piece.length === 1) {
+    const swap = LETTER_CONFUSIONS[piece.toUpperCase()];
+    if (swap) push(piece === piece.toUpperCase() ? swap : swap.toLowerCase());
+  }
+
+  // Cifra en dígitos: se cambia un solo dígito, y sólo dentro del grupo.
+  if (out.length === 0 && /^\d+$/.test(piece)) {
+    const digits = piece.split('');
+    const last = digits.length - 1;
+    push([...digits.slice(0, last), String((Number(digits[last]) + 1) % 10)].join(''));
+    if (digits.length >= 2) {
+      const swapped = [...digits];
+      [swapped[0], swapped[1]] = [swapped[1], swapped[0]];
+      push(swapped.join(''));
+    }
+    push(String((Number(piece) + 10) % (10 ** digits.length)).padStart(digits.length, '0'));
+  }
+
+  // Palabra: primero el banco de pares reales, después el vecino generado y,
+  // para lo que no es léxico común (un apellido, un dominio), el cambio de una
+  // sola letra dentro de la palabra.
+  if (out.length === 0) {
+    for (const candidate of PAIR_INDEX.get(key) || []) push(candidate);
+    for (const candidate of generatedNeighbours(piece, true)) push(candidate);
+    for (const candidate of inWordNearMisses(piece)) push(candidate);
+  }
+
+  // Un distractor que SÍ suena en el audio deja el ítem sin clave única.
+  return out.filter(candidate => !isHeard(index, candidate)).slice(0, 2);
+}
+
+const dictation: Engine = (dialogue, slot, index) => {
+  const focus = slot.focus && slot.focus !== 'generic' ? slot.focus : undefined;
+  const candidates: DictationRun[] = [];
+
+  for (const run of spokenNumberRuns(dialogue)) {
+    const segmented = segmentSpokenRun(run.value, run.lineIndex);
+    if (segmented) candidates.push(segmented);
+  }
+  candidates.push(...spokenSpellingRuns(dialogue));
+  (dialogue || []).forEach((line, lineIndex) => {
+    for (const match of (line.text || '').match(SPELLED_RUN) || []) {
+      const segmented = segmentSpelledLiteral(match, lineIndex);
+      if (segmented) candidates.push(segmented);
+    }
+    for (const match of (line.text || '').match(DIGIT_LITERAL) || []) {
+      const segmented = segmentDigitLiteral(match, lineIndex);
+      if (segmented) candidates.push(segmented);
+    }
+  });
+
+  if (candidates.length === 0) return null;
+
+  // Con foco declarado manda el dato que la consigna anunció; si no lo hay, el
+  // tramo más largo, que es el que más tiene que reconstruir el alumno.
+  const joined = (run: DictationRun) =>
+    run.pieces.map((p, i) => [run.separators[i], p].filter(Boolean).join(' ')).join(' ');
+  const ranked = [...candidates].sort((a, b) => {
+    if (focus) {
+      const fa = isFocusLiteral(joined(a), focus) ? 0 : 1;
+      const fb = isFocusLiteral(joined(b), focus) ? 0 : 1;
+      if (fa !== fb) return fa - fb;
+    }
+    return b.pieces.length - a.pieces.length;
+  });
+
+  for (const run of ranked) {
+    const fields: ExerciseField[] = [];
+    const answer: Record<string, string> = {};
+    let complete = true;
+
+    run.pieces.forEach((piece, i) => {
+      const distractors = pieceDistractors(piece, index);
+      if (distractors.length === 0) {
+        complete = false;
+        return;
+      }
+      const fieldId = `eng_di_${i}`;
+      const correctId = `${fieldId}_ok`;
+      fields.push({
+        id: fieldId,
+        label: String(i + 1),
+        options: shuffle([
+          { id: correctId, text: piece },
+          ...distractors.map((text, k) => ({ id: `${fieldId}_x${k}`, text }))
+        ])
+      });
+      answer[fieldId] = correctId;
+    });
+
+    // Todo o nada: una posición sin alternativas audibles se regalaría, y el
+    // ejercicio dejaría de ser una reconstrucción del dato completo.
+    if (!complete || fields.length < 2) continue;
+
+    const label = focus ? DATA_POINTS[focus].fieldLabel : labelFor(joined(run));
+    return {
+      id: 'eng_dictation',
+      type: 'dictation',
+      question: `Reconstruí ${label.toLowerCase()} tal como se dicta: elegí en cada casilla lo que oíste, en orden.`,
+      fields,
+      separators: run.separators.slice(1),
+      correctAnswer: answer,
+      sourceTurns: [run.lineIndex],
+      explanation:
+        'Cada casilla ofrece la pieza que suena y otras que se le parecen al oído. No hay nada que deducir: hay que volver al audio y anotar elemento por elemento, que es lo que se hace al tomar un dato al vuelo.'
+    };
+  }
+
+  return null;
 };
 
 // --- Cloze ---------------------------------------------------------------
@@ -1009,6 +1387,7 @@ const ENGINES: Record<EngineId, Engine> = {
   listening_cloze: listeningCloze,
   two_gap_cloze: twoGapCloze,
   data_capture: dataCapture,
+  dictation,
   minimal_pairs: minimalPairs,
   spot_the_difference: spotTheDifference,
   chunk_order: chunkOrder
@@ -1040,10 +1419,62 @@ export function fillMissingSlots(
   const pool = [...verified];
   const result: Exercise[] = [];
 
+  /** El motor del slot, ya verificado. `null` si no hay material. */
+  const runEngine = (slot: ExerciseSlot): { exercise?: Exercise; reason?: string } => {
+    const engine = slot.engineFallback ? ENGINES[slot.engineFallback] : undefined;
+    if (!engine) return { reason: 'sin motor de respaldo' };
+
+    let built: Exercise | null = null;
+    try {
+      built = engine(dialogue, slot, index);
+    } catch (error) {
+      console.warn(`[ejercicios] el motor "${slot.engineFallback}" falló:`, error);
+      return { reason: error instanceof Error ? error.message : String(error) };
+    }
+    if (!built) {
+      return { reason: `el motor "${slot.engineFallback}" no encontró material en el audio` };
+    }
+
+    // Lo generado aquí pasa por el mismo control que lo generado por el modelo.
+    const check = verifyExercise(built, index);
+    if (!check.ok || !check.exercise) {
+      console.warn(`[ejercicios] motor "${slot.engineFallback}" descartado: ${check.reason}`);
+      return { reason: `motor descartado: ${check.reason || 'sin motivo'}` };
+    }
+    return { exercise: check.exercise };
+  };
+
   blueprint.forEach((slot, position) => {
-    // El modelo suele devolver el slotId; si no lo hace, se empareja por formato.
-    let i = pool.findIndex(ex => ex.slotId === slot.slotId);
-    if (i < 0) i = pool.findIndex(ex => ex.type === slot.format);
+    // EL FORMATO MANDA. Antes bastaba con que el ejercicio trajera el slotId
+    // para ocupar el hueco, sin mirar su tipo: una opción múltiple vaga
+    // etiquetada `slotId: "a0-ficha"` se quedaba con el slot del dato, se le
+    // estampaba `skill: 'dato_literal'` y el motor determinista no llegaba a
+    // correr nunca. Y como `verifyMultipleChoice` no comprobaba nada contra el
+    // audio, esa opción múltiple era además infalsificable.
+    const matches = (ex: Exercise) => ex.type === slot.format;
+    let i = pool.findIndex(ex => ex.slotId === slot.slotId && matches(ex));
+    if (i < 0) i = pool.findIndex(matches);
+
+    // Donde el ejercicio se puede demostrar entero contra la transcripción, el
+    // motor va primero: una reconstrucción derivada del audio siempre es más
+    // fiel que una redactada.
+    let engineAttempt: { exercise?: Exercise; reason?: string } | null = null;
+    if (slot.preferEngine) {
+      engineAttempt = runEngine(slot);
+      const { exercise } = engineAttempt;
+      if (exercise) {
+        if (i >= 0) pool.splice(i, 1);
+        onSlot?.({ slotId: slot.slotId, source: 'engine' });
+        result.push({
+          ...exercise,
+          id: `${slot.slotId}_auto`,
+          slotId: slot.slotId,
+          stage: slot.stage,
+          skill: slot.skill
+        });
+        return;
+      }
+    }
 
     if (i >= 0) {
       const [ex] = pool.splice(i, 1);
@@ -1058,45 +1489,17 @@ export function fillMissingSlots(
       return;
     }
 
-    const engine = slot.engineFallback ? ENGINES[slot.engineFallback] : undefined;
-    if (!engine) {
-      console.warn(`[ejercicios] slot "${slot.slotId}" sin cubrir y sin motor de respaldo`);
-      onSlot?.({ slotId: slot.slotId, source: 'empty', reason: 'sin motor de respaldo' });
+    const { exercise, reason } = engineAttempt || runEngine(slot);
+    if (!exercise) {
+      const why = reason || `el motor "${slot.engineFallback}" no encontró material en el audio`;
+      if (!slot.engineFallback) console.warn(`[ejercicios] slot "${slot.slotId}" sin cubrir y sin motor de respaldo`);
+      onSlot?.({ slotId: slot.slotId, source: 'empty', reason: why });
       return;
     }
 
-    let built: Exercise | null = null;
-    let engineError: string | null = null;
-    try {
-      built = engine(dialogue, slot, index);
-    } catch (error) {
-      console.warn(`[ejercicios] el motor "${slot.engineFallback}" falló:`, error);
-      engineError = error instanceof Error ? error.message : String(error);
-    }
-    if (!built) {
-      onSlot?.({
-        slotId: slot.slotId,
-        source: 'empty',
-        reason: engineError || `el motor "${slot.engineFallback}" no encontró material en el audio`
-      });
-      return;
-    }
-
-    // Lo generado aquí pasa por el mismo control que lo generado por el modelo.
-    const check = verifyExercise(built, index);
-    if (!check.ok || !check.exercise) {
-      console.warn(`[ejercicios] motor "${slot.engineFallback}" descartado: ${check.reason}`);
-      onSlot?.({
-        slotId: slot.slotId,
-        source: 'empty',
-        reason: `motor descartado: ${check.reason || 'sin motivo'}`
-      });
-      return;
-    }
     onSlot?.({ slotId: slot.slotId, source: 'engine' });
-
     result.push({
-      ...check.exercise,
+      ...exercise,
       id: `${slot.slotId}_auto`,
       slotId: slot.slotId,
       stage: slot.stage,
@@ -1104,9 +1507,17 @@ export function fillMissingSlots(
     });
   });
 
-  // Ejercicios válidos que el modelo añadió de más: se conservan al final.
-  for (const leftover of pool) {
-    result.push({ ...leftover, question: clampText(leftover.question, 300) });
+  // EL BLUEPRINT ES LA LECCIÓN. Lo que el modelo devolvió de más se descarta:
+  // antes se anexaba al final, así que una lección de tres ejercicios podía
+  // salir con cinco, y los dos de propina eran justo los que nadie había
+  // planificado ni situado en ninguna etapa de escucha.
+  if (pool.length > 0) {
+    console.warn(`[ejercicios] ${pool.length} ejercicio(s) fuera del blueprint descartados`);
+    onSlot?.({
+      slotId: '(sobrantes)',
+      source: 'empty',
+      reason: `${pool.length} ejercicio(s) del modelo fuera del blueprint`
+    });
   }
 
   return result.sort(compareByStage);
