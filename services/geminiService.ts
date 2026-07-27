@@ -1385,6 +1385,133 @@ async function synthesizeWithProgress(
   return bytes;
 }
 
+/**
+ * Voces prefabricadas del TTS de Gemini, agrupadas por el timbre que proyectan.
+ * Hacen falta **varias por género**: si los dos personajes son del mismo género
+ * —dos clientas, dos periodistas, dos amigos— la asignación anterior devolvía
+ * `Kore` (o `Fenrir`) para ambos y el diálogo salía con una sola voz aunque los
+ * nombres fueran distintos. Al alumno le queda un audio en el que no puede
+ * separar los turnos, que es justamente lo que la mitad de los ejercicios pide.
+ */
+const TTS_VOICE_POOLS: Record<Character['gender'], readonly string[]> = {
+  Female: ['Kore', 'Aoede', 'Leda', 'Autonoe'],
+  Male: ['Fenrir', 'Puck', 'Charon', 'Orus']
+};
+
+/** Orden de reserva cuando el guion no dice de qué género es el personaje. */
+const TTS_FALLBACK_VOICES: readonly string[] = ['Fenrir', 'Kore', 'Puck', 'Aoede', 'Charon', 'Leda'];
+
+export interface SpeakerVoiceAssignment {
+  /** La etiqueta tal como viene en el guion. */
+  speaker: string;
+  /** La etiqueta que viaja al TTS, en el `speechConfig` y delante de cada turno. */
+  label: string;
+  voice: string;
+}
+
+/** Minúsculas, sin tildes, sin acotaciones ni puntuación. Solo para comparar. */
+function normalizeSpeaker(raw: string): string {
+  return (raw || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Limpia la etiqueta que se le manda al TTS. El nombre se conserva —es lo que
+ * el modelo espera ver delante de cada turno— pero sin acotaciones ni signos
+ * que puedan romper la correspondencia con el `speechConfig`.
+ */
+function canonicalSpeakerLabel(raw: string): string {
+  const cleaned = (raw || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/[\*\[\]\{\}_"“”:]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || (raw || '').trim();
+}
+
+function findCharacter(speaker: string, characters: Character[]): Character | undefined {
+  const target = normalizeSpeaker(speaker);
+  if (!target) return undefined;
+  const named = characters.filter(c => normalizeSpeaker(c.name));
+
+  return (
+    named.find(c => normalizeSpeaker(c.name) === target) ||
+    // "Ana" ↔ "Ana Gómez", "Sra. Ana" ↔ "Ana": el más largo primero, para que
+    // "Ana María" no se lleve los turnos de "Ana".
+    [...named]
+      .sort((a, b) => normalizeSpeaker(b.name).length - normalizeSpeaker(a.name).length)
+      .find(c => {
+        const name = normalizeSpeaker(c.name);
+        return target.split(' ').includes(name) || name.split(' ').includes(target);
+      })
+  );
+}
+
+/**
+ * Asigna una voz distinta a cada hablante. Distinta **siempre**: el género solo
+ * decide de qué grupo se sirve, nunca puede hacer que dos personajes compartan
+ * timbre. Se calcula una vez para todo el diálogo y se reutiliza en cada tramo.
+ */
+export function assignSpeakerVoices(speakers: string[], characters: Character[]): SpeakerVoiceAssignment[] {
+  const labels = canonicalSpeakerLabels(speakers);
+  const used = new Set<string>();
+
+  return speakers.map((speaker, i) => {
+    const gender = findCharacter(speaker, characters)?.gender;
+    const preference = gender
+      ? [...TTS_VOICE_POOLS[gender], ...TTS_VOICE_POOLS[gender === 'Female' ? 'Male' : 'Female']]
+      : [...TTS_FALLBACK_VOICES.slice(i), ...TTS_FALLBACK_VOICES];
+
+    const every = [...preference, ...TTS_VOICE_POOLS.Female, ...TTS_VOICE_POOLS.Male];
+    const voice = every.find(v => !used.has(v)) || preference[0];
+    used.add(voice);
+
+    return { speaker, label: labels[i], voice };
+  });
+}
+
+/**
+ * Etiquetas únicas e inconfundibles entre sí. Si dos hablantes se llaman igual
+ * tras limpiar la etiqueta, o el nombre de uno está contenido en el del otro
+ * ("Ana" / "Ana María"), el TTS no puede saber a quién pertenece cada turno y
+ * lo lee todo con la primera voz: en ese caso se numeran.
+ */
+function canonicalSpeakerLabels(speakers: string[]): string[] {
+  const labels = speakers.map(canonicalSpeakerLabel);
+  const normalized = labels.map(normalizeSpeaker);
+
+  const ambiguous = normalized.some((a, i) =>
+    !a || normalized.some((b, j) => i !== j && (a === b || a.includes(b)))
+  );
+
+  return ambiguous ? speakers.map((_, i) => `Hablante ${i + 1}`) : labels;
+}
+
+/** El turno pertenece al hablante cuya etiqueta coincide; el más largo gana. */
+function assignmentFor(
+  speaker: string | undefined,
+  assignments: SpeakerVoiceAssignment[]
+): SpeakerVoiceAssignment | undefined {
+  const target = normalizeSpeaker(speaker || '');
+  if (!target) return undefined;
+
+  return (
+    assignments.find(a => normalizeSpeaker(a.speaker) === target) ||
+    [...assignments]
+      .sort((a, b) => normalizeSpeaker(b.speaker).length - normalizeSpeaker(a.speaker).length)
+      .find(a => {
+        const name = normalizeSpeaker(a.speaker);
+        return target.split(' ').includes(name) || name.split(' ').includes(target);
+      })
+  );
+}
+
 export const generateAudio = async (
   dialogue: LessonPlan['dialogue'],
   characters: Character[],
@@ -1416,54 +1543,42 @@ export const generateAudio = async (
   const assignedVoices: string[] = [];
 
   if (isMultiSpeaker) {
-    const s1 = sortedSpeakers[0];
-    const s2 = sortedSpeakers[1];
+    // Dos voces distintas, garantizado: `assignSpeakerVoices` nunca repite
+    // timbre aunque los dos personajes sean del mismo género.
+    const assignments = assignSpeakerVoices(sortedSpeakers.slice(0, 2), characters);
+    for (const a of assignments) assignedVoices.push(`${a.label}→${a.voice}`);
 
-    const getVoice = (name: string, defaultVoice: string) => {
-      const char = characters.find(c => c.name === name || name.includes(c.name));
-      return char?.gender === 'Female' ? 'Kore' : (char?.gender === 'Male' ? 'Fenrir' : defaultVoice);
-    };
-
-    const voice1 = getVoice(s1, 'Fenrir');
-    const voice2 = getVoice(s2, 'Kore');
-    assignedVoices.push(`${s1}→${voice1}`, `${s2}→${voice2}`);
-
-    // Use actual speaker names directly (not internal mapping)
     speechConfig = {
       multiSpeakerVoiceConfig: {
-        speakerVoiceConfigs: [
-          {
-            speaker: s1,
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: voice1 }
-            }
-          },
-          {
-            speaker: s2,
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: voice2 }
-            }
+        speakerVoiceConfigs: assignments.map(a => ({
+          speaker: a.label,
+          voiceConfig: {
+            prebuiltVoiceConfig: { voiceName: a.voice }
           }
-        ]
+        }))
       }
     };
 
     joiner = '\n';
+    // La etiqueta que encabeza cada turno tiene que ser *exactamente* la del
+    // `speechConfig`. Si el guion escribe "Ana (cajera):" y la configuración
+    // dice "Ana", el modelo no reconoce al hablante y lee todo con una voz.
     lines = dialogue
-      .filter(d => d.speaker && (d.speaker.includes(s1) || d.speaker.includes(s2) || s1.includes(d.speaker) || s2.includes(d.speaker)))
       .map(d => {
+        const assignment = assignmentFor(d.speaker, assignments);
+        if (!assignment) return null;
         const cleanText = sanitizeForTTS(d.text);
         if (!cleanText) return null;
-        return `${d.speaker}: ${cleanText}`;
+        return `${assignment.label}: ${cleanText}`;
       })
       .filter((l): l is string => Boolean(l)); // Remove nulls
 
   } else {
     // Single Speaker Logic
     const s1 = sortedSpeakers[0];
-    const char = characters.find(c => c.name === s1 || s1.includes(c.name));
-    const voice = char?.gender === 'Female' ? 'Kore' : 'Puck';
-    assignedVoices.push(`${s1}→${voice}`);
+    const [assignment] = assignSpeakerVoices([s1], characters);
+    const voice = assignment.voice;
+    assignedVoices.push(`${assignment.label}→${voice}`);
 
     speechConfig = {
       voiceConfig: {
