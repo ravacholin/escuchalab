@@ -59,6 +59,23 @@ const storeDefaultLevel = (level: Level): void => {
     } catch (e) { /* localStorage unavailable */ }
 };
 
+// Recuerda la última variedad dialectal elegida por el usuario para que sea el default la próxima vez.
+const DEFAULT_ACCENT_KEY = 'escuchalab_default_accent';
+const getStoredDefaultAccent = (): Accent => {
+    try {
+        const stored = localStorage.getItem(DEFAULT_ACCENT_KEY);
+        if (stored && (Object.values(Accent) as string[]).includes(stored)) {
+            return stored as Accent;
+        }
+    } catch (e) { /* localStorage unavailable */ }
+    return Accent.Madrid;
+};
+const storeDefaultAccent = (accent: Accent): void => {
+    try {
+        localStorage.setItem(DEFAULT_ACCENT_KEY, accent);
+    } catch (e) { /* localStorage unavailable */ }
+};
+
 const App: React.FC = () => {
     // Lazy initialization to check localStorage immediately prevents the "Auth" flash
     const [state, setState] = useState<AppState>(() => {
@@ -73,7 +90,7 @@ const App: React.FC = () => {
                     topic: "",
                     length: Length.Short,
                     textType: TextType.Dialogue,
-                    accent: Accent.Madrid
+                    accent: getStoredDefaultAccent()
                 },
                 lessonPlan: null,
                 audioBlob: null,
@@ -88,7 +105,7 @@ const App: React.FC = () => {
                     topic: "",
                     length: Length.Short,
                     textType: TextType.Dialogue,
-                    accent: Accent.Madrid
+                    accent: getStoredDefaultAccent()
                 },
                 lessonPlan: null,
                 audioBlob: null,
@@ -536,7 +553,11 @@ const App: React.FC = () => {
                                         label="Acento Preferente"
                                         value={state.config.accent}
                                         options={ACCENTS}
-                                        onChange={(e: any) => setState({ ...state, config: { ...state.config, accent: e.target.value } })}
+                                        onChange={(e: any) => {
+                                            const newAccent = e.target.value as Accent;
+                                            storeDefaultAccent(newAccent);
+                                            setState({ ...state, config: { ...state.config, accent: newAccent } });
+                                        }}
                                         subLabel={state.config.mode === AppMode.Vocabulary ? "El vocabulario técnico se adaptará a esta región." : undefined}
                                     />
                                 )}
