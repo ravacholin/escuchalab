@@ -141,6 +141,7 @@ export function normalizeExerciseAnswers(exercise: Exercise): Exercise {
     }
 
     case 'data_capture':
+    case 'dictation':
     case 'minimal_pairs': {
       if (!ex.fields || !answer || typeof answer !== 'object' || Array.isArray(answer)) break;
       const normalized: Record<string, string> = {};

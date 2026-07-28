@@ -55,10 +55,18 @@ const KNOWN_TYPES = new Set<ExerciseType>([
   'matching',
   'scale',
   'data_capture',
+  'dictation',
   'minimal_pairs',
   'spot_the_difference',
   'chunk_order'
 ]);
+
+/**
+ * Habilidades cuya clave es material LITERAL del audio. En ellas una opción
+ * múltiple tiene que citar algo que suena: si no, es infalsificable y ocupa el
+ * hueco de un ejercicio que sí se podía comprobar.
+ */
+const LITERAL_SKILLS = new Set(['dato_literal', 'decodificacion']);
 
 const JUDGEMENT_VALUES = new Set(['true', 'false', 'not_given']);
 
@@ -142,12 +150,30 @@ function bestMatchingLine(index: TranscriptIndex, text: string, hint?: number[])
 // Verificación por formato
 // ---------------------------------------------------------------------------
 
-function verifyMultipleChoice(ex: Exercise): VerificationResult {
+function verifyMultipleChoice(ex: Exercise, index: TranscriptIndex): VerificationResult {
   if (!optionsAreSound(ex.options, 2)) return fail('multiple_choice sin opciones utilizables');
   const ids = idsOf(ex.options);
 
+  /**
+   * En los slots de dato la clave no es una paráfrasis, es algo que suena. Sin
+   * esta comprobación `multiple_choice` era el ÚNICO formato sin ninguna
+   * verificación contra el audio, así que una pregunta vaga sobre el dato
+   * ("¿cuál era el número?") pasaba siempre mientras una ficha precisa podía
+   * ser rechazada. En las habilidades interpretativas (inferencia, actitud,
+   * registro) la clave sí es paráfrasis y se deja como está.
+   */
+  const anchored = (id: string): boolean => {
+    if (!ex.skill || !LITERAL_SKILLS.has(ex.skill)) return true;
+    const option = ex.options!.find(o => o.id === id);
+    if (!option) return false;
+    return isHeard(index, option.text) || heardRatio(index, option.text) >= 0.5;
+  };
+
   if (typeof ex.correctAnswer === 'string') {
     if (!ids.has(ex.correctAnswer)) return fail('la respuesta correcta no está entre las opciones');
+    if (!anchored(ex.correctAnswer)) {
+      return fail('la clave de un ítem de dato literal no cita nada que suene en el audio');
+    }
     return { ok: true, exercise: ex };
   }
 
@@ -156,6 +182,9 @@ function verifyMultipleChoice(ex: Exercise): VerificationResult {
     if (unique.length === 0) return fail('selección múltiple sin ninguna respuesta correcta');
     if (unique.some(id => !ids.has(id))) return fail('la selección múltiple apunta a ids inexistentes');
     if (unique.length === ex.options!.length) return fail('todas las opciones son correctas: el ítem no discrimina');
+    if (unique.some(id => !anchored(id))) {
+      return fail('la clave de un ítem de dato literal no cita nada que suene en el audio');
+    }
     return { ok: true, exercise: { ...ex, correctAnswer: unique } };
   }
 
@@ -328,6 +357,51 @@ function verifyFieldBased(ex: Exercise, index: TranscriptIndex): VerificationRes
   return { ok: true, exercise: ex };
 }
 
+/**
+ * `dictation` promete algo más fuerte que la ficha de datos: que el alumno
+ * reconstruye EL dato, entero y en orden. La ficha se conformaba con que la
+ * mayoría de sus campos sonaran, porque sus campos son datos independientes;
+ * aquí los campos son las piezas de un único dato, así que la comprobación es
+ * la secuencia completa, no cada pieza por su lado.
+ */
+function verifyDictation(ex: Exercise, index: TranscriptIndex): VerificationResult {
+  if (!Array.isArray(ex.fields) || ex.fields.length < 2) return fail('dictation con menos de 2 posiciones');
+  const correct = asRecord(ex.correctAnswer);
+  if (!correct) return fail('respuesta no es un mapa posición → opción');
+
+  const separators = Array.isArray(ex.separators) ? ex.separators : [];
+  const solution: string[] = [];
+
+  for (let i = 0; i < ex.fields.length; i++) {
+    const field = ex.fields[i];
+    if (!field || typeof field.id !== 'string' || !field.id.trim()) return fail('posición sin id');
+    if (!optionsAreSound(field.options, 2)) return fail(`la posición "${field.id}" tiene menos de 2 opciones`);
+
+    const chosen = field.options.find(o => o.id === correct[field.id]);
+    if (!chosen) return fail(`la posición "${field.id}" apunta a una opción inexistente`);
+
+    // Un distractor idéntico a la solución (o a la solución de la posición
+    // contigua) deja la casilla sin clave única.
+    const twin = field.options.find(
+      o => o.id !== chosen.id && normalizeText(o.text) === normalizeText(chosen.text)
+    );
+    if (twin) return fail(`la posición "${field.id}" repite la solución entre sus opciones`);
+
+    if (i > 0) solution.push(normalizeText(separators[i - 1] || ''));
+    solution.push(normalizeText(chosen.text));
+  }
+
+  // LA comprobación: el dato reconstruido tiene que oírse tal cual, de corrido.
+  // Sin esto el formato podría pedir que se reponga una secuencia que nadie
+  // dictó, que es exactamente lo que se está corrigiendo.
+  const heard = solution.filter(Boolean).join(' ');
+  if (!isHeard(index, heard)) {
+    return fail(`la secuencia reconstruida ("${heard}") no suena de corrido en ningún turno`);
+  }
+
+  return { ok: true, exercise: ex };
+}
+
 function verifySpotTheDifference(ex: Exercise, index: TranscriptIndex): VerificationResult {
   if (!optionsAreSound(ex.tokens, 6)) return fail('spot_the_difference con menos de 6 palabras');
   if (!Array.isArray(ex.correctAnswer)) return fail('spot_the_difference sin lista de palabras alteradas');
@@ -396,7 +470,7 @@ export function verifyExercise(raw: unknown, index: TranscriptIndex): Verificati
 
   switch (ex.type) {
     case 'multiple_choice':
-      return verifyMultipleChoice(ex);
+      return verifyMultipleChoice(ex, index);
     case 'true_false':
       return verifyJudgement(ex, false);
     case 'true_false_notgiven':
@@ -416,6 +490,8 @@ export function verifyExercise(raw: unknown, index: TranscriptIndex): Verificati
     case 'data_capture':
     case 'minimal_pairs':
       return verifyFieldBased(ex, index);
+    case 'dictation':
+      return verifyDictation(ex, index);
     case 'spot_the_difference':
       return verifySpotTheDifference(ex, index);
     default:

@@ -207,6 +207,49 @@ const REJECT_CASES = [
       correctAnswer: { m1: 'm1a', m2: 'm2a' },
       explanation: ''
     }
+  ],
+  [
+    'dictado cuya secuencia reconstruida no se dice de corrido',
+    {
+      type: 'dictation',
+      question: 'Reconstruí el precio',
+      fields: [
+        { id: 'd1', label: '1', options: [{ id: 'd1a', text: '14' }, { id: 'd1b', text: '40' }] },
+        { id: 'd2', label: '2', options: [{ id: 'd2a', text: '55' }, { id: 'd2b', text: '95' }] }
+      ],
+      separators: [','],
+      // "14,55" no se dice: el audio dice "14,95".
+      correctAnswer: { d1: 'd1a', d2: 'd2a' },
+      explanation: ''
+    }
+  ],
+  [
+    'dictado con la solución repetida entre las opciones de una posición',
+    {
+      type: 'dictation',
+      question: 'Reconstruí el precio',
+      fields: [
+        { id: 'd1', label: '1', options: [{ id: 'd1a', text: '14' }, { id: 'd1b', text: '14' }] },
+        { id: 'd2', label: '2', options: [{ id: 'd2a', text: '95' }, { id: 'd2b', text: '55' }] }
+      ],
+      separators: [','],
+      correctAnswer: { d1: 'd1a', d2: 'd2a' },
+      explanation: ''
+    }
+  ],
+  [
+    'opción múltiple de dato literal cuya clave no cita nada que suene',
+    {
+      type: 'multiple_choice',
+      skill: 'dato_literal',
+      question: '¿Cuál es el precio del jarabe?',
+      options: [
+        { id: 'a', text: 'algo más de catorce euros con descuento' },
+        { id: 'b', text: 'una cifra cercana a los cuarenta' }
+      ],
+      correctAnswer: 'a',
+      explanation: ''
+    }
   ]
 ];
 
@@ -258,6 +301,33 @@ const ACCEPT_CASES = [
       question: 'Reconstruí',
       options: [{ id: 'k1', text: '¿Hasta qué' }, { id: 'k2', text: 'hora abren' }, { id: 'k3', text: 'hoy?' }],
       correctAnswer: ['k1', 'k2', 'k3'],
+      explanation: ''
+    }
+  ],
+  [
+    'dictado cuya secuencia sí se dice de corrido',
+    {
+      type: 'dictation',
+      question: 'Reconstruí el precio',
+      fields: [
+        { id: 'd1', label: '1', options: [{ id: 'd1a', text: '14' }, { id: 'd1b', text: '40' }] },
+        { id: 'd2', label: '2', options: [{ id: 'd2a', text: '95' }, { id: 'd2b', text: '55' }] }
+      ],
+      separators: [','],
+      correctAnswer: { d1: 'd1a', d2: 'd2a' },
+      sourceTurns: [2],
+      explanation: ''
+    }
+  ],
+  [
+    'opción múltiple de dato literal cuya clave sí suena',
+    {
+      type: 'multiple_choice',
+      skill: 'dato_literal',
+      question: '¿Cuánto cuesta el jarabe?',
+      options: [{ id: 'a', text: '14,95' }, { id: 'b', text: '40,95' }, { id: 'c', text: '14,55' }],
+      correctAnswer: 'a',
+      sourceTurns: [2],
       explanation: ''
     }
   ]
@@ -452,6 +522,211 @@ if (focusedPairs) {
     `el primer par mínimo debería contrastar cifras del teléfono, no otra palabra (${firstOptions.join(' / ')})`
   );
 }
+
+// ---------------------------------------------------------------------------
+// 6. El dictado: reproducir el dato, no reconocerlo entre tres cadenas
+// ---------------------------------------------------------------------------
+
+const dictationSlot = (focus, items = 6) => ({
+  slotId: 't-dictado',
+  stage: 'selectiva',
+  skill: 'dato_literal',
+  format: 'dictation',
+  items,
+  brief: 'x',
+  engineFallback: 'dictation',
+  preferEngine: true,
+  focus
+});
+
+/** Texto de la solución de un dictado, en el orden de sus posiciones. */
+const solutionOf = ex =>
+  ex.fields.map(f => f.options.find(o => o.id === ex.correctAnswer[f.id]).text);
+
+const buildDictation = (dialogue, focus, items) => {
+  const made = fillMissingSlots([], [dictationSlot(focus, items)], dialogue).find(
+    e => e.slotId === 't-dictado'
+  );
+  return made;
+};
+
+// (a) Teléfono dictado con palabras: una posición por cifra, en orden, y
+//     "treinta y dos" como UNA pieza, que es como se anota.
+const spokenDictation = buildDictation(SPOKEN_PHONE, 'phone');
+check(!!spokenDictation, 'un teléfono dictado con palabras debería producir un dictado');
+if (spokenDictation) {
+  check(
+    verifyExercise(spokenDictation, buildTranscriptIndex(SPOKEN_PHONE)).ok,
+    `el dictado del teléfono en palabras no verifica: ${verifyExercise(spokenDictation, buildTranscriptIndex(SPOKEN_PHONE)).reason}`
+  );
+  const solution = solutionOf(spokenDictation);
+  check(
+    solution.join(' ') === 'seis cinco cuatro treinta y dos dieciocho',
+    `la secuencia reconstruida debería ser el teléfono exacto (es: ${solution.join(' | ')})`
+  );
+  check(
+    spokenDictation.fields.every(f => f.options.length >= 2),
+    'cada posición del dictado debería ofrecer alternativas'
+  );
+  // La alternativa de una posición no puede ser el valor de otra: se acertaría
+  // por descarte, sin oír esa cifra concreta.
+  spokenDictation.fields.forEach((field, i) => {
+    const others = new Set(solution.filter((_, k) => k !== i).map(t => t.toLowerCase()));
+    const correctId = spokenDictation.correctAnswer[field.id];
+    for (const option of field.options) {
+      if (option.id === correctId) continue;
+      check(
+        !others.has(option.text.toLowerCase()),
+        `la posición ${field.label} ofrece "${option.text}", que es la solución de otra posición`
+      );
+    }
+  });
+}
+
+// (b) El mismo teléfono en cifras agrupadas: tres posiciones, no una cadena.
+const groupedDictation = buildDictation(GROUPED_PHONE, 'phone');
+check(!!groupedDictation, 'un teléfono en cifras agrupadas debería producir un dictado');
+if (groupedDictation) {
+  check(
+    solutionOf(groupedDictation).join(' ') === '654 32 18',
+    `"654 32 18" debería reconstruirse en tres posiciones (es: ${solutionOf(groupedDictation).join(' | ')})`
+  );
+}
+
+// (c) Un precio dicho "catorce con noventa": dos posiciones y "con" FIJO entre
+//     ellas. El nexo no es una casilla: no hay nada que discriminar en él.
+const SPOKEN_PRICE = [
+  { speaker: 'Cajera', text: 'Son catorce con noventa, por favor.' },
+  { speaker: 'Cliente', text: 'Aquí tiene. Muchas gracias.' }
+];
+const priceDictation = buildDictation(SPOKEN_PRICE, 'price');
+check(!!priceDictation, 'un precio dicho con palabras debería producir un dictado');
+if (priceDictation) {
+  check(
+    priceDictation.fields.length === 2,
+    `"catorce con noventa" son dos posiciones (son: ${priceDictation.fields.length})`
+  );
+  check(
+    (priceDictation.separators || []).join('') === 'con',
+    `"con" debería ser una pieza fija, no un campo (separadores: ${JSON.stringify(priceDictation.separators)})`
+  );
+  check(
+    verifyExercise(priceDictation, buildTranscriptIndex(SPOKEN_PRICE)).ok,
+    'el dictado del precio no verifica'
+  );
+}
+
+// (d) Una hora dicha "a las cinco y media". Antes no existía para ningún motor:
+//     "cinco" sola no llegaba al umbral de tramo numérico, así que una lección
+//     de "reservar una cita" salía sin un solo ejercicio sobre la hora.
+const SPOKEN_TIME = [
+  { speaker: 'Recepción', text: '¿Le viene bien el martes?' },
+  { speaker: 'Paciente', text: 'Sí, a las cinco y media me va perfecto.' }
+];
+const timeDictation = buildDictation(SPOKEN_TIME, 'time');
+check(!!timeDictation, 'una hora dicha "cinco y media" debería producir un dictado');
+if (timeDictation) {
+  check(
+    solutionOf(timeDictation).join(' ') === 'cinco media',
+    `la hora debería reconstruirse como "cinco" + "media" (es: ${solutionOf(timeDictation).join(' | ')})`
+  );
+  check(
+    verifyExercise(timeDictation, buildTranscriptIndex(SPOKEN_TIME)).ok,
+    'el dictado de la hora no verifica'
+  );
+}
+
+// (e) Un correo dictado con "arroba" y "punto": las piezas son las palabras y
+//     los nexos son fijos. La primera pieza es la que va ANTES del arroba.
+const SPOKEN_EMAIL = [
+  { speaker: 'Empleado', text: '¿Me deja un correo de contacto?' },
+  { speaker: 'Clienta', text: 'Sí, es marta punto ruiz arroba correo punto com.' }
+];
+const emailDictation = buildDictation(SPOKEN_EMAIL, 'email');
+check(!!emailDictation, 'un correo dictado con "arroba" debería producir un dictado');
+if (emailDictation) {
+  check(
+    solutionOf(emailDictation).join(' ') === 'marta ruiz correo com',
+    `el correo debería reconstruirse entero desde la primera pieza (es: ${solutionOf(emailDictation).join(' | ')})`
+  );
+  check(
+    (emailDictation.separators || []).includes('arroba'),
+    `"arroba" debería ser una pieza fija (separadores: ${JSON.stringify(emailDictation.separators)})`
+  );
+  check(
+    verifyExercise(emailDictation, buildTranscriptIndex(SPOKEN_EMAIL)).ok,
+    'el dictado del correo no verifica'
+  );
+}
+
+// (f) Y "en punto" NO es una dirección: el nexo suelto no basta, hace falta un
+//     arroba de verdad o dos nombres de letra inequívocos.
+const NOT_AN_EMAIL = [
+  { speaker: 'A', text: 'Nos vemos a las nueve en punto en la puerta del cine.' },
+  { speaker: 'B', text: 'De acuerdo, allí estaré sin falta.' }
+];
+const notEmail = buildDictation(NOT_AN_EMAIL, 'email');
+if (notEmail) {
+  check(
+    !solutionOf(notEmail).join(' ').includes('en'),
+    `"en punto" no debería leerse como una dirección (salió: ${solutionOf(notEmail).join(' | ')})`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 7. El formato manda y el blueprint es la lección
+// ---------------------------------------------------------------------------
+// Los dos agujeros por los que se colaban las opciones múltiples vagas: un
+// ejercicio del modelo ocupaba el slot sólo por traer su slotId, sin mirar el
+// tipo; y lo que devolvía de más se anexaba al final de la lección.
+
+const VAGUE_MC = {
+  id: 'modelo_1',
+  type: 'multiple_choice',
+  slotId: 't-dictado',
+  question: '¿Cuál era el número de teléfono?',
+  options: [{ id: 'a', text: 'un móvil' }, { id: 'b', text: 'un fijo' }],
+  correctAnswer: 'a',
+  explanation: ''
+};
+
+const substituted = fillMissingSlots([VAGUE_MC], [dictationSlot('phone')], SPOKEN_PHONE);
+check(
+  substituted.length === 1 && substituted[0].type === 'dictation',
+  `una opción múltiple etiquetada con el slotId del dato no debería ocupar ese slot (salió: ${substituted.map(e => e.type).join(', ')})`
+);
+
+const EXTRA_MC = { ...VAGUE_MC, id: 'modelo_2', slotId: 'inventado' };
+const withLeftovers = fillMissingSlots([EXTRA_MC], [dictationSlot('phone')], SPOKEN_PHONE);
+check(
+  withLeftovers.length === 1,
+  `los ejercicios fuera del blueprint deberían descartarse (salieron ${withLeftovers.length})`
+);
+
+// Y un ejercicio del modelo del formato correcto sí entra cuando el motor no
+// encuentra material: `preferEngine` da prioridad, no exclusividad.
+const NO_DATA = [
+  { speaker: 'A', text: 'Qué buen día hace hoy, ¿no te parece?' },
+  { speaker: 'B', text: 'Sí, precioso. Vamos a dar una vuelta.' }
+];
+const MODEL_DICTATION = {
+  id: 'modelo_3',
+  type: 'dictation',
+  slotId: 't-dictado',
+  question: 'Reconstruí',
+  fields: [
+    { id: 'd1', label: '1', options: [{ id: 'd1a', text: 'buen' }, { id: 'd1b', text: 'bien' }] },
+    { id: 'd2', label: '2', options: [{ id: 'd2a', text: 'día' }, { id: 'd2b', text: 'lía' }] }
+  ],
+  separators: [''],
+  correctAnswer: { d1: 'd1a', d2: 'd2a' },
+  explanation: ''
+};
+const fallenBack = fillMissingSlots([MODEL_DICTATION], [dictationSlot('phone')], NO_DATA);
+check(
+  fallenBack.length === 1 && fallenBack[0].id === 'modelo_3',
+  'sin material en el audio, el ejercicio del modelo debería cubrir el slot con preferEngine'
+);
 
 // ---------------------------------------------------------------------------
 

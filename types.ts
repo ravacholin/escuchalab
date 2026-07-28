@@ -111,6 +111,7 @@ export type ExerciseType =
   | 'matching'             // emparejamiento biyectivo de dos columnas
   | 'scale'                // eje ordinal (termómetro de postura/certeza)
   | 'data_capture'         // ficha de datos con desplegables casi idénticos
+  | 'dictation'            // reconstrucción exacta del dato dictado, elemento a elemento
   | 'minimal_pairs'        // ¿qué oíste? contrastes fónicos
   | 'spot_the_difference'  // caza el cambio: dictado sin escribir
   | 'chunk_order';         // reconstruir UNA frase por grupos fónicos
@@ -155,8 +156,16 @@ export interface Exercise {
   textWithGaps?: string;
   gapOptions?: Record<string, ExerciseOption[]>;
 
-  // Ficha de datos / pares mínimos
+  // Ficha de datos / pares mínimos / dictado
   fields?: ExerciseField[];
+
+  /**
+   * `dictation`: piezas fijas que van ENTRE dos campos y que el alumno no elige
+   * ("catorce **con** noventa", "ana **arroba** correo **punto** com"). Se
+   * muestran como texto entre los controles y cuentan para comprobar que la
+   * secuencia reconstruida es la que suena. Longitud: `fields.length - 1`.
+   */
+  separators?: string[];
 
   // Caza el cambio
   tokens?: ExerciseToken[];

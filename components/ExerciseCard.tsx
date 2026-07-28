@@ -183,6 +183,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
           case 'scale':
           case 'cloze':
           case 'data_capture':
+          case 'dictation':
           case 'minimal_pairs':
           case 'true_false_notgiven':
               return isAnswerMapCorrect();
@@ -217,6 +218,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
           case 'true_false_notgiven':
                return Object.keys(answersMap).length === (safeExercise.rows?.length || 0);
           case 'data_capture':
+          case 'dictation':
           case 'minimal_pairs':
                return Object.keys(answersMap).length === (safeExercise.fields?.length || 0);
           case 'cloze':
@@ -756,6 +758,90 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
   };
 
   /**
+   * RECONSTRUIR EL DATO. Comparte estructura con la ficha (campo → opción) pero
+   * no se puede presentar como ella: la ficha apila desplegables a ancho
+   * completo, y un teléfono de nueve piezas serían nueve filas donde se pierde
+   * por completo que son UN dato. Aquí van en línea, en el orden en que suenan,
+   * con las piezas fijas ("con", "arroba") intercaladas como texto.
+   */
+  const renderDictation = () => {
+    const fields = safeExercise.fields || [];
+    const correctMap = (safeExercise.correctAnswer as Record<string, string>) || {};
+    const separators: string[] = Array.isArray(safeExercise.separators) ? safeExercise.separators : [];
+
+    if (fields.length === 0) {
+        return (
+            <div className="p-8 flex flex-col items-center justify-center text-zinc-500">
+                <AlertCircle size={32} className="mb-2" />
+                <p className="font-mono text-xs uppercase">Error de datos: no hay posiciones</p>
+            </div>
+        );
+    }
+
+    const solution = fields
+        .map((f: any) => (f.options.find((o: any) => o.id === correctMap[f.id]) || {}).text || '?')
+        .reduce((acc: string, text: string, i: number) => {
+            const glue = i > 0 && separators[i - 1] ? ` ${separators[i - 1]} ` : i > 0 ? ' ' : '';
+            return `${acc}${glue}${text}`;
+        }, '');
+
+    return (
+        <div className="p-6">
+            <div className="flex flex-wrap items-end gap-x-2 gap-y-4">
+                {fields.map((field: any, i: number) => {
+                    const selected = answersMap[field.id] || '';
+                    const correctId = correctMap[field.id];
+                    const isFieldCorrect = isSubmitted && selected === correctId;
+
+                    let boxClass = 'border-zinc-700 bg-black text-white';
+                    if (isSubmitted) {
+                        boxClass = isFieldCorrect
+                            ? 'border-green-500 bg-green-500/10 text-green-400'
+                            : 'border-red-500 bg-red-500/10 text-red-400';
+                    }
+
+                    return (
+                        <React.Fragment key={field.id}>
+                            {i > 0 && separators[i - 1] && (
+                                <span className="font-mono text-sm text-zinc-500 pb-2 select-none">
+                                    {separators[i - 1]}
+                                </span>
+                            )}
+                            <div className="flex flex-col gap-1">
+                                <span className="font-mono text-[10px] text-zinc-600 tracking-widest">
+                                    {field.label}
+                                </span>
+                                <select
+                                    value={selected}
+                                    onChange={(e) => setAnswersMap(prev => ({ ...prev, [field.id]: e.target.value }))}
+                                    disabled={isSubmitted}
+                                    aria-label={`Posición ${field.label}`}
+                                    className={`border ${boxClass} font-mono text-base px-2 py-2 outline-none focus:border-white disabled:opacity-80 transition-colors duration-300`}
+                                >
+                                    <option value="" disabled>—</option>
+                                    {field.options.map((o: any) => (
+                                        <option key={o.id} value={o.id} className="bg-black text-white">{o.text}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </React.Fragment>
+                    );
+                })}
+            </div>
+
+            {isSubmitted && (
+                <div className="mt-6 border-t border-zinc-800 pt-4">
+                    <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 mb-1">
+                        Se dictó
+                    </p>
+                    <p className="font-mono text-lg text-white break-words">{solution}</p>
+                </div>
+            )}
+        </div>
+    );
+  };
+
+  /**
    * EMPAREJAR. La biyección se impone en la propia interfaz: una opción ya usada
    * queda deshabilitada en las demás filas. Así se evita la matriz de radios de
    * N×N, que para 4 problemas y 4 soluciones era ilegible.
@@ -984,6 +1070,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
           case 'cloze': return renderCloze();
           case 'data_capture':
           case 'minimal_pairs': return renderFields();
+          case 'dictation': return renderDictation();
           case 'spot_the_difference': return renderSpotTheDifference();
           default: return <div className="p-4 text-red-500 border border-red-900 bg-red-950/10 font-mono text-xs">ERR_UNKNOWN_TYPE: {safeExercise.type}</div>;
       }
