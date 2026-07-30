@@ -12,7 +12,7 @@ import AuthScreen from './components/AuthScreen';
 import SelectInput from './components/SelectInput';
 import MatrixSelector from './components/MatrixSelector';
 import { SCENARIO_DATABASE, ScenarioContext, ScenarioAction } from './data/scenarios';
-import { ArrowRight, AlertTriangle, BookOpen, Mic2, Layout, Search, Key, RefreshCw } from 'lucide-react';
+import { ArrowRight, AlertTriangle, BookOpen, ChevronDown, ChevronUp, Mic2, Layout, Search, Key, RefreshCw } from 'lucide-react';
 
 const LEVELS = Object.values(Level);
 const LENGTHS = Object.values(Length);
@@ -204,6 +204,39 @@ const App: React.FC = () => {
     // La etapa de anticipación se responde ANTES de reproducir; el resto pierde
     // sentido si se lee la transcripción primero.
     const hasAnticipationStage = stagedExercises.some(g => g.stage === 'anticipacion');
+
+    /**
+     * Etapas desplegadas y ejercicios ya corregidos.
+     *
+     * La lección se pintaba entera en un scroll único: cinco o seis tarjetas
+     * encadenadas, varias de ellas tablas, antes de que el alumno hubiera
+     * decidido siquiera por dónde empezar. Buena parte de lo que se percibía
+     * como una carga inmanejable era eso, con independencia del contenido. Ahora
+     * se abre sólo la primera etapa y cada cabecera lleva su contador, así que el
+     * recorrido se ve de un vistazo y se avanza por etapas.
+     */
+    const [openStages, setOpenStages] = useState<Set<ListeningStage>>(new Set());
+    const [answered, setAnswered] = useState<Record<string, boolean>>({});
+
+    // Cada lección nueva reinicia el recorrido: se abre su primera etapa y se
+    // olvidan las respuestas de la anterior.
+    useEffect(() => {
+        setAnswered({});
+        setOpenStages(new Set(stagedExercises.length > 0 ? [stagedExercises[0].stage] : []));
+    }, [stagedExercises]);
+
+    const toggleStage = useCallback((stage: ListeningStage) => {
+        setOpenStages(prev => {
+            const next = new Set(prev);
+            if (next.has(stage)) next.delete(stage);
+            else next.add(stage);
+            return next;
+        });
+    }, []);
+
+    const markAnswered = useCallback((key: string, correct: boolean) => {
+        setAnswered(prev => ({ ...prev, [key]: correct }));
+    }, []);
 
     // --- EFFECT: COERCE INVALID LEVEL FOR NARRATIVE FORMATS ---
     // Podcast/Monólogo no tienen A0: si el usuario cambia a esos formatos estando en A0,
@@ -729,31 +762,55 @@ const App: React.FC = () => {
                                         No se pudo construir ningún ejercicio verificable para este audio.
                                     </p>
                                 )}
-                                {stagedExercises.map(group => (
-                                    <section key={group.stage} className="mb-16">
-                                        <div className="mb-10 border-b border-zinc-800 pb-4">
+                                {stagedExercises.map(group => {
+                                    const isOpen = openStages.has(group.stage);
+                                    const keyOf = (ex: Exercise, idx: number) => ex.id || `${group.stage}_${idx}`;
+                                    const done = group.items.filter((ex, idx) => keyOf(ex, idx) in answered).length;
+                                    return (
+                                    <section key={group.stage} className={isOpen ? 'mb-16' : 'mb-4'}>
+                                        <button
+                                            type="button"
+                                            onClick={() => toggleStage(group.stage)}
+                                            aria-expanded={isOpen}
+                                            className={`w-full text-left border-b border-zinc-800 pb-4 group ${isOpen ? 'mb-10' : ''}`}
+                                        >
                                             <div className="flex items-baseline gap-3 flex-wrap">
                                                 <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-600">
                                                     {String(group.position).padStart(2, '0')}
                                                 </span>
-                                                <h3 className="font-display text-2xl uppercase font-bold text-white">
+                                                <h3 className="font-display text-2xl uppercase font-bold text-white group-hover:text-zinc-300 transition-colors">
                                                     {STAGE_META[group.stage].label}
                                                 </h3>
+                                                <span className={`font-mono text-[10px] uppercase tracking-widest ml-auto ${done === group.items.length ? 'text-emerald-500' : 'text-zinc-600'}`}>
+                                                    {done}/{group.items.length} resueltos
+                                                </span>
+                                                {isOpen
+                                                    ? <ChevronUp size={16} className="text-zinc-600 flex-shrink-0" />
+                                                    : <ChevronDown size={16} className="text-zinc-600 flex-shrink-0" />}
                                             </div>
-                                            <p className="font-mono text-xs text-zinc-500 mt-2 leading-relaxed">
-                                                {STAGE_META[group.stage].hint}
-                                            </p>
+                                            {isOpen && (
+                                                <p className="font-mono text-xs text-zinc-500 mt-2 leading-relaxed">
+                                                    {STAGE_META[group.stage].hint}
+                                                </p>
+                                            )}
+                                        </button>
+                                        {/* Ocultas, no desmontadas: el estado de corrección vive
+                                            dentro de cada tarjeta, así que desmontarlas haría que
+                                            plegar una etapa para mirar otra borrase lo respondido. */}
+                                        <div hidden={!isOpen}>
+                                            {group.items.map((ex, idx) => (
+                                                <ExerciseCard
+                                                    key={keyOf(ex, idx)}
+                                                    exercise={ex}
+                                                    index={idx}
+                                                    dialogue={state.lessonPlan?.dialogue}
+                                                    onAnswered={correct => markAnswered(keyOf(ex, idx), correct)}
+                                                />
+                                            ))}
                                         </div>
-                                        {group.items.map((ex, idx) => (
-                                            <ExerciseCard
-                                                key={ex.id || `${group.stage}_${idx}`}
-                                                exercise={ex}
-                                                index={idx}
-                                                dialogue={state.lessonPlan?.dialogue}
-                                            />
-                                        ))}
                                     </section>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>

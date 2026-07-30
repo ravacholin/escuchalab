@@ -14,6 +14,13 @@ interface ExerciseCardProps {
   index: number;
   /** Turnos del audio, para poder citar la fuente de la respuesta al corregir. */
   dialogue?: DialogueLine[];
+  /**
+   * Se avisa al corregir para que la etapa pueda mostrar cuántos ejercicios
+   * lleva resueltos el alumno sin desplegarlos todos. El estado de la tarjeta
+   * sigue siendo suyo: esto solo lo informa hacia arriba. Quién es esta tarjeta
+   * lo decide quien la monta, no el `id` que haya devuelto el modelo.
+   */
+  onAnswered?: (correct: boolean) => void;
 }
 
 /** Formatos que se resuelven rellenando un mapa campo → opción. */
@@ -27,7 +34,7 @@ const TABLE_TYPES = new Set([
   'true_false_notgiven'
 ]);
 
-const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }) => {
+const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, onAnswered }) => {
   // --- ROBUST DATA NORMALIZATION ---
   // This ensures that even if the AI returns malformed data (missing IDs), the UI won't break.
   const safeExercise = useMemo(() => {
@@ -105,6 +112,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue }
 
   const handleSubmit = () => {
     setIsSubmitted(true);
+    onAnswered?.(isCorrect());
   };
 
   // --- VALIDATION HELPERS ---

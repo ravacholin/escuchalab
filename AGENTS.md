@@ -33,7 +33,7 @@
 ## Testing
 
 - `npm test` runs the type check plus two assertion scripts that need no API key or network:
-  - `npm run check:syllabus` — pedagogical invariants of `data/listeningSyllabus.ts` across every level × text-type × mode combination.
+  - `npm run check:syllabus` — pedagogical invariants of `data/listeningSyllabus.ts` across every level × text-type × mode × **length** combination, including the three budgets (cards, discrete answers, reading load).
   - `npm run check:exercises` — the answer-key verifier (`services/exerciseVerification.ts`) and the deterministic engines.
 - There is no component test runner yet. If you add one, wire it into the `test` script and colocate the tests near the code (e.g., `components/__tests__/`).
 

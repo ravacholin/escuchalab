@@ -47,6 +47,10 @@ const check = (condition, message) => {
 const S = await loadSyllabus();
 const {
   getBlueprint,
+  answerCost,
+  readingLoad,
+  totalAnswers,
+  totalReadingLoad,
   FORMAT_RULES,
   ENGINE_IDS,
   STAGE_ORDER,
@@ -74,30 +78,84 @@ const MODES = {
   Vocabulary: 'Ampliar Vocabulario',
   AccentChallenge: 'Adivina el Acento'
 };
+const LENGTHS = {
+  Short: 'Corto (4-6 turnos)',
+  Medium: 'Medio (8-12 turnos)',
+  Long: 'Largo (14+ turnos)'
+};
+const LENGTH_ORDER = [LENGTHS.Short, LENGTHS.Medium, LENGTHS.Long];
 
 const SINGLE_SPEAKER = [TEXT_TYPES.RadioNews, TEXT_TYPES.Monologue];
 // A0 no se ofrece en los formatos narrativos (ver `availableLevels` en App.tsx).
 const NARRATIVE = [TEXT_TYPES.PodcastInterview, TEXT_TYPES.Monologue];
 
 /**
- * Presupuesto de ejercicios por nivel. No es una preferencia estética: en A0 el
- * alumno decodifica datos, no cláusulas, y cada ejercicio de más es una tarea de
- * lectura en una lengua que todavía no lee. El techo baja según baja el nivel
- * para que no vuelva a colarse una lección de seis ejercicios de la que sólo uno
- * trabaje el dato dictado.
+ * Presupuesto de TARJETAS por nivel y duración del audio. No es una preferencia
+ * estética: en A0 el alumno decodifica datos, no cláusulas, y cada ejercicio de
+ * más es una tarea de lectura en una lengua que todavía no lee.
  *
- * El techo de B1-B2 y C1 bajó de 9 y 10 a 6: esos dos niveles nunca se habían
- * recortado, y una lección de C1 pedía ≈38 respuestas discretas repartidas en
- * diez tarjetas, con dos clasificaciones de la MISMA habilidad sobre el mismo
- * audio. Más ejercicios no es más escucha; a partir de cierto punto es sólo más
- * lectura.
+ * La columna de duración es lo que faltaba. Antes el techo era un único número
+ * por nivel, así que un diálogo Corto de seis turnos —el valor por defecto de la
+ * app— recibía las mismas seis tarjetas que uno de catorce. No había material en
+ * el audio para sostenerlas: o el modelo se inventaba el ejercicio, o el
+ * verificador lo descartaba y la lección encogía sin que el alumno supiera por qué.
  */
 const MAX_SLOTS = {
-  [LEVELS.Intro]: 3,
-  [LEVELS.Beginner]: 4,
-  [LEVELS.Intermediate]: 6,
-  [LEVELS.Advanced]: 6
+  [LEVELS.Intro]: { [LENGTHS.Short]: 3, [LENGTHS.Medium]: 3, [LENGTHS.Long]: 3 },
+  [LEVELS.Beginner]: { [LENGTHS.Short]: 3, [LENGTHS.Medium]: 4, [LENGTHS.Long]: 4 },
+  [LEVELS.Intermediate]: { [LENGTHS.Short]: 4, [LENGTHS.Medium]: 5, [LENGTHS.Long]: 6 },
+  [LEVELS.Advanced]: { [LENGTHS.Short]: 4, [LENGTHS.Medium]: 5, [LENGTHS.Long]: 6 }
 };
+
+/**
+ * Presupuesto de RESPUESTAS DISCRETAS por nivel. La tarjeta era la unidad
+ * equivocada: tres tarjetas pueden ser cuatro respuestas o veinte, según si son
+ * opciones múltiples o tablas. B1-B2 y C1 pedían ≈20 y ≈21 con seis tarjetas.
+ */
+const MAX_ANSWERS = {
+  [LEVELS.Intro]: 11,
+  [LEVELS.Beginner]: 13,
+  [LEVELS.Intermediate]: 16,
+  [LEVELS.Advanced]: 15
+};
+
+/**
+ * Presupuesto de LECTURA: unidades de texto de longitud frase que hay que leer
+ * para resolver la lección entera (ver `readingLoad()` en el syllabus).
+ *
+ * Es el techo que de verdad faltaba. Una lección de B1 pedía ≈34 unidades y una
+ * de C1 ≈32: una escala de 4 citas × 4 puntos y una clasificación de 4 palabras
+ * × 3 columnas son, juntas, quince frases en español que hay que leer y cruzar
+ * entre sí. Pasado ese punto la tarea deja de medir comprensión auditiva y mide
+ * comprensión lectora, que es justo lo que la app NO quiere evaluar.
+ */
+const MAX_READING = {
+  [LEVELS.Intro]: 10,
+  [LEVELS.Beginner]: 15,
+  [LEVELS.Intermediate]: 24,
+  [LEVELS.Advanced]: 26
+};
+
+/**
+ * Formatos cuya clave se comprueba contra la transcripción en
+ * `services/exerciseVerification.ts`. Un slot con motor determinista o con uno de
+ * estos formatos es un slot RESPALDADO: o se demuestra contra el audio, o no
+ * llega al alumno.
+ *
+ * `matching`, `scale`, `classification` y los juicios no verifican nada contra el
+ * audio ni tienen motor, y eran cinco de los seis slots de B1-B2 y de C1: los
+ * niveles con más ejercicios eran los menos fiables, y su número de tarjetas
+ * dependía enteramente de que el modelo acertara.
+ */
+const VERIFIED_FORMATS = [
+  'cloze',
+  'chunk_order',
+  'dictation',
+  'data_capture',
+  'minimal_pairs',
+  'spot_the_difference'
+];
+const isBacked = slot => !!slot.engineFallback || VERIFIED_FORMATS.includes(slot.format);
 
 /** Mecánicas cuya carga cognitiva las hace impropias de un principiante absoluto. */
 const FORBIDDEN_AT_A0 = ['ordering', 'matching', 'scale', 'true_false_notgiven', 'spot_the_difference'];
@@ -131,23 +189,46 @@ for (const level of Object.values(LEVELS)) {
   for (const textType of Object.values(TEXT_TYPES)) {
     if (level === LEVELS.Intro && NARRATIVE.includes(textType)) continue;
     for (const mode of Object.values(MODES)) {
-      combos.push({ level, textType, mode });
+      for (const length of LENGTH_ORDER) {
+        combos.push({ level, textType, mode, length });
+      }
     }
   }
 }
 
 const blueprintsByKey = new Map();
 
-for (const { level, textType, mode } of combos) {
-  const where = `${level} · ${textType} · ${mode}`;
-  const slots = getBlueprint(level, textType, mode);
-  blueprintsByKey.set(`${level}|${textType}|${mode}`, slots);
+for (const { level, textType, mode, length } of combos) {
+  const where = `${level} · ${textType} · ${mode} · ${length}`;
+  const slots = getBlueprint(level, textType, mode, undefined, length);
+  blueprintsByKey.set(`${level}|${textType}|${mode}|${length}`, slots);
+
+  const answers = totalAnswers(slots);
+  const reading = totalReadingLoad(slots);
 
   check(slots.length >= 3, `${where}: solo ${slots.length} ejercicios (mínimo 3)`);
   check(
-    slots.length <= MAX_SLOTS[level],
-    `${where}: ${slots.length} ejercicios (máximo ${MAX_SLOTS[level]} en este nivel)`
+    slots.length <= MAX_SLOTS[level][length],
+    `${where}: ${slots.length} ejercicios (máximo ${MAX_SLOTS[level][length]})`
   );
+  check(
+    answers <= MAX_ANSWERS[level],
+    `${where}: ${answers} respuestas discretas (máximo ${MAX_ANSWERS[level]} en este nivel)`
+  );
+  check(
+    reading <= MAX_READING[level],
+    `${where}: ${reading.toFixed(2)} unidades de lectura (máximo ${MAX_READING[level]} en este nivel)`
+  );
+
+  // Ninguna lección puede quedar ENTERAMENTE en manos del modelo: al menos un
+  // slot tiene que ser demostrable contra el audio (motor determinista o formato
+  // con verificación de fidelidad). El mínimo es uno y no dos a propósito: en C1
+  // el objeto de estudio es la inferencia y el matiz, que por definición no se
+  // derivan de la transcripción con una regla, así que exigir un segundo slot
+  // respaldado sería exigir un ejercicio de decodificación que el nivel no
+  // necesita. Donde sí se puede, se hace: A0, A1-A2 y B1-B2 llevan dos.
+  const backed = slots.filter(isBacked).length;
+  check(backed >= 1, `${where}: ningún slot respaldado contra la transcripción`);
 
   const seen = new Set();
   const stages = new Set();
@@ -229,11 +310,46 @@ for (const { level, textType, mode } of combos) {
   check(skills.size >= 3, `${where}: solo entrena ${skills.size} habilidades distintas`);
 }
 
-// 6. El modo Vocabulario debe escalar por nivel: era el fallo más visible del
+// 6. Cambiar la duración cambia CUÁNTO se trabaja, nunca QUÉ se trabaja: el
+//    blueprint de Corto tiene que ser un subconjunto del de Medio, y el de Medio
+//    del de Largo. Sin esto, alargar el audio podría hacer desaparecer el
+//    ejercicio central del nivel y el alumno no tendría forma de notarlo.
+for (const { level, textType, mode } of combos.filter(c => c.length === LENGTHS.Short)) {
+  const at = `${level} · ${textType} · ${mode}`;
+  const ids = LENGTH_ORDER.map(
+    length => new Set((blueprintsByKey.get(`${level}|${textType}|${mode}|${length}`) || []).map(s => s.slotId))
+  );
+
+  for (let i = 0; i + 1 < ids.length; i++) {
+    const missing = [...ids[i]].filter(id => !ids[i + 1].has(id));
+    check(
+      missing.length === 0,
+      `${at}: al pasar de "${LENGTH_ORDER[i]}" a "${LENGTH_ORDER[i + 1]}" desaparece ${missing.join(', ')}`
+    );
+  }
+}
+
+// 7. B1-B2 y C1 no pueden trabajarse igual. Corrían las mismas seis mecánicas
+//    sobre las mismas habilidades y con los mismos ítems, y lo único que
+//    cambiaba era la prosa del brief: la pregunta "¿qué se trabaja en cada
+//    nivel?" no tenía respuesta distinta para los dos niveles más altos.
+for (const length of LENGTH_ORDER) {
+  const signature = level =>
+    (blueprintsByKey.get(`${level}|${TEXT_TYPES.Dialogue}|${MODES.Standard}|${length}`) || [])
+      .map(s => `${s.format}:${s.skill}`)
+      .sort()
+      .join(',');
+  check(
+    signature(LEVELS.Intermediate) !== signature(LEVELS.Advanced),
+    `${length}: B1-B2 y C1 entrenan exactamente las mismas habilidades con los mismos formatos`
+  );
+}
+
+// 8. El modo Vocabulario debe escalar por nivel: era el fallo más visible del
 //    sistema anterior, donde un A0 y un C1 recibían ejercicios idénticos.
 const vocabByLevel = Object.values(LEVELS).map(level => ({
   level,
-  ids: (blueprintsByKey.get(`${level}|${TEXT_TYPES.Dialogue}|${MODES.Vocabulary}`) || [])
+  ids: (blueprintsByKey.get(`${level}|${TEXT_TYPES.Dialogue}|${MODES.Vocabulary}|${LENGTHS.Long}`) || [])
     .map(s => s.slotId)
     .join(',')
 }));
@@ -246,10 +362,11 @@ for (let i = 0; i < vocabByLevel.length; i++) {
   }
 }
 
-// 7. Un boletín de radio y un diálogo del mismo nivel no pueden trabajarse igual.
+// 9. Un boletín de radio y un diálogo del mismo nivel no pueden trabajarse igual.
 for (const level of Object.values(LEVELS)) {
-  const dialogue = blueprintsByKey.get(`${level}|${TEXT_TYPES.Dialogue}|${MODES.Standard}`) || [];
-  const news = blueprintsByKey.get(`${level}|${TEXT_TYPES.RadioNews}|${MODES.Standard}`) || [];
+  const key = tt => `${level}|${tt}|${MODES.Standard}|${LENGTHS.Long}`;
+  const dialogue = blueprintsByKey.get(key(TEXT_TYPES.Dialogue)) || [];
+  const news = blueprintsByKey.get(key(TEXT_TYPES.RadioNews)) || [];
   if (dialogue.length === 0 || news.length === 0) continue;
   const sameBriefs = dialogue.map(s => s.brief).join('|') === news.map(s => s.brief).join('|');
   check(!sameBriefs, `${level}: diálogo y noticiero reciben exactamente las mismas consignas`);
@@ -263,4 +380,18 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(`✓ syllabus correcto en las ${total} combinaciones de nivel × tipo de audio × modo`);
+// La carga real de cada nivel, para que el presupuesto se pueda LEER y no haya
+// que deducirlo de las tablas de slots.
+console.log('');
+console.log('  nivel                      corto        medio        largo    (tarjetas/respuestas/lectura)');
+for (const level of Object.values(LEVELS)) {
+  const cells = LENGTH_ORDER.map(length => {
+    const slots = blueprintsByKey.get(`${level}|${TEXT_TYPES.Dialogue}|${MODES.Standard}|${length}`) || [];
+    return `${slots.length}/${totalAnswers(slots)}/${totalReadingLoad(slots).toFixed(1)}`.padStart(12);
+  });
+  console.log(`  ${level.padEnd(24)}${cells.join(' ')}`);
+}
+console.log('');
+console.log(
+  `✓ syllabus correcto en las ${total} combinaciones de nivel × tipo de audio × modo × duración`
+);
