@@ -1,4 +1,4 @@
-import { AppMode, ExerciseOption, ExerciseType, Level, ListeningSkill, ListeningStage, TextType } from '@/types';
+import { AppMode, ExerciseOption, ExerciseType, Length, Level, ListeningSkill, ListeningStage, TextType } from '@/types';
 import { DataPointKind, dataPointProfile } from '@/data/dataPoints';
 
 /**
@@ -23,6 +23,12 @@ import { DataPointKind, dataPointProfile } from '@/data/dataPoints';
  *      discursiva adecuada (`FORMAT_RULES[...].textTypes`).
  *   3. Los ejercicios que presuponen interacción entre dos hablantes se eliminan
  *      automáticamente en audios de un solo hablante (`requiresTwoSpeakers`).
+ *
+ * Y una cuarta que es de CANTIDAD y no de tipo: la lección crece con el audio
+ * (`minLength`). Antes no lo hacía, y un diálogo Corto de seis turnos —el valor
+ * por defecto de la app— recibía las mismas seis tarjetas y las mismas veinte
+ * respuestas que uno de catorce. No había material para sostenerlas: o el modelo
+ * se lo inventaba, o el verificador lo tiraba y la lección encogía sin avisar.
  */
 
 // ---------------------------------------------------------------------------
@@ -288,6 +294,21 @@ export interface ExerciseSlot {
   format: ExerciseType;
   /** Filas / ítems / opciones esperados. */
   items: number;
+  /**
+   * Columnas de los formatos que se resuelven sobre una tabla (`classification`,
+   * `scale`, `matching`, juicios). Vivía sólo en la prosa del `brief`, así que no
+   * había forma de MEDIR lo que costaba leer una tarjeta: una escala de 4 filas
+   * son 4 respuestas pero 8 unidades de texto. Por defecto, `DEFAULT_COLUMNS`.
+   */
+  columns?: number;
+  /**
+   * Naturaleza de las filas: `'word'` cuando son palabras o expresiones sueltas
+   * (todo el modo Vocabulario, el léxico dialectal) y `'phrase'` cuando son
+   * afirmaciones o citas de una línea. Sin esta distinción, emparejar cuatro
+   * palabras con su paráfrasis y emparejar cuatro problemas con su solución
+   * costarían lo mismo, y no cuestan ni parecido.
+   */
+  rowScale?: 'word' | 'phrase';
   /** Instrucción concreta ya resuelta para el tipo de audio. */
   brief: string;
   engineFallback?: EngineId;
@@ -313,8 +334,121 @@ export interface ExerciseSlot {
 interface SlotTemplate extends Omit<ExerciseSlot, 'brief' | 'focus'> {
   brief: string;
   briefByTextType?: Partial<Record<TextType, string>>;
+  /**
+   * La habilidad cambia con el tipo de audio. `b-relaciones` empareja problemas
+   * con soluciones en un diálogo, pero datos con su FUENTE en un boletín: es
+   * `rol_fuente`, no `inferencia`. Sin esto, `textType` sólo cambiaba la
+   * redacción del brief y nunca lo que la lección declara entrenar.
+   */
+  skillByTextType?: Partial<Record<TextType, ListeningSkill>>;
+  /**
+   * Duración mínima del audio a partir de la cual aparece este slot. Por defecto
+   * `Corto`, o sea siempre. Es lo que hace que la lección escale: el núcleo del
+   * nivel entra en Corto y lo demás se gana con turnos de audio.
+   */
+  minLength?: Length;
   /** El slot gira alrededor del dato obligatorio: recibe `focus` y interpolación. */
   focusOnDataPoint?: boolean;
+}
+
+/** Orden creciente de duración; el índice es lo que compara `getBlueprint`. */
+const LENGTH_ORDER: Length[] = [Length.Short, Length.Medium, Length.Long];
+
+/** Columnas implícitas de cada formato de tabla cuando el slot no las declara. */
+const DEFAULT_COLUMNS: Partial<Record<ExerciseType, number>> = {
+  true_false: 2,
+  true_false_notgiven: 3,
+  classification: 3,
+  scale: 4
+};
+
+/** Columnas efectivas del slot: `matching` es biyectivo, así que son sus filas. */
+function columnCount(slot: Pick<ExerciseSlot, 'format' | 'items' | 'columns'>): number {
+  if (slot.columns) return slot.columns;
+  if (slot.format === 'matching') return slot.items;
+  return DEFAULT_COLUMNS[slot.format] ?? 0;
+}
+
+/**
+ * Respuestas discretas que el slot le pide al alumno.
+ *
+ * No es lo mismo que `items`: una opción múltiple de seis opciones es UNA
+ * respuesta, y un dictado de seis campos son seis. El presupuesto por nivel se
+ * contaba en tarjetas, que es la unidad equivocada — tres tarjetas pueden ser
+ * cuatro respuestas o veinte.
+ */
+export function answerCost(slot: Pick<ExerciseSlot, 'format' | 'items'>): number {
+  switch (slot.format) {
+    // Una sola decisión, tenga las opciones que tenga (aunque sea multirrespuesta:
+    // se corrige todo o nada, así que el alumno entrega una única respuesta).
+    case 'multiple_choice':
+      return 1;
+    default:
+      return slot.items;
+  }
+}
+
+/**
+ * Unidades de texto de longitud FRASE que hay que leer para resolver el slot.
+ *
+ * Es el coste que de verdad hacía inmanejable una lección de B1: seis tarjetas
+ * son veinte respuestas, pero también treinta y tantas frases en español que hay
+ * que leer y comparar entre sí antes de poder contestar. Pasado cierto punto la
+ * tarea deja de medir comprensión auditiva y mide comprensión lectora.
+ *
+ * Las unidades de nivel PALABRA (cifras de un dictado, pares mínimos, grupos
+ * fónicos, opciones de un hueco) pesan 0.25: son las que el nivel bajo puede
+ * permitirse justamente porque no hay que leer español corrido para procesarlas.
+ */
+export function readingLoad(slot: Pick<ExerciseSlot, 'format' | 'items' | 'columns' | 'rowScale'>): number {
+  const WORD = 0.25;
+  const cols = columnCount(slot);
+  // Las filas del modo Vocabulario son palabras sueltas; las de B1/C1, citas.
+  const rows = slot.items * (slot.rowScale === 'word' ? WORD : 1);
+
+  switch (slot.format) {
+    // Filas y columnas son texto que hay que cruzar; el eje se lee entero.
+    case 'classification':
+    case 'scale':
+      return rows + cols;
+    // Biyectivo: la columna derecha son paráfrasis que se comparan entre sí.
+    case 'matching':
+      return rows + slot.items;
+    // Las etiquetas de juicio (V/F/NO SE DICE) son fijas y se leen una vez.
+    case 'true_false':
+    case 'true_false_notgiven':
+      return rows + cols * WORD;
+    // Opciones y paráfrasis de una línea.
+    case 'multiple_choice':
+    case 'ordering':
+      return slot.items;
+    // Una frase portadora más las opciones sueltas de cada hueco.
+    case 'cloze':
+      return 1 + slot.items * 3 * WORD;
+    // Una sola frase que se lee entera y se marca encima.
+    case 'spot_the_difference':
+      return 1;
+    // Piezas de nivel palabra: cifras, letras, grupos fónicos.
+    case 'chunk_order':
+      return slot.items * WORD;
+    case 'minimal_pairs':
+      return slot.items * 2 * WORD;
+    case 'dictation':
+    case 'data_capture':
+      return slot.items * 3 * WORD;
+    default:
+      return slot.items;
+  }
+}
+
+/** Suma de respuestas discretas de una lección. */
+export function totalAnswers(slots: Pick<ExerciseSlot, 'format' | 'items'>[]): number {
+  return slots.reduce((sum, slot) => sum + answerCost(slot), 0);
+}
+
+/** Suma de unidades de lectura de una lección. */
+export function totalReadingLoad(slots: Pick<ExerciseSlot, 'format' | 'items' | 'columns'>[]): number {
+  return slots.reduce((sum, slot) => sum + readingLoad(slot), 0);
 }
 
 /**
@@ -330,10 +464,11 @@ function interpolate(brief: string, dataPoint?: DataPointKind): string {
 }
 
 function resolve(template: SlotTemplate, textType: TextType, dataPoint?: DataPointKind): ExerciseSlot {
-  const { briefByTextType, focusOnDataPoint, ...rest } = template;
+  const { briefByTextType, skillByTextType, minLength, focusOnDataPoint, ...rest } = template;
   const brief = briefByTextType?.[textType] ?? template.brief;
   return {
     ...rest,
+    skill: skillByTextType?.[textType] ?? template.skill,
     brief: focusOnDataPoint ? interpolate(brief, dataPoint) : brief,
     ...(focusOnDataPoint ? { focus: dataPoint ?? 'generic' } : {})
   };
@@ -416,14 +551,19 @@ const A0_SLOTS: SlotTemplate[] = [
 // queda. Los roles se nombran por su papel concreto (cliente/empleado), nunca
 // por etiquetas abstractas como "formal/informal", que son B1+.
 //
-// Son CUATRO ejercicios. Fueron nueve (≈36 respuestas) y después cinco. El que
-// sobra es el `ordering` de cuatro acciones parafraseadas: es la tarea de más
-// LECTURA del nivel —cuatro paráfrasis de una línea que hay que comparar entre
-// sí—, no tiene motor determinista (una paráfrasis automática no es verificable),
-// así que cuando el modelo falla el slot desaparece en silencio, y `a2-chunks` ya
-// entrena reconstruir un orden, además de forma literal. `estructura` pasa a
-// trabajarse a partir de B1. `matching` y `spot_the_difference` siguen usándose
-// en el modo Vocabulario y en B1+.
+// Son CUATRO ejercicios en Medio y Largo, TRES en Corto. Fueron nueve (≈36
+// respuestas) y después cinco. El que sobra es el `ordering` de cuatro acciones
+// parafraseadas: es la tarea de más LECTURA del nivel —cuatro paráfrasis de una
+// línea que hay que comparar entre sí—, no tiene motor determinista (una
+// paráfrasis automática no es verificable), así que cuando el modelo falla el
+// slot desaparece en silencio, y `a2-chunks` ya entrena reconstruir un orden,
+// además de forma literal. `estructura` pasa a trabajarse a partir de B1.
+// `matching` y `spot_the_difference` siguen usándose en el modo Vocabulario y
+// en B1+.
+//
+// El cloze de fórmulas es lo que se gana con la duración: en seis turnos hay una
+// fórmula rutinaria, no dos, y el núcleo del nivel —qué se quiere, el dato y la
+// segmentación de una frase— ya está entero en Corto.
 
 const A2_SLOTS: SlotTemplate[] = [
   {
@@ -477,6 +617,7 @@ const A2_SLOTS: SlotTemplate[] = [
     skill: 'colocacion_formula',
     format: 'cloze',
     items: 2,
+    minLength: Length.Medium,
     engineFallback: 'two_gap_cloze',
     brief:
       'Frase del audio con 2 huecos que caigan sobre una FÓRMULA rutinaria de la situación ("¿me pone…?", "¿cuánto le debo?", "un momentito"). Las 3 opciones de cada hueco son fórmulas del mismo tipo, todas gramaticales en ese lugar.'
@@ -486,19 +627,35 @@ const A2_SLOTS: SlotTemplate[] = [
 // ---------------------------------------------------------------------------
 // NIVEL B1-B2 — Intermedio
 // ---------------------------------------------------------------------------
-// El salto real es dejar de premiar el reconocimiento literal. Aquí manda la
-// inferencia puente, la distinción entre lo contradicho y lo no dicho, y la
-// gradación de la actitud.
+// El salto real es dejar de premiar el reconocimiento literal. La firma del
+// nivel es INFERIR EL PUENTE SIN SOBREINFERIR: el V/F/NO SE DICE es su ejercicio
+// insignia, porque es el único formato que castiga rellenar los huecos con lo
+// que uno esperaba oír.
 //
-// Son SEIS ejercicios (≈20 respuestas). Eran nueve y ≈32: este nivel nunca se
-// había recortado, mientras A0 y A1-A2 sí. Se han quitado los tres que no son
-// ninguna de las sub-habilidades que el nivel declara: el `ordering` de cinco
-// movimientos parafraseados (más lectura que escucha, y sin motor), el
-// caza-el-cambio de cuatro alteraciones sobre una frase de 15-25 palabras (la
-// tarjeta más cara de todas, y `segmentacion` ya se entrena en A1-A2) y la
-// reflexión metacognitiva de cierre. Los seis que quedan son exactamente
-// inferencia puente, V/F/NO SE DICE, actitud graduada, precisión léxica y
-// colocación.
+// Cuatro tarjetas en Corto, cinco en Medio, seis en Largo (9-13 respuestas).
+// Eran seis fijas y ≈20 respuestas, pero el número de respuestas nunca fue el
+// problema principal: eran ≈34 unidades de texto de longitud FRASE que había que
+// leer y cruzar. Una escala de 4 citas × 4 puntos y una clasificación de 4
+// palabras × 3 columnas son, juntas, quince frases que comparar; eso ya no mide
+// comprensión auditiva.
+//
+// Se han quitado dos:
+//   · `b-actitud` (scale). Graduar la postura en cuatro puntos ordinales es
+//     trabajo de C1, y aquí la inferencia ya la cubre el V/F/NO SE DICE. La
+//     escala pasa a ser firma EXCLUSIVA de C1 — antes B1 y C1 corrían las mismas
+//     seis mecánicas con los mismos ítems y sólo cambiaba la prosa del brief, así
+//     que la pregunta "¿qué se trabaja en cada nivel?" no tenía respuesta.
+//   · `b-precision` (classification). Sin motor, sin verificación contra la
+//     transcripción y siete unidades de lectura para construir un glosario; ese
+//     trabajo léxico es literalmente lo que hace el modo Vocabulario.
+//
+// Y ha entrado `b-forma` (spot_the_difference), que llevaba en el repo motor,
+// renderer y la verificación de fidelidad MÁS estricta de todas —las palabras
+// alteradas no pueden aparecer en el turno— sin que ningún slot lo usara. Es
+// escucha intensiva que no se puede resolver leyendo, y con él el nivel pasa de
+// tener 1 slot respaldado de 6 a tener 2 de 4: antes, si el modelo fallaba el
+// matching, la escala y el V/F/NG, la lección salía con tres tarjetas y el alumno
+// no tenía forma de saber por qué.
 
 const B_SLOTS: SlotTemplate[] = [
   {
@@ -519,39 +676,55 @@ const B_SLOTS: SlotTemplate[] = [
     }
   },
   {
+    // Tres pares y no cuatro: un emparejamiento biyectivo obliga a leer las dos
+    // columnas enteras antes de poder colocar nada, así que su coste de lectura
+    // crece el doble de rápido que su número de respuestas.
     slotId: 'b-relaciones',
     stage: 'selectiva',
     skill: 'inferencia',
     format: 'matching',
-    items: 4,
+    items: 3,
+    minLength: Length.Medium,
+    // En un boletín esto no es inferencia puente: es atribución de fuente, que es
+    // otra habilidad y estaba declarada sin usar en todo el syllabus.
+    skillByTextType: {
+      [TextType.RadioNews]: 'rol_fuente',
+      [TextType.PodcastInterview]: 'rol_fuente'
+    },
     brief:
-      'Empareja los 4 problemas u obstáculos que aparecen con las 4 respuestas o soluciones que se dan. Biyectivo y sin descartes triviales.',
+      'Empareja los 3 problemas u obstáculos que aparecen con las 3 respuestas o soluciones que se dan. Biyectivo y sin descartes triviales.',
     briefByTextType: {
       [TextType.PodcastInterview]:
-        'Empareja 4 afirmaciones del entrevistado con la evidencia o el ejemplo con que las apoya.',
+        'Empareja 3 afirmaciones del entrevistado con la evidencia o el ejemplo con que las apoya.',
       [TextType.RadioNews]:
-        'Empareja 4 datos con su FUENTE ("según…", "fuentes de…"). Si el boletín no atribuye cuatro veces, empareja cada dato con la función que cumple en la noticia.',
+        'Empareja 3 datos con su FUENTE ("según…", "fuentes de…"). Si el boletín no atribuye tres veces, empareja cada dato con la función que cumple en la noticia.',
       [TextType.Monologue]:
-        'Empareja 4 causas con sus consecuencias dentro del relato.'
+        'Empareja 3 causas con sus consecuencias dentro del relato.'
     }
   },
   {
+    // EL ejercicio del nivel. Cuatro filas y no cinco: con 2V + 1F + 1 NO SE DICE
+    // el contraste que entrena —lo contradicho frente a lo no dicho— está entero.
     slotId: 'b-vfns',
     stage: 'intensiva',
     skill: 'inferencia',
     format: 'true_false_notgiven',
-    items: 5,
-    brief:
-      '5 afirmaciones: 2 verdaderas (al menos una que solo se obtenga por inferencia puente, no literal), 2 falsas contradichas explícitamente y 1 de NO SE DICE que sea muy tentadora.'
-  },
-  {
-    slotId: 'b-actitud',
-    stage: 'intensiva',
-    skill: 'actitud_postura',
-    format: 'scale',
     items: 4,
     brief:
-      'Eje ordinal de 4 puntos sobre el grado de acuerdo o disposición ("lo rechaza" → "duda" → "acepta con reservas" → "acepta sin reservas"). Las filas son 4 citas textuales del audio.'
+      '4 afirmaciones: 2 verdaderas (al menos una que solo se obtenga por inferencia puente, no literal), 1 falsa contradicha explícitamente y 1 de NO SE DICE que sea muy tentadora. El ítem de NO SE DICE es el que entrena a no rellenar huecos con lo que uno esperaba oír: tiene que ser el más plausible de los cuatro.'
+  },
+  {
+    // Escucha intensiva imposible de resolver leyendo: la frase alterada es
+    // gramatical y verosímil, así que sólo el audio la delata. Además es el slot
+    // que garantiza que el nivel nunca se quede sin ejercicios verificados.
+    slotId: 'b-forma',
+    stage: 'intensiva',
+    skill: 'reconocimiento_lexico',
+    format: 'spot_the_difference',
+    items: 2,
+    engineFallback: 'spot_the_difference',
+    brief:
+      'Copia UNA frase del audio de 10 a 16 palabras y altera exactamente 2. Las dos alteraciones deben dejar la frase gramatical y verosímil en la situación (cambia una palabra por otra del mismo tipo, no por una imposible): si el cambio canta sin escuchar, el ejercicio no vale.'
   },
   {
     slotId: 'b-colocacion',
@@ -564,29 +737,48 @@ const B_SLOTS: SlotTemplate[] = [
       '2 huecos sobre COLOCACIONES del audio (verbo + sustantivo, sustantivo + adjetivo). Los distractores son colocaciones que existen en español pero que NO se dijeron.'
   },
   {
-    slotId: 'b-precision',
-    stage: 'intensiva',
-    skill: 'lexico_significado',
-    format: 'classification',
-    items: 4,
+    // Noticing de cierre: una sola respuesta y tres opciones cortas. Es lo más
+    // barato en lectura de toda la lección y lo único que se transfiere a la
+    // siguiente escucha, y hasta ahora la etapa `reflexion` no existía fuera del
+    // modo Adivina el Acento.
+    slotId: 'b-reflexion',
+    stage: 'reflexion',
+    skill: 'estrategia',
+    format: 'multiple_choice',
+    items: 3,
+    minLength: Length.Long,
     brief:
-      '4 palabras o expresiones del audio; 3 columnas con matices de significado próximos entre sí. Cada palabra se clasifica por el sentido que tiene EN ESTE audio, no por su sentido más común.'
+      '¿Qué indicio concreto del audio permitió decidir la respuesta del ejercicio de VERDADERO/FALSO/NO SE DICE? 3 opciones que citen un elemento que SUENA (una palabra, un conector, un cambio de tono), nunca un razonamiento abstracto. Las dos incorrectas deben citar elementos que también suenan pero que no deciden nada.'
   }
 ];
 
 // ---------------------------------------------------------------------------
 // NIVEL C1 — Avanzado
 // ---------------------------------------------------------------------------
-// Subtexto, atenuación y organización retórica. Nada de reconocimiento literal
-// ni de definiciones: todo se juega en el matiz y en lo que NO se dice.
+// LEER ENTRE LÍNEAS Y OÍR LA ARQUITECTURA DEL DISCURSO. Nada de reconocimiento
+// literal ni de definiciones: todo se juega en el matiz, en la atenuación y en
+// lo que NO se dice.
 //
-// Son SEIS ejercicios (≈21 respuestas). Eran diez y ≈38, y buena parte de ese
-// exceso era repetición: `c1-concesiones` y `c1-compromiso` graduaban los dos la
-// misma habilidad (`actitud_postura`) sobre el mismo audio, y `c1-matiz` pedía
-// otra vez lo que ya pide `c1-registro`. Se han quitado esas dos, el
-// caza-el-cambio y la reflexión de cierre. Los seis restantes cubren uno a uno
-// lo que el nivel declara: implicatura e ironía, organización retórica,
-// atenuación, y variación diafásica.
+// Cuatro tarjetas en Corto, cinco en Medio, seis en Largo (10-15 respuestas).
+// Eran seis fijas, ≈21 respuestas y ≈32 unidades de lectura; antes de eso, diez
+// y ≈38.
+//
+// Se ha quitado `c1-registro` (classification 4×3): sin motor, sin verificación
+// contra la transcripción y siete unidades de lectura. Su trabajo pragmático no
+// se pierde, se traslada a `c1-reflexion`, que pide exactamente lo mismo —qué
+// MARCA concreta delata el registro o la intención— por una respuesta en lugar
+// de cuatro.
+//
+// Y `c1-retorica` pasa a partir de Medio: es el slot más caro de generar bien
+// (cinco paráfrasis funcionales, sin motor posible porque una paráfrasis
+// automática no se puede verificar) y en seis turnos no hay cuatro movimientos
+// argumentativos que ordenar. Pedirlo sobre un audio que no los tiene es
+// garantizar que el modelo se los invente.
+//
+// La escala ordinal es ahora firma EXCLUSIVA de este nivel: graduar el
+// compromiso del hablante con lo que afirma —la atenuación— es lo que separa C1
+// de B1, y mientras B1 también tenía una escala los dos niveles corrían las
+// mismas seis mecánicas con los mismos ítems.
 
 const C1_SLOTS: SlotTemplate[] = [
   {
@@ -609,27 +801,31 @@ const C1_SLOTS: SlotTemplate[] = [
     stage: 'global',
     skill: 'estructura',
     format: 'ordering',
-    items: 5,
+    items: 4,
+    minLength: Length.Medium,
     brief:
-      'Ordena 5 movimientos ARGUMENTATIVOS según aparecen (concesión, objeción, ejemplo, reformulación, conclusión), descritos por su función y no por su contenido.'
+      'Ordena 4 movimientos ARGUMENTATIVOS según aparecen (concesión, objeción, ejemplo, reformulación, conclusión), descritos por su función y no por su contenido.'
   },
   {
     slotId: 'c1-vfns',
     stage: 'intensiva',
     skill: 'inferencia',
     format: 'true_false_notgiven',
-    items: 5,
+    items: 4,
     brief:
-      '5 afirmaciones que incluyan al menos una implicatura conversacional y una ironía. Una debe ser NO SE DICE y tiene que ser la más tentadora de todas.'
+      '4 afirmaciones que incluyan al menos una implicatura conversacional y una ironía. Una debe ser NO SE DICE y tiene que ser la más tentadora de todas.'
   },
   {
+    // Tres citas y no cuatro: cada fila es una cita textual con atenuación, así
+    // que la tarjeta ya obliga a leer también los cuatro puntos del eje.
     slotId: 'c1-compromiso',
     stage: 'intensiva',
     skill: 'actitud_postura',
     format: 'scale',
-    items: 4,
+    items: 3,
+    columns: 4,
     brief:
-      'Eje ordinal de 4 puntos sobre el grado de compromiso del hablante con lo que afirma ("lo descarta" → "lo ve improbable" → "lo admite como posible" → "lo afirma sin reservas"). Las 4 filas son citas textuales con atenuación o matización.'
+      'Eje ordinal de 4 puntos sobre el grado de compromiso del hablante con lo que afirma ("lo descarta" → "lo ve improbable" → "lo admite como posible" → "lo afirma sin reservas"). Las 3 filas son citas textuales con atenuación o matización.'
   },
   {
     slotId: 'c1-locuciones',
@@ -642,15 +838,18 @@ const C1_SLOTS: SlotTemplate[] = [
       '2 huecos sobre LOCUCIONES o MARCADORES DISCURSIVOS del audio ("por cierto", "de hecho", "ahora bien", "a ver si"). Los distractores son marcadores que encajarían sintácticamente pero cambiarían el valor argumentativo.'
   },
   {
-    // En `selectiva` y no en `intensiva`: es la única escucha de detalle que le
-    // queda al nivel, y sin ella la lección se iría a dos etapas.
-    slotId: 'c1-registro',
-    stage: 'selectiva',
-    skill: 'pragmatica_registro',
-    format: 'classification',
-    items: 4,
+    // Recoge el trabajo pragmático que hacía la clasificación de registro, pero
+    // por una respuesta en vez de cuatro: lo que se le pedía al alumno era
+    // justificar cada casilla con una marca concreta, y eso es exactamente lo
+    // que aquí se pregunta de forma directa.
+    slotId: 'c1-reflexion',
+    stage: 'reflexion',
+    skill: 'estrategia',
+    format: 'multiple_choice',
+    items: 3,
+    minLength: Length.Long,
     brief:
-      '4 fragmentos del audio; 3 columnas de registro o tono. Cada clasificación tiene que justificarse por una marca concreta (tratamiento, elección léxica, atenuación, elipsis). ATENCIÓN: "gracias", "por favor" y "buenos días" son NEUTROS y aparecen en cualquier registro; no los uses como prueba de formalidad. Tampoco confundas marca DIALECTAL ("che", "po", "vale") con marca de registro.'
+      '¿Qué MARCA concreta del audio delata lo que el hablante está haciendo realmente (el tratamiento, una atenuación, una elección léxica, una elipsis, un cambio de tono)? 3 opciones que citen un elemento que SUENA. ATENCIÓN: "gracias", "por favor" y "buenos días" son NEUTROS y aparecen en cualquier registro; no valen como marca. Tampoco confundas marca DIALECTAL ("che", "po", "vale") con marca de registro.'
   }
 ];
 
@@ -675,10 +874,10 @@ const VOCABULARY_SLOTS: Record<Level, SlotTemplate[]> = {
       stage: 'selectiva',
       skill: 'reconocimiento_lexico',
       format: 'minimal_pairs',
-      items: 5,
+      items: 4,
       engineFallback: 'minimal_pairs',
       brief:
-        '5 ítems con la FORMA SONORA de las palabras clave del tema: en cada uno, la palabra real del audio frente a otra que suena casi igual.'
+        '4 ítems con la FORMA SONORA de las palabras clave del tema: en cada uno, la palabra real del audio frente a otra que suena casi igual.'
     },
     // Aquí había un `voc-a0-caza`: seis palabras escritas de las que había que
     // marcar cuáles suenan. Se quitó porque en A0 es una tarea de LECTURA —seis
@@ -702,9 +901,10 @@ const VOCABULARY_SLOTS: Record<Level, SlotTemplate[]> = {
       stage: 'selectiva',
       skill: 'lexico_significado',
       format: 'matching',
-      items: 5,
+      items: 4,
+      rowScale: 'word',
       brief:
-        'Empareja 5 palabras o expresiones del audio con su significado en contexto, en paráfrasis cortas y concretas.'
+        'Empareja 4 palabras o expresiones del audio con su significado en contexto, en paráfrasis cortas y concretas.'
     },
     {
       slotId: 'voc-a2-campos',
@@ -712,8 +912,11 @@ const VOCABULARY_SLOTS: Record<Level, SlotTemplate[]> = {
       skill: 'lexico_significado',
       format: 'classification',
       items: 4,
+      columns: 2,
+      rowScale: 'word',
+      minLength: Length.Medium,
       brief:
-        '4 palabras del audio en 2 o 3 campos temáticos CONCRETOS de la situación (por ejemplo "lo que se pide" / "lo que se paga" / "lo que se agradece"). Nada de "formal" ni "informal": esa distinción es de B1 en adelante.'
+        '4 palabras del audio en 2 campos temáticos CONCRETOS de la situación (por ejemplo "lo que se pide" / "lo que se paga"). Nada de "formal" ni "informal": esa distinción es de B1 en adelante.'
     },
     {
       slotId: 'voc-a2-formulas',
@@ -732,18 +935,20 @@ const VOCABULARY_SLOTS: Record<Level, SlotTemplate[]> = {
       stage: 'selectiva',
       skill: 'colocacion_formula',
       format: 'matching',
-      items: 5,
+      items: 4,
+      rowScale: 'word',
       brief:
-        'Empareja 5 verbos del audio con el complemento con el que aparecieron realmente. Todos los complementos deben ser combinables con más de un verbo.'
+        'Empareja 4 verbos del audio con el complemento con el que aparecieron realmente. Todos los complementos deben ser combinables con más de un verbo.'
     },
     {
       slotId: 'voc-b-precision',
       stage: 'intensiva',
       skill: 'lexico_significado',
       format: 'classification',
-      items: 6,
+      items: 4,
+      rowScale: 'word',
       brief:
-        '6 palabras del audio en 3 columnas de matiz próximo, clasificadas por el sentido que tienen EN ESTE audio.'
+        '4 palabras del audio en 3 columnas de matiz próximo, clasificadas por el sentido que tienen EN ESTE audio.'
     },
     {
       slotId: 'voc-b-cloze',
@@ -760,9 +965,10 @@ const VOCABULARY_SLOTS: Record<Level, SlotTemplate[]> = {
       stage: 'intensiva',
       skill: 'lexico_significado',
       format: 'true_false_notgiven',
-      items: 5,
+      items: 4,
+      minLength: Length.Medium,
       brief:
-        '5 afirmaciones sobre el USO de expresiones del audio (qué implican, cuándo se dicen). Una debe ser NO SE DICE.'
+        '4 afirmaciones sobre el USO de expresiones del audio (qué implican, cuándo se dicen). Una debe ser NO SE DICE.'
     }
   ],
   [Level.Advanced]: [
@@ -771,18 +977,21 @@ const VOCABULARY_SLOTS: Record<Level, SlotTemplate[]> = {
       stage: 'selectiva',
       skill: 'lexico_significado',
       format: 'matching',
-      items: 5,
+      items: 4,
+      rowScale: 'word',
       brief:
-        'Empareja 5 expresiones del audio con la paráfrasis que capta su matiz exacto; las paráfrasis deben ser casi sinónimas entre sí.'
+        'Empareja 4 expresiones del audio con la paráfrasis que capta su matiz exacto; las paráfrasis deben ser casi sinónimas entre sí.'
     },
     {
       slotId: 'voc-c1-connotacion',
       stage: 'intensiva',
       skill: 'actitud_postura',
       format: 'scale',
-      items: 4,
+      items: 3,
+      columns: 4,
+      rowScale: 'word',
       brief:
-        'Eje ordinal de 4 puntos sobre la carga valorativa con que el hablante usa 4 expresiones ("claramente peyorativo" → "crítico y atenuado" → "neutro" → "abiertamente elogioso").'
+        'Eje ordinal de 4 puntos sobre la carga valorativa con que el hablante usa 3 expresiones ("claramente peyorativo" → "crítico y atenuado" → "neutro" → "abiertamente elogioso").'
     },
     {
       slotId: 'voc-c1-locuciones',
@@ -799,9 +1008,11 @@ const VOCABULARY_SLOTS: Record<Level, SlotTemplate[]> = {
       stage: 'intensiva',
       skill: 'pragmatica_registro',
       format: 'classification',
-      items: 6,
+      items: 4,
+      rowScale: 'word',
+      minLength: Length.Medium,
       brief:
-        '6 expresiones del audio en 3 columnas de registro, cada una justificable por una marca concreta. No uses "gracias" ni "por favor" como prueba de formalidad, ni confundas marca dialectal con registro.'
+        '4 expresiones del audio en 3 columnas de registro, cada una justificable por una marca concreta. No uses "gracias" ni "por favor" como prueba de formalidad, ni confundas marca dialectal con registro.'
     }
   ]
 };
@@ -829,9 +1040,10 @@ function accentSlots(level: Level): SlotTemplate[] {
             stage: 'anticipacion' as const,
             skill: 'variacion_dialectal' as const,
             format: 'multiple_choice' as const,
-            items: 6,
+            items: 4,
+            minLength: Length.Long,
             brief:
-              'Antes de escuchar. 6 rasgos observables descritos SIN nombrar países ("pronuncia la c de cinco como z", "usa vos en vez de tú", "aspira la s final"). El alumno marca los que cree que va a oír; "correctAnswer" es el array de los que efectivamente aparecen.'
+              'Antes de escuchar. 4 rasgos observables descritos SIN nombrar países ("pronuncia la c de cinco como z", "usa vos en vez de tú", "aspira la s final"). El alumno marca los que cree que va a oír; "correctAnswer" es el array de los que efectivamente aparecen.'
           }
         ]),
     {
@@ -859,9 +1071,12 @@ function accentSlots(level: Level): SlotTemplate[] {
             stage: 'selectiva' as const,
             skill: 'variacion_dialectal' as const,
             format: 'classification' as const,
-            items: 6,
+            items: 4,
+            columns: 2,
+            rowScale: 'word' as const,
+            minLength: Length.Medium,
             brief:
-              '6 palabras o expresiones DIALECTALES realmente dichas en el audio; 2 columnas, una por hablante, identificadas como "Hablante A" y "Hablante B" sin revelar el país.'
+              '4 palabras o expresiones DIALECTALES realmente dichas en el audio; 2 columnas, una por hablante, identificadas como "Hablante A" y "Hablante B" sin revelar el país.'
           }
         ]),
     // En niveles bajos la procedencia se pregunta UNA vez, por la pareja: dos
@@ -935,7 +1150,8 @@ export function getBlueprint(
   level: Level,
   textType: TextType,
   mode: AppMode,
-  dataPoint?: DataPointKind
+  dataPoint?: DataPointKind,
+  length: Length = Length.Short
 ): ExerciseSlot[] {
   let templates: SlotTemplate[];
 
@@ -946,22 +1162,34 @@ export function getBlueprint(
   } else if (mode === AppMode.Vocabulary) {
     // Se conserva la entrada en la lección (anticipación + idea global) del nivel
     // y se sustituye el resto por el trabajo léxico propio del nivel.
+    //
+    // UNA apertura como mucho, no todas las que compartan etapa: C1 tiene dos
+    // slots de etapa `global` (`c1-subtexto` y `c1-retorica`), así que heredaba
+    // las dos y un Vocabulario de C1 salía con seis tarjetas mientras uno de A0
+    // salía con tres, sin que nadie lo hubiera decidido.
     const levelTemplates = LEVEL_SLOTS[level] ?? LEVEL_SLOTS[Level.Beginner];
-    const opening = levelTemplates.filter(
-      slot => slot.stage === 'anticipacion' || slot.stage === 'global'
-    );
-    const closing = levelTemplates.filter(slot => slot.stage === 'reflexion');
-    templates = [...opening, ...(VOCABULARY_SLOTS[level] ?? []), ...closing];
+    const first = (stage: ListeningStage) => levelTemplates.filter(slot => slot.stage === stage).slice(0, 1);
+    templates = [
+      ...first('anticipacion'),
+      ...first('global'),
+      ...(VOCABULARY_SLOTS[level] ?? []),
+      ...first('reflexion')
+    ];
   } else {
     templates = LEVEL_SLOTS[level] ?? LEVEL_SLOTS[Level.Beginner];
   }
 
   const singleSpeaker = textType === TextType.RadioNews || textType === TextType.Monologue;
+  const lengthIndex = Math.max(0, LENGTH_ORDER.indexOf(length));
 
   const seen = new Set<string>();
   return templates
     .filter(slot => isFormatAllowed(slot.format, level, textType))
     .filter(slot => !(singleSpeaker && slot.requiresTwoSpeakers))
+    // La lección crece con el audio: el núcleo del nivel entra siempre y el
+    // resto se gana con turnos. Pedir seis tarjetas sobre seis turnos no era
+    // pedir más escucha, era pedir que el modelo rellenara.
+    .filter(slot => lengthIndex >= LENGTH_ORDER.indexOf(slot.minLength ?? Length.Short))
     .filter(slot => {
       if (seen.has(slot.slotId)) return false;
       seen.add(slot.slotId);

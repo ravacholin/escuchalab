@@ -739,7 +739,11 @@ const buildExercisePrompt = (slots: ExerciseSlot[]): string => {
   const slotBlock = slots
     .map((slot, i) => {
       const stage = STAGE_META[slot.stage].label;
-      return `  ${i + 1}. slotId="${slot.slotId}" | etapa="${slot.stage}" (${stage}) | habilidad="${slot.skill}" | type="${slot.format}" | ${slot.items} ítems\n     ${slot.brief}`;
+      // El número de columnas vivía sólo en la prosa del brief, así que el
+      // modelo podía devolver una escala de tres puntos donde el presupuesto de
+      // lectura contaba cuatro. Aquí es un dato del slot, no una sugerencia.
+      const columns = slot.columns ? ` | ${slot.columns} columnas` : '';
+      return `  ${i + 1}. slotId="${slot.slotId}" | etapa="${slot.stage}" (${stage}) | habilidad="${slot.skill}" | type="${slot.format}" | ${slot.items} ítems${columns}\n     ${slot.brief}`;
     })
     .join('\n');
 
@@ -801,7 +805,9 @@ const PLAN_STEPS = [
 const REQUESTED_TURNS: Record<Length, number> = {
   [Length.Short]: 6,
   [Length.Medium]: 12,
-  [Length.Long]: 14
+  // "14+ turnos": con el denominador en 14 la barra llegaba al 100 % en cuanto
+  // entraba el turno catorce y se quedaba ahí el resto del guion.
+  [Length.Long]: 16
 };
 
 const SPEAKER_KEY = /"speaker"\s*:/;
@@ -894,7 +900,7 @@ export const generateLessonPlan = async (
     profileInstruction = `${baseProfile}. CONSISTENCIA: AMBOS HABLANTES SON NATIVOS DE ESTA REGIÓN. Prohibido mezclar con neutro.`;
   }
 
-  const blueprint = getBlueprint(level, textType, mode, dataPoint);
+  const blueprint = getBlueprint(level, textType, mode, dataPoint, length);
   const exerciseLogic = buildExercisePrompt(blueprint);
   const registerInstruction = getRegisterInstruction(textType);
 
@@ -949,9 +955,13 @@ export const generateLessonPlan = async (
 
   // A0 prioriza la naturalidad del habla por encima del recuento de turnos: el
   // objetivo del nivel es captar un dato dentro de habla nativa real.
+  // El número de turnos se le pide en cifras: interpolar el valor del enum metía
+  // la cadena en español ("Largo (14+ turnos)") dentro de un prompt en inglés y
+  // dejaba la cifra escondida entre paréntesis. Ahora es lo primero que se lee, y
+  // es además el número con el que el syllabus dimensiona la lección.
   const lengthInstruction = (level === Level.Intro)
     ? "LENGTH: natural y fluida; ignora el límite estricto de turnos si corta la naturalidad."
-    : `LENGTH: STICK TO ${length}.`;
+    : `LENGTH: exactly ${REQUESTED_TURNS[length]} dialogue turns (${length}).`;
 
   // Denominador real de turnos: solo existe donde el prompt lo exige.
   const requestedTurns = level === Level.Intro ? null : REQUESTED_TURNS[length];
