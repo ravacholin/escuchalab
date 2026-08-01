@@ -15,6 +15,7 @@
     "tts:voices": "node scripts/measure-tts-voices.mjs",
     "check:ambience": "node scripts/check-ambience.mjs",
     "check:ambience:runtime": "node scripts/check-ambience-runtime.mjs",
+    "check:ambience:scenes": "node scripts/check-ambience-scenes.mjs",
     "ambience:build": "node scripts/generate-ambience-beds.mjs",
     "ambience:preview": "node scripts/ambience/preview.mjs",
     "test": "npm run typecheck && npm run check:syllabus && npm run check:exercises && npm run check:audio && npm run check:ambience && npm run check:ambience:runtime"
