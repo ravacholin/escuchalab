@@ -1090,6 +1090,181 @@ export const SCENE_RECIPES = {
   },
 
   // --- weather-flavoured variants ------------------------------------------
+  // --- recording settings --------------------------------------------------
+  //
+  // A bulletin, a podcast and a monologue are RECORDINGS, and where they were made is
+  // a real and varied fact about them. Before these existed, 106 of the 148 scenario
+  // labels resolved to one of four studios built from the same two featureless stems,
+  // so 72% of all lessons carried no sense of place at all — the same defect the
+  // Dialogue catalogue had been fixed for and nobody had checked for the rest.
+  //
+  // The rule is that the label decides the RECORDING SETUP, never the topic. An
+  // episode about a city is not recorded in that city; an episode about learning to
+  // cook plausibly is recorded at a kitchen table. Where a label implies nothing, the
+  // format's studio remains the answer.
+
+  kitchen_home: {
+    label: 'Cocina de casa',
+    stems: [
+      { stem: 'kitchen', gain: 0.34, lowpass: 6000 },
+      { stem: 'home_life', gain: 0.4 },
+      { stem: 'room_tone', gain: 0.18 },
+    ],
+    room: { size: 'small', wet: 0.13, rt60Scale: 0.85, brightnessHz: 5800, surface: 'tile' },
+    events: [
+      ev('porcelain', 14, 0.34, { burst: 0.4, distance: 'near' }),
+      ev('cutlery', 18, 0.3, { burst: 0.4, distance: 'near' }),
+      ev('woodKnock', 26, 0.26, { distance: 'near' }),
+      ev('sizzle', 46, 0.28, { distance: 'mid' }),
+    ],
+    activity: 'calm',
+    eventHeadroomDb: 10,
+    tone: { tiltDb: 1 },
+  },
+
+  podcast_home: {
+    label: 'Podcast en casa',
+    stems: [
+      { stem: 'home_life', gain: 0.42, lowpass: 3200 },
+      { stem: 'room_tone', gain: 0.3 },
+      { stem: 'studio_tone', gain: 0.2 },
+    ],
+    room: { size: 'small', wet: 0.09, rt60Scale: 0.6, damping: 0.68, brightnessHz: 3300, surface: 'carpet' },
+    events: [
+      ev('chairScrape', 40, 0.2, { distance: 'near' }),
+      ev('creak', 52, 0.18, { distance: 'near' }),
+      ev('plasticTap', 46, 0.16, { distance: 'near' }),
+    ],
+    intensityBias: -0.25,
+    duckingBias: -0.12,
+    activity: 'still',
+    eventHeadroomDb: 10,
+    tone: { tiltDb: -3.5 },
+  },
+
+  podcast_live: {
+    label: 'Podcast ante público',
+    stems: [
+      { stem: 'crowd_far', gain: 0.3, lowpass: 2200 },
+      { stem: 'room_tone', gain: 0.26 },
+      { stem: 'studio_tone', gain: 0.16 },
+    ],
+    room: { size: 'large', wet: 0.24, rt60Scale: 1.05, damping: 0.34, brightnessHz: 5200, surface: 'wood' },
+    events: [
+      ev('laugh', 26, 0.3, { distance: 'far' }),
+      ev('applause', 90, 0.34, { distance: 'far' }),
+      ev('cough', 34, 0.2, { distance: 'far' }),
+      ev('chairScrape', 44, 0.18, { distance: 'mid' }),
+    ],
+    activity: 'calm',
+    eventHeadroomDb: 9,
+    tone: { tiltDb: 0.5 },
+  },
+
+  podcast_remote: {
+    label: 'Invitado a distancia',
+    stems: [
+      // A guest on a line. The band limiting IS the scene: 300-3400 Hz is what a
+      // telephone channel passes, and hearing it is hearing that they are not there.
+      { stem: 'booth_tight', gain: 0.5, highpass: 300, lowpass: 3400 },
+      { stem: 'studio_tone', gain: 0.34 },
+      { stem: 'room_tone', gain: 0.16 },
+    ],
+    room: { size: 'small', wet: 0.05, rt60Scale: 0.4, damping: 0.8, brightnessHz: 3000, surface: 'carpet' },
+    events: [
+      ev('plasticTap', 40, 0.16, { distance: 'near' }),
+      ev('paperRustle', 34, 0.18, { distance: 'near' }),
+    ],
+    intensityBias: -0.3,
+    duckingBias: -0.18,
+    activity: 'still',
+    eventHeadroomDb: 8,
+    tone: { tiltDb: -2, peak: { hz: 1400, db: 3.5, q: 1.1 } },
+  },
+
+  radio_desk: {
+    label: 'Estudio de tertulia',
+    stems: [
+      { stem: 'studio_tone', gain: 0.44 },
+      { stem: 'booth_tight', gain: 0.24 },
+      { stem: 'hvac_office', gain: 0.2 },
+    ],
+    room: { size: 'small', wet: 0.09, rt60Scale: 0.55, damping: 0.66, brightnessHz: 3800, surface: 'carpet' },
+    events: [
+      ev('paperRustle', 20, 0.24, { distance: 'near' }),
+      ev('chairScrape', 44, 0.18, { distance: 'near' }),
+      ev('plasticTap', 38, 0.14, { distance: 'near' }),
+    ],
+    intensityBias: -0.28,
+    duckingBias: -0.16,
+    activity: 'still',
+    eventHeadroomDb: 10,
+    tone: { tiltDb: -3 },
+  },
+
+  radio_street: {
+    label: 'Conexión en la calle',
+    stems: [
+      // A correspondent with a handheld mic. The street is not the subject of the
+      // bulletin, it is where the reporter is standing — which is a fact about the
+      // recording, not a claim about the news.
+      { stem: 'traffic_near', gain: 0.4, width: 0.8 },
+      { stem: 'traffic_far', gain: 0.34 },
+      { stem: 'babble_open', gain: 0.16, lowpass: 2200, width: 0.85 },
+    ],
+    room: { size: 'outdoor', wet: 0.05, brightnessHz: 5400, surface: 'asphalt' },
+    events: [
+      ev('honk', 30, 0.28, { distance: 'far' }),
+      ev('vehiclePass', 13, 0.3, { distance: 'mid' }),
+      ev('footstep', 12, 0.2, { distance: 'near' }),
+    ],
+    duckingBias: 0.14,
+    activity: 'busy',
+    eventHeadroomDb: 4,
+    tone: { tiltDb: -2, lowShelf: { hz: 150, db: 2 } },
+  },
+
+  radio_field: {
+    label: 'Reportaje de campo',
+    stems: [
+      // A reporter outdoors with a windscreened handheld, which is a different sound
+      // from a park: closer to people and traffic, rolled off at the top by the
+      // windscreen, and with the low rumble that a handheld mic always picks up.
+      { stem: 'crowd_far', gain: 0.34, lowpass: 2400 },
+      { stem: 'traffic_far', gain: 0.3 },
+      { stem: 'wind_leaves', gain: 0.16, lowpass: 3200 },
+    ],
+    room: { size: 'outdoor', wet: 0.05, brightnessHz: 4600, surface: 'asphalt' },
+    events: [
+      ev('windGust', 13, 0.36),
+      ev('footstep', 9, 0.28, { distance: 'near' }),
+      ev('paperRustle', 22, 0.26, { distance: 'near' }),
+      ev('vehiclePass', 24, 0.24, { distance: 'far' }),
+    ],
+    intensityBias: -0.05,
+    activity: 'busy',
+    eventHeadroomDb: 8,
+    tone: { tiltDb: -2.5, lowShelf: { hz: 170, db: 4 } },
+  },
+
+  radio_phone: {
+    label: 'Estudio con línea telefónica',
+    stems: [
+      { stem: 'studio_tone', gain: 0.54 },
+      { stem: 'booth_tight', gain: 0.32, highpass: 320, lowpass: 3200 },
+    ],
+    room: { size: 'small', wet: 0.06, rt60Scale: 0.42, damping: 0.78, brightnessHz: 3100, surface: 'carpet' },
+    events: [
+      ev('paperRustle', 26, 0.2, { distance: 'near' }),
+      ev('plasticTap', 44, 0.14, { distance: 'near' }),
+    ],
+    intensityBias: -0.32,
+    duckingBias: -0.18,
+    activity: 'still',
+    eventHeadroomDb: 9,
+    tone: { tiltDb: -4, peak: { hz: 1100, db: 3, q: 1.2 } },
+  },
+
   street_rain: {
     label: 'Calle con lluvia',
     stems: [
@@ -1188,34 +1363,167 @@ const DIALOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
 };
 
 /**
- * Overrides for the single-voice / interview formats.
+ * Where the single-voice and interview formats were RECORDED.
  *
- * The default for those formats is the studio they are recorded in — a radio bulletin
- * about traffic is heard from a studio, not from a road, and pretending otherwise
- * would contradict the audio the learner is actually listening to. Only the handful of
- * labels whose *format* differs get an override: breaking news and investigations come
- * from a live newsroom, and speeches are delivered to a room.
+ * The old version had six overrides for RadioNews, nine for Monologue and no table at
+ * all for PodcastInterview, so 106 of the 148 scenario labels landed on one of four
+ * studios — and those four studios were the same two featureless stems at four
+ * slightly different gains. For 72% of every lesson the app generated, the learner
+ * heard no place whatsoever. That is the exact defect the Dialogue catalogue had
+ * already been fixed for (30 of 40 scenarios once shared `office.wav`); nobody had
+ * measured whether the other three formats had it too. They did, worse.
+ *
+ * The principle that made those formats studios in the first place still holds and is
+ * not being abandoned: a bulletin about traffic is heard from a studio, not from a
+ * road, and pretending otherwise contradicts the audio the learner is listening to.
+ * What changed is the recognition that "a studio" is not one room. A bulletin can come
+ * from an on-air booth, a live newsroom, a talk desk, a correspondent standing in the
+ * street, or a contributor on a phone line — all of those are things a listener has
+ * actually heard on the radio, and they sound nothing like each other.
+ *
+ * So: **the label chooses the recording setup, never the topic.** An episode about a
+ * city is not recorded in that city. An episode about learning to cook plausibly is
+ * recorded at a kitchen table, and one about a hospital stay plausibly is not.
  */
 const RADIO_SCENE_BY_LABEL: Record<string, SceneId> = {
+  // A live newsroom: the story is still moving while it is being read.
   'Última Hora': 'studio_newsroom',
   'Cobertura de Crisis': 'studio_newsroom',
   'Investigación Periodística': 'studio_newsroom',
-  'Debate Electoral': 'studio_newsroom',
-  'Análisis Político': 'studio_newsroom',
   'Sucesos y Comunidad': 'studio_newsroom',
+  'Noticias del Barrio': 'studio_newsroom',
+  'Política Municipal': 'studio_newsroom',
+  'Tribunales y Justicia': 'studio_newsroom',
+  // A correspondent outdoors. Traffic and roadworks are reported from the road.
+  'Tráfico': 'radio_street',
+  'Transporte Público': 'radio_street',
+  'Transporte y Movilidad': 'radio_street',
+  'Seguridad Vial': 'radio_street',
+  'Infraestructura Urbana': 'radio_street',
+  'Ferias y Mercados': 'radio_street',
+  'Servicios de la Ciudad': 'radio_street',
+  // A field recording, windscreen and all.
+  'El Tiempo': 'radio_field',
+  'Clima y Estaciones': 'radio_field',
+  'Medio Ambiente': 'radio_field',
+  'Medio Ambiente Local': 'radio_field',
+  'Turismo de la Región': 'radio_field',
+  'Deportes Locales': 'radio_field',
+  // A studio taking a contribution down a line — 300-3400 Hz, and you can hear it.
+  'Geopolítica': 'radio_phone',
+  'Economía y Mercados': 'radio_phone',
+  'Economía Nacional': 'radio_phone',
+  'Debate Electoral': 'radio_phone',
+  'Tecnología y Ética': 'radio_phone',
+  'Análisis Político': 'radio_phone',
+  // A talk desk: bigger than a booth, with paper on it.
+  'Editorial de Opinión': 'radio_desk',
+  'Cultura y Crítica': 'radio_desk',
+  'Ciencia Avanzada': 'radio_desk',
+  'Tecnología y Sociedad': 'radio_desk',
+  'Consumo y Ahorro': 'radio_desk',
+  'Trabajo y Empleo': 'radio_desk',
+  'Cultura y Espectáculos': 'radio_desk',
+  // The remaining seven fall through to `studio_radio`, the on-air booth.
 };
 
+const PODCAST_SCENE_BY_LABEL: Record<string, SceneId> = {
+  'Mi Rutina Diaria': 'podcast_home',
+  'Mi Ciudad Favorita': 'studio_podcast',
+  'Aprendí a Cocinar': 'kitchen_home',
+  'Mi Primera Mascota': 'podcast_home',
+  'Mi Trabajo Actual': 'office',
+  'Un Viaje Reciente': 'studio_podcast',
+  'Mi Pasatiempo': 'podcast_home',
+  'Mi Familia': 'podcast_home',
+  'Cómo Cambié de Casa': 'home',
+  'Mi Deporte Favorito': 'gym',
+  'El Día que Me Despidieron': 'studio_podcast',
+  'Emprender de Cero': 'open_office',
+  // A guest who lives abroad joins on a line; that is what "a distancia" sounds like.
+  'Vivir en el Extranjero': 'podcast_remote',
+  'Mi Relación a Distancia': 'podcast_remote',
+  'Superé una Lesión': 'gym',
+  'Cambié de Carrera': 'office',
+  'Un Estilo de Vida Nuevo': 'park',
+  'Aprendí un Oficio': 'workshop_garage',
+  'Todo Salió Mal en un Evento': 'venue_stage',
+  'Convivir con Compañeros': 'podcast_home',
+  'Cómo Salí de una Deuda': 'bank',
+  'Mi Experiencia de Voluntario': 'foyer',
+  'Escapé de una Situación de Control': 'therapy_room',
+  'Fui Testigo de un Hecho Grave': 'police_station',
+  'Cuidé a un Familiar Enfermo': 'hospital',
+  'Sobreviví a un Desastre': 'studio_podcast',
+  'Denuncié Malas Prácticas': 'office_meeting',
+  'Reconstruí mi Identidad': 'therapy_room',
+  'La Fama y sus Costos': 'podcast_live',
+  'Rechazos Antes de Publicar': 'library',
+  'Ética en las Decisiones': 'studio_podcast',
+  'Migrar y Empezar de Nuevo': 'station',
+  'La Enfermedad que Me Cambió': 'clinic_room',
+  'Perdón y Reconciliación': 'podcast_home',
+};
+
+/**
+ * A monologue label is a narration, not a place — so what varies is whether it is
+ * PERFORMED to a room, RECORDED alone, or REGISTERED on location.
+ */
 const MONOLOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
+  // Performed to an audience.
   'Discurso Motivacional': 'venue_stage',
   'Discurso de Despedida': 'venue_stage',
-  'Monólogo de Humor': 'venue_stage',
   'Manifiesto Creativo': 'venue_stage',
   'Análisis Social': 'venue_stage',
-  'Carta Abierta': 'venue_stage',
-  'Crónica de mi Barrio': 'home',
+  'Monólogo de Humor': 'bar_night',
+  // Recorded alone.
+  'Ensayo Personal': 'studio_intimate',
+  'Relato Literario': 'studio_intimate',
+  'Una Decisión que Cambió Todo': 'studio_intimate',
+  'Lo que Aprendí de un Fracaso': 'studio_intimate',
+  'Carta Abierta': 'studio_intimate',
   'Confesión y Catarsis': 'home',
-  'Reflexión sobre el Tiempo': 'home',
+  'Un Día Cualquiera': 'home',
+  'Un Pequeño Logro': 'home',
+  'Mi Comida Favorita': 'kitchen_home',
+  'Una Tradición que Heredé': 'kitchen_home',
+  'Crónica de Investigación': 'newsroom',
+  'Memoria Histórica': 'gallery',
+  'Mi Rincón Favorito': 'library',
+  'Aprendí Algo Nuevo': 'classroom',
+  'Cambié de Trabajo': 'office',
+  'La Vez que Me Equivoqué': 'office_meeting',
+  'Un Problema y su Solución': 'workshop_garage',
+  'Un Proyecto Personal': 'workshop_garage',
+  'Una Historia de Superación': 'gym',
+  'Una Fiesta Familiar': 'restaurant',
+  'Cómo Conocí a mi Mejor Amigo': 'cafe',
+  // Registered on location.
+  'Crónica de mi Barrio': 'street',
+  'Mi Primer Viaje': 'station',
+  'El Día que Perdí Algo': 'station',
+  'Un Viaje en Solitario': 'park',
+  'Mi Fin de Semana': 'park',
+  'Una Mascota Especial': 'park',
+  'Reencuentro Inesperado': 'plaza',
+  'Reflexión sobre el Tiempo': 'park_rain',
 };
+
+/**
+ * How present the place is for a recording made in it.
+ *
+ * A podcast episode recorded at a kitchen table is not the same as standing in a
+ * kitchen: the microphone is close to the speakers, and a full-strength market or
+ * café would bury the dialogue while claiming something untrue. Scaling the bed, the
+ * events and the onset budget together says the accurate thing — this was recorded
+ * there. Studios are exempt: for them, the recording setup IS the place.
+ */
+const RECORDING_PRESENCE = 0.62;
+
+const STUDIO_SCENES = new Set<SceneId>([
+  'studio_radio', 'studio_newsroom', 'studio_podcast', 'studio_intimate',
+  'radio_desk', 'radio_phone', 'podcast_remote', 'podcast_home',
+]);
 
 const DEFAULT_SCENE_BY_TEXT_TYPE: Record<string, SceneId> = {
   [TextType.Dialogue]: 'office',
@@ -1329,7 +1637,16 @@ export function resolveAmbienceScene(scene: AmbienceScene): ResolvedAmbience {
 
   const finish = (id: SceneId, source: ResolvedAmbience['source']): ResolvedAmbience => {
     const modified = applyModifiers(id, `${action} ${topic} ${keywords}`);
-    return { id: modified, recipe: SCENE_RECIPES[modified], source };
+    // A recording made in a place, rather than a conversation happening in one.
+    const recorded = textType !== undefined
+      && textType !== TextType.Dialogue
+      && !STUDIO_SCENES.has(modified);
+    return {
+      id: modified,
+      recipe: SCENE_RECIPES[modified],
+      source,
+      ...(recorded ? { presence: RECORDING_PRESENCE } : {}),
+    };
   };
 
   // 1. Format-specific label overrides (a bulletin about the courts is still a studio,
@@ -1340,6 +1657,9 @@ export function resolveAmbienceScene(scene: AmbienceScene): ResolvedAmbience {
     }
     if (textType === TextType.Monologue && MONOLOGUE_SCENE_BY_LABEL[label]) {
       return finish(MONOLOGUE_SCENE_BY_LABEL[label], 'label');
+    }
+    if (textType === TextType.PodcastInterview && PODCAST_SCENE_BY_LABEL[label]) {
+      return finish(PODCAST_SCENE_BY_LABEL[label], 'label');
     }
     // 2. The dialogue catalogue: a real place with a real ambience.
     if ((!textType || textType === TextType.Dialogue) && DIALOGUE_SCENE_BY_LABEL[label]) {
@@ -1369,6 +1689,14 @@ export function resolveAmbienceScene(scene: AmbienceScene): ResolvedAmbience {
 }
 
 /** Every scene id the model is allowed to name, for the generation prompt. */
+const MODEL_EXCLUDED_SCENES = new Set<SceneId>([
+  // Weather variants are reached by `applyModifiers`, not by naming.
+  'street_rain', 'park_rain',
+  // Recording setups, not places. A model asked "where does this happen?" must not be
+  // able to answer "on a telephone line" for a two-person conversation.
+  'podcast_remote', 'radio_phone', 'radio_desk', 'podcast_live', 'podcast_home',
+]);
+
 export const MODEL_SELECTABLE_SCENES: SceneId[] = SCENE_IDS.filter(
-  (id) => id !== 'street_rain' && id !== 'park_rain',
+  (id) => !MODEL_EXCLUDED_SCENES.has(id),
 );

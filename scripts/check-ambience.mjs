@@ -80,13 +80,13 @@ const mod = await bundle(`
     SCENE_RECIPES, SCENE_IDS, STEM_IDS, MODEL_SELECTABLE_SCENES, STEM_LEVELS_DBFS,
     resolveAmbienceScene, isSceneId, bedLevel,
   } from './services/ambiencePresets';
-  export { EVENT_SYNTHS, EVENT_CLUSTER_SIZE } from './services/ambienceEngine';
+  export { EVENT_SYNTHS, EVENT_CLUSTER_SIZE, STEM_BANDWIDTH_HZ } from './services/ambienceEngine';
   export { TextType } from './types';
 `);
 
 const {
   SCENARIO_DATABASE, SCENE_RECIPES, SCENE_IDS, MODEL_SELECTABLE_SCENES, STEM_LEVELS_DBFS,
-  resolveAmbienceScene, isSceneId, EVENT_SYNTHS, EVENT_CLUSTER_SIZE, TextType,
+  resolveAmbienceScene, isSceneId, EVENT_SYNTHS, EVENT_CLUSTER_SIZE, STEM_BANDWIDTH_HZ, TextType,
 } = mod;
 
 // ---------------------------------------------------------------------------
@@ -184,7 +184,9 @@ if (uncurated.length > 0) {
 // not all collapse onto the SAME studio.
 // ---------------------------------------------------------------------------
 const MAX_SHARE_PLACE_BASED = 0.15;
-const MAX_SHARE_OVERALL = 0.3;
+const MIN_SCENES_PER_FORMAT = 5;
+const MAX_SHARE_PER_FORMAT = 0.35;
+const MAX_SHARE_OVERALL = 0.1;
 const PLACE_BASED_TEXT_TYPE = TextType.Dialogue;
 
 for (const [textType, perType] of usageByTextType) {
@@ -204,12 +206,30 @@ for (const [textType, perType] of usageByTextType) {
          `largest "${topScene}" at ${(share * 100).toFixed(1)}%`);
     }
   } else {
-    // Deliberately no intra-format minimum here. A podcast interview really is one
-    // recording setup, and forcing variation would mean inventing distinctions the
-    // catalogue does not support — e.g. pretending an episode about living abroad
-    // was recorded abroad. The invariants that matter for these formats are the
-    // global share bound and the distinct-default check below.
-    ok(`"${textType}" uses ${perType.size} scene(s), largest "${topScene}" at ${(share * 100).toFixed(0)}%`);
+    // There USED to be no minimum here, on the argument that a podcast interview is
+    // one recording setup and that varying it would mean inventing distinctions —
+    // "pretending an episode about living abroad was recorded abroad". The first half
+    // of that is wrong and the consequence was severe: 106 of 148 labels resolved to
+    // one of four near-identical studios, so 72% of all lessons had no place at all.
+    //
+    // A podcast is not one setup. It is a booth, a kitchen table, an office, a live
+    // room or a guest on a line, and those sound nothing alike. What the old comment
+    // was really protecting is preserved by a different rule, one this file cannot
+    // check but ambiencePresets.ts states explicitly: the label chooses the RECORDING
+    // SETUP, never the topic. An episode about a city is still recorded in a studio.
+    if (perType.size < MIN_SCENES_PER_FORMAT) {
+      fail(
+        `"${textType}" uses only ${perType.size} scene(s) (min ${MIN_SCENES_PER_FORMAT}) — ` +
+        `every recording in this format sounds like the same room`,
+      );
+    } else if (share > MAX_SHARE_PER_FORMAT) {
+      fail(
+        `scene "${topScene}" covers ${(share * 100).toFixed(0)}% of "${textType}" ` +
+        `(max ${(MAX_SHARE_PER_FORMAT * 100).toFixed(0)}%)`,
+      );
+    } else {
+      ok(`"${textType}" uses ${perType.size} scene(s), largest "${topScene}" at ${(share * 100).toFixed(0)}%`);
+    }
   }
 }
 
@@ -241,6 +261,50 @@ if (narrativeDefaults.size < narrativeFormats) {
   ok(`each non-dialogue format has its own default scene (${[...narrativeDefaults].join(', ')})`);
 }
 ok(`${sceneUsage.size} distinct scenes in use across the catalogue`);
+
+// ---------------------------------------------------------------------------
+// 2b. No scene is unreachable.
+//
+// Seven scenes — bar_night, plaza, park, hospital, library and both rain variants —
+// were authored, measured, bundled and reachable from nothing at all. Only the
+// reverse invariant existed (no orphaned STEM), so a recipe could be dead code
+// indefinitely. Weather variants are exempt: `applyModifiers` is how they are reached
+// by design.
+// ---------------------------------------------------------------------------
+{
+  const MODIFIER_ONLY = new Set(['street_rain', 'park_rain']);
+  const unreachable = SCENE_IDS.filter((id) => !sceneUsage.has(id) && !MODIFIER_ONLY.has(id));
+  if (unreachable.length > 0) {
+    fail(
+      `scene(s) reachable from no scenario label: ${unreachable.join(', ')} — ` +
+      `either map a label to them or delete the recipe`,
+    );
+  } else {
+    ok(`every scene is reachable from a scenario label (or is a weather variant)`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 2c. The engine's stem bandwidth table is complete and honest.
+//
+// Adding a stem means touching four tables, and CLAUDE.md's own instructions named
+// three. `STEM_BANDWIDTH_HZ` is the one that gets forgotten, and it is silent when
+// wrong: a missing entry makes `sceneBandwidthHz()` read `undefined` and the scene's
+// event ceiling collapses to its floor.
+// ---------------------------------------------------------------------------
+{
+  const wrong = [];
+  for (const id of STEM_IDS) {
+    const declared = STEM_BANDWIDTH_HZ[id];
+    const expected = STEMS[id].sampleRate / 2;
+    if (declared !== expected) wrong.push(`${id}: ${declared ?? 'missing'} (expected ${expected})`);
+  }
+  if (wrong.length > 0) {
+    fail(`STEM_BANDWIDTH_HZ disagrees with the baked sample rates: ${wrong.join('; ')}`);
+  } else {
+    ok(`STEM_BANDWIDTH_HZ matches every stem's Nyquist`);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // 3. Recipes are well-formed and their references resolve

@@ -302,7 +302,7 @@ const ROOM_PARAMS: Record<RoomSize, { rt60: number; preDelayMs: number; damping:
  * (scripts/ambience/stems.mjs). A stem baked at 8 kHz carries nothing above 4 kHz no
  * matter how the browser resamples it.
  */
-const STEM_BANDWIDTH_HZ: Record<StemId, number> = {
+export const STEM_BANDWIDTH_HZ: Record<StemId, number> = {
   babble_close: 8000, babble_hall: 8000, babble_open: 8000,
   traffic_near: 8000, traffic_far: 4000,
   kitchen: 12000, hvac_office: 4000, room_tone: 4000, studio_tone: 4000,
