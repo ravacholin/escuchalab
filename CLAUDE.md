@@ -197,20 +197,48 @@ rain regardless of context. Three independent causes, all measurable:
   to one hiss; its syllabic envelope modulated a gain into negative values, so syllables
   never articulated.
 
-**Architecture.** 12 reusable stems, mixed per scene at runtime:
-- `public/ambience/*.wav` — 12 bundled stems (~8.9 MB total, less than the 5 old beds):
+**Then it was rebuilt again, for specificity.** The rebuild above worked — there was
+life and depth — but every scene still sounded like every other one, and *nothing in the
+test suite could say so*: `check:ambience` measures the baked stems and
+`check:ambience:runtime` measures the shape of the audio graph, so no check had ever
+rendered a scene. Measured once one did (`check:ambience:scenes`), **18 of 861 scene
+pairs sat below the distinguishability floor**, and the reasons were structural:
+- **106 of 148 labels resolved to one of four studios**, and those four were the same two
+  featureless stems at slightly different gains. For 72% of every lesson generated, the
+  learner heard no place at all — the *same* defect the Dialogue catalogue had been fixed
+  for, reproduced intact in the three formats nobody had measured.
+- Five global normalisations erased what distinguishes one place from another: a single
+  density ceiling (26 of 42 scenes fired at exactly 26.00 onsets/min), a scene-independent
+  event-over-bed ratio (+6.0 dB everywhere, by construction), a hard bed floor (12 scenes
+  pinned to one level), a binary indoor/outdoor air ceiling (70% of events through one of
+  two values), and no per-scene EQ at all (64 of 103 layers unfiltered).
+- 12 stems covered 42 scenes, `room_tone` in 29 of them and `hvac_office` in 20.
+
+**Architecture.** 20 reusable stems, mixed per scene at runtime:
+- `public/ambience/*.wav` — 20 bundled stems (~12.1 MB total, budget 14):
   `babble_close`, `babble_hall`, `babble_open`, `traffic_near`, `traffic_far`,
   `kitchen`, `hvac_office`, `room_tone`, `studio_tone`, `transit_hum`, `rain`,
-  `wind_leaves`. Sample rate and channel count are chosen per stem by content (8-24 kHz,
-  mono except the two that carry the most spatial information).
-- `services/ambiencePresets.ts` — ~40 `SceneRecipe`s (stems + gains + room + events) and
-  the mapping from all **148** `ScenarioContext.label`s, layered by `TextType`: a radio
-  bulletin is heard from a studio, not from the place it is about. `bedLevel()` computes
-  a scene's nominal bed amplitude from `STEM_LEVELS_DBFS`.
+  `wind_leaves`, plus the character stems added to break up the support cluster —
+  `office_life`, `pa_concourse`, `tiled_corridor`, `home_life`, `booth_tight`,
+  `workshop_tools`, `crowd_far`, `sports_hall`. Sample rate and channel count are chosen
+  per stem by content (8-24 kHz, mono except the three that carry the most spatial
+  information).
+- `services/ambiencePresets.ts` — **50** `SceneRecipe`s (stems + gains + room + tone +
+  activity + event headroom + events) and the mapping from all **148**
+  `ScenarioContext.label`s, layered by `TextType`. `bedLevel()` computes a scene's
+  nominal bed amplitude from `STEM_LEVELS_DBFS`.
+- **The label chooses the recording setup, never the topic.** A bulletin about traffic
+  is still heard from a studio and not from a road — but "a studio" is not one room. A
+  bulletin can come from an on-air booth, a live newsroom, a talk desk, a correspondent
+  in the street or a contributor on a 300-3400 Hz phone line. A podcast about learning to
+  cook is plausibly recorded at a kitchen table; one about a city is *not* recorded in
+  that city. `RECORDING_PRESENCE` (0.62) scales bed, events and density together when a
+  non-dialogue format lands on a real place, because a recording made somewhere is not
+  the same as standing there.
 - `services/ambienceEngine.ts` — framework-free runtime engine. Mixes the recipe's stems
-  (each shaped, stereo-widened, entering its loop at a random offset), builds a room
-  impulse response with early reflections and frequency-dependent decay, and schedules
-  ~39 synthesised event kinds.
+  (each shaped, coloured, stereo-widened, entering its loop at a random offset), builds a
+  room impulse response with early reflections and frequency-dependent decay, and
+  schedules ~39 synthesised event kinds.
 - `scripts/ambience/{dsp,voice,events,stems,preview}.mjs` — the offline synthesis
   toolkit. `voice.mjs` is the highest-leverage piece: a source-filter voice (Rosenberg
   glottal pulses with jitter → 4 resonant formants on real Spanish vowels → syllable
@@ -237,16 +265,46 @@ rain regardless of context. Three independent causes, all measurable:
   rather than at the sum of four. Without this a `gain` of 1 spanned ~15 dB depending
   on which synth read it, and it was biased the wrong way: the pingy sine-stack events
   came out loudest, the naturalistic noise ones quietest.
-- **Events are scaled against the scene's bed** (`bedLevel() * EVENT_OVER_BED`), never by
-  a fixed makeup gain. Beds span ~20 dB across scenes, so a global gain puts the same
-  footstep 11 dB over a café and 25 dB over a therapy room. The loudest spec in the
-  catalogue lands +6 dB over the bed; the typical one within a couple of dB.
-- **A density budget, not per-recipe restraint.** `MAX_EVENT_ONSETS_PER_MIN` caps how
-  often a scene puts a discrete sound in front of the listener, and the engine stretches
-  every interval to fit. Recipes were authored at up to ~92 occurrences/minute, and the
-  naive count hid the worst of it because several synths are clusters — one `typing`
-  occurrence is 16 key hits — so `EVENT_CLUSTER_SIZE` weights each kind by the root of
-  its cluster size.
+- **Events are scaled against the scene's bed**, never by a fixed makeup gain. Beds span
+  ~20 dB across scenes, so a global gain puts the same footstep 11 dB over a café and
+  25 dB over a therapy room. But scaling bed and events by the *same* factor made the
+  ratio a scene-independent constant: the loudest spec of every scene landed on exactly
+  +6.0 dB. In a library a dropped book is 20 dB over the bed and in a market a shout is
+  barely 3, and that contrast is the information. Each recipe declares its own
+  `eventHeadroomDb`; unannotated ones reproduce the old value. The catalogue now spans
+  14 dB across 14 distinct values, asserted **in both directions** — no scene deafening,
+  and the ceilings not all equal.
+- **A density budget per scene, not one for the catalogue.** `activity`
+  (`still`/`calm`/`busy`/`bustling`/`chaotic` → 6-52 onsets/min) says how often a scene
+  puts a discrete sound in front of the listener. There used to be one ceiling of 26, and
+  26 of 42 scenes were authored over it, so a full restaurant, a market, a call centre
+  and a newsroom all landed on exactly 26.00. The naive count hides the worst of it
+  because several synths are clusters — one `typing` occurrence is 16 key hits — so
+  `EVENT_CLUSTER_SIZE` weights each kind by the root of its cluster size, and
+  `ONSET_KNEE_MAX` stops a scene authored at 220/min from outranking one authored at 65.
+- **The rate scale is evaluated at a fixed reference intensity, always.**
+  `onsetsPerMinute` goes as 1/(1.6 − i) and the scheduler interval is multiplied by
+  (1.6 − i), so computing the budget at the *live* intensity makes the two cancel
+  exactly — and for one release the intensity slider changed only how loud events were,
+  never how often, in 26 of 42 scenes. No retuning fixes that: a scene that always
+  exactly fills a fixed budget cannot respond to anything. Pinning the evaluation makes
+  `rateScale` a per-scene constant, and `check:ambience:runtime` asserts the slider moves
+  the rate in every scene. `setIntensity()` therefore applies live; AudioPlayer used to
+  rebuild the whole engine on every slider move, restarting every stem from a new random
+  offset.
+- **The bed floor is a compressor, not a clamp.** `min(MAX_BED_BOOST, FLOOR/raw)` lifted
+  every quiet scene to *exactly* the floor — 12 scenes at one identical level and one
+  identical event scale, an 18 dB spread crushed to 11.5 with a pile-up at the bottom.
+  A ratio lift (`BED_KNEE_RATIO`) is strictly monotonic: quiet scenes come up and stay in
+  order.
+- **Per-scene colour.** `SceneTone` (tilt, shelves, one room mode) applies to the stem bus
+  and to individual layers, with its own makeup taken back out of the gain so colouring a
+  scene changes what it sounds like and not how loud it is. Without it, `room_tone`
+  arrived identical in the 29 scenes that use it and a tiled corridor differed from a
+  carpeted therapy room only in reverb length.
+- **The floor is declared, not deduced.** `surface` was derived from `RoomSize` alone,
+  which gave every `large` scene concrete — a workshop, a gym, a library, a bank and a
+  police station walking on the same floor because they shared a reverb preset.
 - **The limiter is a safety device, not a program compressor.** The old settings
   (−6 dB, 20:1, 250 ms release, events driven ×42) meant every clink ducked the whole
   bed for a quarter second.
@@ -263,7 +321,22 @@ rain regardless of context. Three independent causes, all measurable:
   where the bed does not exist can never be masked by it, so they float on top as a
   separate layer.
 - **Outdoor scenes get almost no reverb tail** (`ROOM_PARAMS.outdoor`). Giving a street a
-  1.1 s tail is one of the reasons everything used to sound like an interior.
+  1.1 s tail is one of the reasons everything used to sound like an interior. Beyond the
+  five size presets, a recipe adjusts `rt60Scale` and `damping`, so two `large` rooms are
+  not one room.
+- **The air ceiling is continuous, not a boolean.** The mid and far event buses were
+  lowpassed at `outdoor ? 6500 : 5000` and `outdoor ? 2600 : 1900`, and 70% of all event
+  specs went through one of the two indoor values — so every material's identity above
+  5 kHz was erased identically in every indoor scene, and a coin in a bank became the
+  same tick as a fork in a restaurant. `room.brightnessHz` is a property of the room's
+  surfaces and also bounds `sceneBandwidthHz()`.
+- **An event should sound like the thing it is.** Three primitives produce 39 kinds, and
+  several were the same synth reparameterised: `printer`/`grinder`/`compressor` shared an
+  exact topology and arrived through the mid bus as one machine at three speeds. A
+  printer is its stepper; a grinder *bogs* under load; a compressor cuts out and blows
+  its relief valve. Likewise `coin` accelerates as it settles, `creak` glides upward
+  where `chairScrape` is stick-slip, and a weight plate is a heavy modal hit rather than
+  `material('metal')` twice.
 - **Every `EventKind` has a synth**, asserted by `check:ambience` — tags can no longer be
   dead code.
 - **Node lifecycle**: event nodes are released on completion rather than accumulating
@@ -283,19 +356,46 @@ rain regardless of context. Three independent causes, all measurable:
   (`ambience_prefs_v1`) — `App.tsx` remounts the player per lesson, so plain state reset
   them every time.
 
+- **No two scenes may measure the same.** `check:ambience:scenes` renders all 50 scenes
+  offline through the same renderer as `ambience:preview` and compares them on four axes
+  — spectrum, loudness range, event density and room signature. It fails on any pair
+  below the distance floor, on a clustered catalogue (the *median* scene's nearest
+  neighbour, not just the closest pair), and on any pair that drew ≥15% closer than its
+  committed baseline. That last one catches slow convergence that still clears the floor,
+  which is how this problem arrived in the first place.
+- **No scene may be unreachable.** Seven were — `bar_night`, `plaza`, `park`, `hospital`,
+  `library` and both rain variants: authored, measured, bundled, and reachable from
+  nothing. Only the reverse invariant existed (no orphaned *stem*), so a recipe could be
+  dead code indefinitely. Weather variants are exempt; `applyModifiers` is their route.
+
 **Working on it**
-- `npm run ambience:build` regenerates all 12 stems (deterministic — re-running gives
+- `npm run ambience:build` regenerates all 20 stems (deterministic — re-running gives
   byte-identical files). Pass stem names to rebuild a subset. It prints each stem's
   measurements and flags any that miss their targets.
 - `npm run ambience:preview -- cafe street station` renders complete scene mixes to
   `.ambience-preview/*.wav` so you can **listen** without a browser or an API key. Run
   with no arguments to list the scenes, or `--all`.
+- `npm run check:ambience:scenes` prints the closest scene pairs with the failing axis
+  named, plus a per-scene table. `-- --write-baseline` re-pins
+  `scripts/ambience/scene-distance.baseline.json` once the catalogue is where you want it.
 - Beware when tuning a near-stationary support stem: raising its event *rate* fills in
   the quiet windows and so **reduces** the measured loudness range. That range has to
   come from the slow swell.
+- A synthesised texture comes out spectrally narrow because it is made of one or two
+  generators — `office_life` is keystrokes and paper, both at 1-2 kHz, and it measured
+  72% of its energy in that one octave. Do not tune that by hand, and above all do not
+  tune it with a different instrument than the one that judges it: `fillSpectrum()` in
+  stems.mjs drives the correction from `octaveConcentration()` itself, the same function
+  `check:ambience` uses, and its fill carries a swell because a flat one closes the gaps
+  between events and destroys the loudness range.
 - Adding a scene costs a recipe, not another 2 MB of audio. Adding a stem means adding it
-  to `STEMS` (stems.mjs), `StemId` + `STEM_LEVELS_DBFS` (ambiencePresets.ts), and
-  referencing it from at least one recipe — `check:ambience` enforces all three.
+  to `STEMS` (stems.mjs), `StemId` + `STEM_LEVELS_DBFS` (ambiencePresets.ts),
+  **`STEM_BANDWIDTH_HZ` (ambienceEngine.ts)** — four tables, not three; that last one is
+  the one that gets forgotten and it fails silently — and referencing it from at least
+  one recipe. `check:ambience` enforces all four.
+- Adding a scene: write the recipe, give it `activity`, `eventHeadroomDb`, `surface`,
+  `brightnessHz` and a `tone`, map at least one label to it, audition it with
+  `ambience:preview`, then run `check:ambience:scenes` and refresh the baseline.
 
 ### Exercise System
 
@@ -449,6 +549,7 @@ Models defined as constants in `geminiService.ts`:
 - **Audio Sanitization**: TTS will reject text with stage directions - always sanitize before sending
 - **Speaker Mapping**: TTS requires consistent internal speaker IDs; use "SpeakerA"/"SpeakerB" mapping for robustness
 - **Ambient Stems Are Bundled Assets**: `public/ambience/*.wav` ship with the app; there is no external ambient-audio API call, so there's nothing to rate-limit or fail at runtime. Regenerate/retune them with `npm run ambience:build`, and audition scenes with `npm run ambience:preview -- <scene>`.
+- **A bound every scene meets identically is not a bound**: the event-over-bed ratio, the density ceiling and the bed floor were all "satisfied" by every scene in the catalogue landing on the same number. Whenever a contract is added here, add the inverse assertion — that the catalogue actually uses the range.
 - **Ambience is judged by ear, floored by measurement**: `check:ambience` asserts the numbers that separate "a place" from "noise" (energy below 250 Hz, short-term loudness range, spectral+dynamic distance between scenes). It cannot tell you a café sounds like a café — use `ambience:preview` for that.
 - **Answer keys are verified, not trusted**: every exercise (model-generated *and* engine-generated) goes through `verifyExercise()` before rendering. It checks internal coherence and fidelity to the transcript. Prefer shipping one exercise fewer over one that teaches something false.
 - **Never display normalised text**: accent-stripped, lowercased forms are for comparison only. Options shown to learners keep their real spelling.
@@ -461,8 +562,9 @@ Automated checks (no API key or network needed) — run all with `npm test`:
 - `npm run typecheck` — `tsc --noEmit`.
 - `npm run check:audio` — asserts the TTS chunking never exceeds the per-accent character budget, never loses a turn (the `substring(0, 5000)` bug), keeps short dialogues in a single request, splits an oversized single turn by sentence instead of truncating it **while re-prefixing every piece with the speaker label**, that the PCM concatenation preserves every sample while fading only the seam, that `assignSpeakerVoices()` gives two speakers two voices that are both different *and* at least 4.5 semitones apart in every configuration (same gender, missing character sheets, acotaciones in the label, one name contained in the other) while keeping the declared gender wherever the catalogue allows it, and that the voice verifier works: it finds the pitch of a synthetic voice without reading it an octave low, accepts a two-voice track, rejects a one-voice track naming the voice that is missing, and declares itself inconclusive on too little audio or on two references too close to separate.
 - `npm run check:syllabus` — walks `getBlueprint()` across the **126** valid level × text-type × mode × length combinations and asserts the pedagogical invariants: the three budgets (cards per level × length, discrete answers, reading load), **monotonicity by duration** (Short ⊆ Medium ⊆ Long), **at least one slot backed against the transcript**, **B1-B2 and C1 not sharing a `format:skill` signature**, no format outside its level or text-type range, nothing presupposing two speakers in single-voice audio, A0 free of ordering/matching/scale/V-F-NG/spot-the-difference, C1 free of basic decoding formats (`data_capture`, `dictation`, `chunk_order`), every lesson covering at least two stages and three distinct skills, stage order preserved, unique slot ids, existing engine fallbacks, no `preferEngine` without one, and Vocabulary/text-type variants genuinely differing from one another. It also prints the per-level load table, so the budget can be read instead of deduced from the slot tables.
-- `npm run check:ambience` — asserts that all 148 scenario labels resolve to a curated scene (none falling through to the generic fallback, which is how 108 of them behaved before), that no scene monopolises the place-based dialogue catalogue (max 15%, where the old `OFFICE` profile held 75%), that each non-dialogue format has its own default scene, that every stem a recipe names exists and none is orphaned, that every `EventKind` has a registered synth, that the runtime's stem-level table matches what was baked, and the acoustic floor: per stem, energy below 250 Hz and short-term loudness range within the targets declared in `stems.mjs`, plus a minimum spectral+dynamic distance between the character stems, how much of each stem's energy falls in its single fullest octave (the crowd stems once held 53-77% in one octave and passed every other bound), and that no stem steps at its loop point. It cannot tell you whether a café *sounds* like a café — `npm run ambience:preview` is for that.
-- `npm run check:ambience:runtime` — instantiates the **real** `AmbienceEngine` against a fake `AudioContext` (`scripts/ambience/fakeWebAudio.mjs`, with virtual timers so minutes of scene time run deterministically) and asserts what the tables alone cannot: that a source actually starts for every layer of all 42 scenes, that loading does not depend on `start()` having been called, that `stop()` cancels an in-flight load, that every bed source reaches the destination, that the scheduler keeps firing over minutes, and the mix contract — every bed lands in −40..−22 dBFS and no event sits more than 8 dB over its bed. This check exists because a 100% reproducible "no stem ever plays" bug shipped while all of `check:ambience` was green: it inspects tables and baked WAVs, and nothing exercised the engine.
+- `npm run check:ambience` — asserts that all 148 scenario labels resolve to a curated scene (none falling through to the generic fallback, which is how 108 of them behaved before), that no scene monopolises the place-based dialogue catalogue (max 15%, where the old `OFFICE` profile held 75%) or the catalogue overall (max 10%, where `studio_podcast` once held 23%), that **each non-dialogue format uses at least 5 scenes with none over 35%** — replacing a rule that asserted nothing there and let 72% of the catalogue collapse onto four near-identical studios — that each such format still has its own default scene, that **no scene is unreachable from any label**, that every stem a recipe names exists and none is orphaned, that every `EventKind` has a registered synth, that the runtime's stem-level **and stem-bandwidth** tables match what was baked, and the acoustic floor: per stem, energy below 250 Hz and short-term loudness range within the targets declared in `stems.mjs`, plus a minimum spectral+dynamic distance between the character stems, how much of each stem's energy falls in its single fullest octave (the crowd stems once held 53-77% in one octave and passed every other bound), and that no stem steps at its loop point. It cannot tell you whether a café *sounds* like a café — `npm run ambience:preview` is for that.
+- `npm run check:ambience:runtime` — instantiates the **real** `AmbienceEngine` against a fake `AudioContext` (`scripts/ambience/fakeWebAudio.mjs`, with virtual timers so minutes of scene time run deterministically) and asserts what the tables alone cannot: that a source actually starts for every layer of all 50 scenes, that loading does not depend on `start()` having been called, that `stop()` cancels an in-flight load, that every bed source reaches the destination, that the scheduler keeps firing over minutes, and the mix contract — every bed in −40..−22 dBFS, no event over 20 dB above its bed, **and the inverse: the headrooms not all equal** (≥6 distinct values spanning ≥8 dB), event density spanning ≥5× across the catalogue with no more than 6 scenes on the same rate, and **intensity actually moving the event rate in every scene**. Those last three exist because bounds every scene satisfies identically are constants, not contracts — which is exactly how 26 scenes came to fire at 26.00 onsets/min with a slider that could not change it.
+- `npm run check:ambience:scenes` — the one that measures what a learner actually complains about. Renders all 50 scenes offline through `scripts/ambience/render.mjs` (shared with `ambience:preview`, so what it measures is what you audition) and compares all 1225 pairs on spectrum, loudness range, event density and room signature. Fails on any pair below the floor, on a clustered catalogue, and on regression against `scene-distance.baseline.json`. When it was first written, 18 pairs were below the floor. It prints the closest pairs with the failing axis named whether or not it passes.
 - `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text. It also pins the dictated-datum path: a phone said in words and a phone said as `654 32 18` must both yield one `Teléfono` field, and focused minimal pairs must contrast the digits rather than the greeting. And the precision contract of `dictation`: a reconstruction whose sequence is not heard contiguously is rejected, a position may not offer the solution twice, the engine rebuilds `seis cinco cuatro treinta y dos dieciocho` / `654 32 18` / `catorce con noventa` / `cinco y media` exactly (with `con` as a fixed piece, not a control), no position offers another position's value, a `multiple_choice` tagged with the datum's `slotId` does not take that slot, and exercises outside the blueprint never reach the lesson.
 
 Checks that need an API key, network and quota (**not** part of `npm test`):
@@ -489,3 +591,5 @@ Manual checklist (needs an API key):
 5. Rendering and submit/feedback for the newer formats (`dictation`, `data_capture`, `minimal_pairs`, `spot_the_difference`, `matching`, `scale`, `true_false_notgiven`, `chunk_order`), including the `sourceTurns` reveal. For `dictation`, check on a narrow screen that a long datum wraps instead of overflowing.
 6. Audio generation across accent/gender combinations; localStorage persistence; error handling for invalid keys. **Listen to a dialogue whose two characters share a gender** — the case with the least margin — and confirm the two speakers are told apart without reading the transcript. If the loading log says «tramo devuelto con una sola voz», the repair fired and the lesson is fine; if it says it twice for the same chunk, the model is drifting and the pitch table is the first thing to re-measure.
 7. Ambience: confirm the player's `N/M capas` counter reaches the total (it is the tell for a silent bed). Play a `Café / Restaurante`, a `Taxi / Transporte`, a `Taller Mecánico`, an `Aeropuerto / Aerolínea`, an `El Tiempo` (RadioNews) and a `Mi Rutina Diaria` (Podcast) — they should be recognisable blind and clearly different from one another. Check that the bed ducks under speech without pumping between syllables, that the volume/intensity/ducking/mute settings survive generating a new lesson, and that deleting `public/ambience/` degrades to a working player rather than an error.
+7b. The formats that used to have no place: generate a `Aprendí a Cocinar` and a `Mi Ciudad Favorita` (both Podcast) and confirm the first is a kitchen table and the second a booth — the mapping is by recording setup, so the city episode is *supposed* to stay in the studio. A `Geopolítica` (RadioNews) should audibly be a phone line. A `Monólogo de Humor` should be a room with an audience in it.
+7c. Move the intensity slider mid-playback: events must get **more frequent**, not just louder, and the bed must not restart. For one release the slider was a pure loudness control in 26 of 42 scenes and every nudge rebuilt the whole engine.
