@@ -957,10 +957,26 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     }
   },
   glass: (c) => material(c, 'glass', rand(c.rng, 0.4, 1), rand(c.rng, -0.7, 0.7)),
+  /**
+   * A dropped coin ACCELERATES: each bounce is closer to the last and quieter, until
+   * it spins down flat. Rendered as evenly spaced hits it was the same event as
+   * `cutlery`, whose frequency range it overlaps almost entirely.
+   */
   coin: (c) => {
     const pan = rand(c.rng, -0.4, 0.4);
-    for (let i = 0; i < randInt(c.rng, 1, 4); i++) {
-      material({ ...c, at: c.at + i * rand(c.rng, 0.03, 0.11) }, 'coin', rand(c.rng, 0.3, 0.8), pan);
+    const bounces = randInt(c.rng, 3, 7);
+    let gap = rand(c.rng, 0.075, 0.13);
+    let t = c.at;
+    let level = rand(c.rng, 0.6, 0.9);
+    for (let i = 0; i < bounces; i++) {
+      material({ ...c, at: t }, 'coin', level, pan);
+      t += gap;
+      gap *= rand(c.rng, 0.62, 0.78);
+      level *= rand(c.rng, 0.62, 0.8);
+    }
+    // The spin-down: a fast tremolo as it settles onto the flat.
+    for (let i = 0; i < randInt(c.rng, 4, 9); i++) {
+      material({ ...c, at: t + i * 0.022, gain: c.gain * 0.16 }, 'coin', 0.3, pan);
     }
   },
   metalClank: (c) => material(c, 'metal', rand(c.rng, 0.5, 1), rand(c.rng, -0.8, 0.8)),
@@ -995,16 +1011,31 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
       oneFootstep(c, surface, Math.max(0.25, proximity), from * (1 - 2 * t), c.at + i * interval);
     }
   },
+  /**
+   * A chair moving is STICK-SLIP: the leg grips, releases, grips again. Rendered as
+   * one smooth band-passed swell it was the same sound as `creak`, whose band overlaps
+   * it — and the two appear together in eight scenes.
+   */
   chairScrape: (c) => {
-    noiseBurst(c, {
-      durationMs: rand(c.rng, 180, 600),
-      filterType: 'bandpass',
-      freq: rand(c.rng, 600, 1500),
-      q: 3.2,
-      gain: c.gain * 0.7,
-      pan: rand(c.rng, -0.6, 0.6),
-      attackMs: 25,
-    });
+    const pan = rand(c.rng, -0.6, 0.6);
+    const total = rand(c.rng, 180, 600);
+    const grabs = randInt(c.rng, 2, 5);
+    let t = c.at;
+    for (let i = 0; i < grabs; i++) {
+      const seg = (total / grabs) * rand(c.rng, 0.6, 1.3);
+      noiseBurst({ ...c, at: t }, {
+        durationMs: seg,
+        filterType: 'bandpass',
+        freq: rand(c.rng, 700, 1700),
+        q: 3.6,
+        gain: c.gain * 0.7 * rand(c.rng, 0.55, 1),
+        pan,
+        attackMs: 8,
+      });
+      t += (seg / 1000) * rand(c.rng, 0.7, 1.1);
+    }
+    // The leg landing at the end of the push.
+    material({ ...c, at: t, gain: c.gain * 0.35 }, 'wood', rand(c.rng, 0.3, 0.7), pan);
   },
   cough: (c) => {
     // A cough is a glottal release, not a puff: a hard noisy burst with a voiced
@@ -1143,29 +1174,57 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
       });
     }
   },
+  /**
+   * A printer, not a motor.
+   *
+   * `printer`, `grinder` and `compressor` were the same synth three times over — a
+   * sawtooth ramping up into a lowpass with a trapezoid envelope — separated only by
+   * their frequency band and duration. Through the mid bus's lowpass they arrived as
+   * one machine at three speeds, which is a large part of why an office, a café and a
+   * workshop did not sound like different kinds of place.
+   *
+   * What identifies a printer is the STEPPER: a train of discrete ticks at a rate you
+   * can count, plus the paper being dragged through. The motor whine is the least
+   * characteristic part of it.
+   */
   printer: (c) => {
     const { ctx, at } = c;
     const dur = rand(c.rng, 0.9, 2.2);
+    const pan = rand(c.rng, -0.3, 0.3);
+
+    // The carriage: discrete steps, fast enough to buzz but slow enough to count.
+    const stepHz = rand(c.rng, 34, 58);
+    const steps = Math.floor(dur * stepHz);
+    for (let i = 0; i < steps; i++) {
+      const t = at + (i / stepHz) + rand(c.rng, -0.0015, 0.0015);
+      modalHit(
+        { ...c, at: t, gain: c.gain * 0.1 * (0.7 + 0.3 * Math.sin(i * 0.4)) },
+        [{ freq: rand(c.rng, 1500, 2400), decayS: 0.01, amp: 1 }],
+        { pan },
+      );
+    }
+    // Paper being pulled through the rollers.
+    noiseBurst(c, {
+      durationMs: dur * 1000, filterType: 'bandpass', freq: rand(c.rng, 2600, 4200), q: 0.9,
+      gain: c.gain * 0.18, pan, attackMs: 90, color: 'pink',
+    });
+    // The feed motor underneath, quiet: it is context, not identity.
     const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(90, at);
-    osc.frequency.linearRampToValueAtTime(220, at + dur * 0.5);
-    osc.frequency.linearRampToValueAtTime(95, at + dur);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(rand(c.rng, 150, 210), at);
     const flt = ctx.createBiquadFilter();
-    flt.type = 'lowpass'; flt.frequency.value = 2200;
+    flt.type = 'lowpass'; flt.frequency.value = 900;
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, at);
-    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.25), at + 0.08);
-    env.gain.setValueAtTime(c.gain * 0.25, at + dur * 0.8);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.09), at + 0.08);
+    env.gain.setValueAtTime(c.gain * 0.09, at + dur * 0.85);
     env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     osc.connect(flt); flt.connect(env); env.connect(c.dest); env.connect(c.send);
     osc.start(at); osc.stop(at + dur + 0.02);
-    c.track(osc, at + dur + 0.05); c.track(flt, at + dur + 0.05); c.track(env, at + dur + 0.05);
-    noiseBurst(c, {
-      durationMs: dur * 1000, filterType: 'bandpass', freq: 1600, q: 0.8,
-      gain: c.gain * 0.12, pan: rand(c.rng, -0.3, 0.3), attackMs: 60,
-    });
+    const done = at + dur + 0.05;
+    c.track(osc, done); c.track(flt, done); c.track(env, done);
   },
+
   phoneRing: (c) => {
     const pan = rand(c.rng, -0.7, 0.7);
     const base = rand(c.rng, 900, 1400);
@@ -1302,29 +1361,46 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     const done = at + dur + 0.1;
     c.track(src, done); c.track(flt, done); c.track(panner, done); c.track(env, done);
   },
+  /**
+   * A burr grinder. What tells it apart from any other motor is that it BOGS: beans
+   * feed in unevenly, the load fluctuates, and the pitch and level wobble with it.
+   * A steady ramp up and down is a fan.
+   */
   grinder: (c) => {
     const { ctx, at } = c;
     const dur = rand(c.rng, 1.6, 3);
     const osc = ctx.createOscillator();
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(40, at);
-    osc.frequency.linearRampToValueAtTime(115, at + 0.35);
-    osc.frequency.setValueAtTime(115, at + dur - 0.3);
+    osc.frequency.linearRampToValueAtTime(rand(c.rng, 105, 125), at + 0.35);
+    // Load fluctuation: the motor dips whenever it catches.
+    const wobble = ctx.createOscillator();
+    wobble.type = 'sine';
+    wobble.frequency.value = rand(c.rng, 5.5, 11);
+    const wobbleDepth = ctx.createGain();
+    wobbleDepth.gain.value = rand(c.rng, 9, 18);
+    wobble.connect(wobbleDepth); wobbleDepth.connect(osc.frequency);
+    osc.frequency.setValueAtTime(rand(c.rng, 105, 125), at + dur - 0.3);
     osc.frequency.linearRampToValueAtTime(45, at + dur);
+
     const flt = ctx.createBiquadFilter();
     flt.type = 'lowpass'; flt.frequency.value = 1800;
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, at);
-    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.35), at + 0.2);
-    env.gain.setValueAtTime(c.gain * 0.35, at + dur - 0.25);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.32), at + 0.2);
+    env.gain.setValueAtTime(c.gain * 0.32, at + dur - 0.25);
     env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     osc.connect(flt); flt.connect(env); env.connect(c.dest); env.connect(c.send);
     osc.start(at); osc.stop(at + dur + 0.02);
+    wobble.start(at); wobble.stop(at + dur + 0.02);
     const done = at + dur + 0.1;
-    c.track(osc, done); c.track(flt, done); c.track(env, done);
+    c.track(osc, done); c.track(wobble, done); c.track(wobbleDepth, done);
+    c.track(flt, done); c.track(env, done);
+
+    // The burr itself: hard fragments rattling, bright and dense.
     noiseBurst(c, {
-      durationMs: dur * 1000, filterType: 'bandpass', freq: 2600, q: 0.6,
-      gain: c.gain * 0.2, pan: 0, attackMs: 200,
+      durationMs: dur * 1000, filterType: 'highpass', freq: rand(c.rng, 2400, 3400),
+      gain: c.gain * 0.26, pan: 0, attackMs: 180,
     });
   },
 
@@ -1408,10 +1484,28 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
       { pan: rand(c.rng, -0.4, 0.4), bodyAmount: 0.22, bodyHz: f * 1.5, bodyMs: 14 },
     );
   },
+  /**
+   * A weight plate is heavy: it lands low, rings long, and settles against the stack.
+   * `metalClank` is a light metal hit — the two were the same `material('metal')`
+   * call, one of them twice, and `impactWrench` is that call again 8-20 times.
+   */
   weightClank: (c) => {
     const pan = rand(c.rng, -0.7, 0.7);
-    material(c, 'metal', rand(c.rng, 0.7, 1), pan);
-    if (c.rng() < 0.6) material({ ...c, at: c.at + rand(c.rng, 0.05, 0.14), gain: c.gain * 0.6 }, 'metal', 0.5, pan);
+    modalHit(
+      { ...c, gain: c.gain * 0.9 },
+      [
+        { freq: rand(c.rng, 78, 140), decayS: rand(c.rng, 0.5, 0.95), amp: 1 },
+        { freq: rand(c.rng, 210, 330), decayS: 0.34, amp: 0.5 },
+        { freq: rand(c.rng, 520, 780), decayS: 0.12, amp: 0.22 },
+      ],
+      { pan },
+    );
+    for (let i = 0; i < randInt(c.rng, 1, 3); i++) {
+      material(
+        { ...c, at: c.at + 0.07 + i * rand(c.rng, 0.05, 0.11), gain: c.gain * (0.4 / (i + 1)) },
+        'metal', rand(c.rng, 0.4, 0.7), pan,
+      );
+    }
   },
   impactWrench: (c) => {
     // Rattle-gun: a burst of very fast metallic hammer blows.
@@ -1421,27 +1515,40 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
       material({ ...c, at: c.at + i * rand(c.rng, 0.022, 0.033), gain: c.gain * rand(c.rng, 0.5, 1) }, 'metal', 0.5, pan);
     }
   },
+  /**
+   * An air compressor: it builds pressure at a steady load and then CUTS OUT, and the
+   * relief valve blows off. That final hiss is the whole signature — without it this
+   * is indistinguishable from a printer an octave down.
+   */
   compressor: (c) => {
     const { ctx, at } = c;
     const dur = rand(c.rng, 3, 7);
     const osc = ctx.createOscillator();
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(28, at);
-    osc.frequency.linearRampToValueAtTime(52, at + 0.6);
-    osc.frequency.setValueAtTime(52, at + dur - 0.5);
-    osc.frequency.linearRampToValueAtTime(26, at + dur);
+    // Pressure builds: the motor works progressively harder rather than plateauing.
+    osc.frequency.linearRampToValueAtTime(46, at + 0.6);
+    osc.frequency.linearRampToValueAtTime(rand(c.rng, 54, 62), at + dur - 0.12);
     const flt = ctx.createBiquadFilter();
     flt.type = 'lowpass'; flt.frequency.value = 700;
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, at);
     env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.4), at + 0.4);
-    env.gain.setValueAtTime(c.gain * 0.4, at + dur - 0.4);
+    env.gain.setValueAtTime(c.gain * 0.4, at + dur - 0.1);
+    // Cut-out, not fade-out: a compressor stops.
     env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     osc.connect(flt); flt.connect(env); env.connect(c.dest); env.connect(c.send);
     osc.start(at); osc.stop(at + dur + 0.02);
     const done = at + dur + 0.1;
     c.track(osc, done); c.track(flt, done); c.track(env, done);
+
+    // The relief valve, right on the cut-out.
+    noiseBurst({ ...c, at: at + dur - 0.04 }, {
+      durationMs: rand(c.rng, 320, 700), filterType: 'highpass', freq: rand(c.rng, 1800, 3200),
+      gain: c.gain * 0.4, pan: rand(c.rng, -0.4, 0.4), attackMs: 4,
+    });
   },
+
   hairDryer: (c) => {
     const { ctx, at } = c;
     const dur = rand(c.rng, 3, 8);
@@ -1462,6 +1569,23 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     src.start(at, c.rng() * 4); src.stop(at + dur + 0.05);
     const done = at + dur + 0.1;
     c.track(src, done); c.track(flt, done); c.track(panner, done); c.track(env, done);
+
+    // A hair dryer has a motor in it; steam and a sizzle do not. Without this the
+    // three looped-noise-through-one-filter events are one sound at three centres.
+    const motor = ctx.createOscillator();
+    motor.type = 'sawtooth';
+    motor.frequency.setValueAtTime(rand(c.rng, 118, 168), at);
+    const motorFlt = ctx.createBiquadFilter();
+    motorFlt.type = 'lowpass'; motorFlt.frequency.value = 620;
+    const motorEnv = ctx.createGain();
+    motorEnv.gain.setValueAtTime(0.0001, at);
+    motorEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.14), at + 0.25);
+    motorEnv.gain.setValueAtTime(c.gain * 0.14, at + dur - 0.3);
+    motorEnv.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    motor.connect(motorFlt); motorFlt.connect(motorEnv);
+    motorEnv.connect(c.dest); motorEnv.connect(c.send);
+    motor.start(at); motor.stop(at + dur + 0.05);
+    c.track(motor, done); c.track(motorFlt, done); c.track(motorEnv, done);
   },
 
   bird: (c) => {
@@ -1542,20 +1666,66 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     c.track(osc, done); c.track(panner, done); c.track(env, done);
   },
 
+  /**
+   * A creak RISES. Wood under a slowly increasing load shifts its resonance upward —
+   * that glide is what tells it apart from a chair being pushed, which is a series of
+   * grabs at a roughly constant pitch.
+   */
   creak: (c) => {
-    noiseBurst(c, {
-      durationMs: rand(c.rng, 120, 400), filterType: 'bandpass', freq: rand(c.rng, 380, 900),
-      q: 5, gain: c.gain * 0.5, pan: rand(c.rng, -0.6, 0.6), attackMs: 30,
-    });
+    const { ctx, at } = c;
+    const dur = rand(c.rng, 0.14, 0.45);
+    const src = ctx.createBufferSource();
+    src.buffer = c.noise.get('white');
+    const flt = ctx.createBiquadFilter();
+    flt.type = 'bandpass';
+    flt.Q.value = 8;
+    const start = rand(c.rng, 320, 620);
+    flt.frequency.setValueAtTime(start, at);
+    flt.frequency.exponentialRampToValueAtTime(start * rand(c.rng, 1.6, 2.6), at + dur);
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = rand(c.rng, -0.6, 0.6);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.5), at + dur * 0.55);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(flt); flt.connect(panner); panner.connect(env);
+    env.connect(c.dest); env.connect(c.send);
+    src.start(at, c.rng() * 4); src.stop(at + dur + 0.02);
+    const done = at + dur + 0.05;
+    c.track(src, done); c.track(flt, done); c.track(panner, done); c.track(env, done);
   },
+  /**
+   * A page turning is one gesture: a rising sweep as the sheet lifts, then the snap of
+   * it landing. `paperRustle` is the granular one — the two used the same granulated
+   * synth with different grain counts, and they share a scene in the library.
+   */
   pageTurn: (c) => {
+    const { ctx, at } = c;
     const pan = rand(c.rng, -0.4, 0.4);
-    for (let i = 0; i < randInt(c.rng, 4, 9); i++) {
-      noiseBurst({ ...c, at: c.at + c.rng() * 0.28 }, {
-        durationMs: rand(c.rng, 8, 40), filterType: 'bandpass', freq: rand(c.rng, 2200, 6000),
-        q: 1.2, gain: c.gain * rand(c.rng, 0.3, 0.9), pan, attackMs: 1.5,
-      });
-    }
+    const dur = rand(c.rng, 0.18, 0.32);
+    const src = ctx.createBufferSource();
+    src.buffer = c.noise.get('white');
+    const flt = ctx.createBiquadFilter();
+    flt.type = 'bandpass';
+    flt.Q.value = 1.1;
+    flt.frequency.setValueAtTime(rand(c.rng, 1400, 2200), at);
+    flt.frequency.exponentialRampToValueAtTime(rand(c.rng, 5000, 7000), at + dur);
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = pan;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.5), at + dur * 0.7);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(flt); flt.connect(panner); panner.connect(env);
+    env.connect(c.dest); env.connect(c.send);
+    src.start(at, c.rng() * 4); src.stop(at + dur + 0.02);
+    const done = at + dur + 0.06;
+    c.track(src, done); c.track(flt, done); c.track(panner, done); c.track(env, done);
+    // The sheet settling.
+    noiseBurst({ ...c, at: at + dur * 0.92 }, {
+      durationMs: rand(c.rng, 14, 30), filterType: 'bandpass', freq: rand(c.rng, 900, 1600),
+      q: 1.6, gain: c.gain * 0.4, pan, attackMs: 1,
+    });
   },
   applause: (c) => {
     // A crowd clapping is a dense wash with a few near claps standing out of it, not

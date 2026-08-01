@@ -11,6 +11,17 @@
 // treat a render as a faithful audition, not a byte-exact simulation. What it is
 // exact about is the mix arithmetic: the constants come out of the engine source at
 // load time (see loadMixModule) instead of being hand-copied.
+//
+// Known divergence, stated rather than left to be discovered: several event kinds were
+// given distinct mechanical signatures in the runtime engine (`printer` is a stepper
+// train, `grinder` bogs under load, `compressor` ends on a relief valve, `coin`
+// accelerates as it settles, `creak` glides upward, `weightClank` is a heavy modal
+// hit) that scripts/ambience/events.mjs has not yet been given. events.mjs also feeds
+// the stem baking, so changing it means rebaking and re-verifying twenty stems against
+// their acoustic targets. Until then, what a render gets right is the scene's
+// STRUCTURE — which stems, at what level, in what room, at what density, with events
+// at the right rates and distances — and that is what check:ambience:scenes measures.
+// The individual timbre of those six kinds is a little duller here than in the browser.
 
 import { build } from 'esbuild';
 import { mkdtempSync, readFileSync, existsSync } from 'node:fs';
