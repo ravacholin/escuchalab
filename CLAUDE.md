@@ -93,17 +93,83 @@ Extensive dialect profiles in `DIALECT_PROFILES` covering:
 Key implementation notes:
 - Each profile includes grammar, pragmatics, and lexicon
 - AccentChallenge mode randomly selects two different accents
-- Audio generation serves voices from per-gender pools (`TTS_VOICE_POOLS`), never a single voice per gender — see Audio Generation below
+- Audio generation picks the voice pair by **measured pitch distance** (`TTS_VOICES`), not by gender pools — see Audio Generation below
 - Multi-speaker TTS labels each turn with the same canonical speaker string used in `speechConfig`
 
 ### Audio Generation
-- Uses `gemini-2.5-flash-preview-tts` model
-- Sanitizes text to remove stage directions (*, [], ()) before TTS
-- Multi-speaker config with voice assignment computed **once** over the whole dialogue and reused for every chunk
-- **Two speakers always get two different voices** (`assignSpeakerVoices`). The old mapping was `Female→Kore`, `Male→Fenrir`, so any dialogue whose two characters shared a gender — two clientas, two periodistas, the frequent same-gender pairing in AccentChallenge — was read entirely in one voice despite having different names, and the learner had no way to segment the turns that half the exercises ask about. Gender now only chooses **which pool** a voice is drawn from (`TTS_VOICE_POOLS`: Kore/Aoede/Leda/Autonoe and Fenrir/Puck/Charon/Orus); the second speaker takes the next unused voice, falling through to the other pool if it has to. A speaker with no matching `Character` entry draws from `TTS_FALLBACK_VOICES` at an offset, so unknown genders never collide either.
-- **The turn label must match `speechConfig` exactly.** The second way both voices came out the same: the config was keyed on the speaker string while each line was prefixed with the raw `d.speaker`, so a script writing `"Ana (cajera)"` in the dialogue and `"Ana"` in the config gave the model a speaker it had no voice for, and it read everything with the first one. `canonicalSpeakerLabel()` strips acotaciones and stray punctuation, `assignmentFor()` routes each turn to its owner (longest match first, so `Ana María` never steals `Ana`'s turns), and if the two labels are still indistinguishable — identical, or one contained in the other — both fall back to `Hablante 1` / `Hablante 2`.
-- Returns base64-encoded audio data
-- Error handling for "non-audio response" rejections
+
+The governing fact, and the one that took three failed fixes to internalise:
+**`multiSpeakerVoiceConfig` is not a router.** It does not assign turn *i* to voice
+*v*. The model reads the transcript, decides on its own who is speaking in each line,
+and *then* looks up a voice — and Google documents "voice inconsistency with prompt
+instructions" as a known limitation of the TTS models. Measured against the API with
+the prompt format this app used to send, a six-turn dialogue between `Lucía` (Kore,
+185 Hz) and `Andrés` (Fenrir, 119 Hz) came back with **no low-pitched segment at all in
+3 of 4 generations**: two names, two configured voices, one voice heard. Every previous
+attempt at this bug fixed the *assignment* — different voices per gender, canonical
+labels — which was necessary and not remotely sufficient, because the assignment was
+never what broke.
+
+So the guarantee is not "we asked correctly". It is: **ask the way the model documents,
+choose voices that can be told apart, and then measure the audio that came back.**
+
+- Model: `gemini-3.1-flash-tts-preview`, PCM 24 kHz / 16-bit mono. Free tier is
+  **10 requests per day per model** — which is why the repair path below is a fallback
+  and not the default, and why chunking a short lesson is avoided.
+- Sanitizes text to remove stage directions (*, [], ()) before TTS.
+- Voice assignment is computed **once** over the whole dialogue and reused for every
+  chunk and every retry.
+- **The pair is chosen by measured pitch distance** (`pickVoicePair`). The pools were
+  the previous fix and they were not enough: measured on the API
+  (`npm run tts:voices`), the female voices of the catalogue span 176-233 Hz and the
+  male ones 119-135 — 3.2 and 2.2 semitones. "A different voice from the same pool"
+  therefore did not mean a voice the learner could use to segment turns, which is the
+  whole point of having two of them. `TTS_VOICES` carries each voice's measured
+  `pitchHz`, and the rule is: of the pairs that respect both declared genders, the most
+  separated; and if none reaches `MIN_VOICE_SEPARATION_SEMITONES` (4.5), **the gender is
+  what gets sacrificed, not the distinction**. Two women still get two female voices
+  (Zephyr/Autonoe, 4.8 semitones). Two men cannot — the entire male catalogue fits in
+  2.2 — so the speaker with fewer turns crosses over.
+- **The prompt follows the documented multi-speaker format.** What used to be sent was
+  the phonetic profile, then a `---BEGIN DIALOGUE---` separator, then the turns: nowhere
+  did it say that this was a conversation, who was in it, or that they had different
+  voices. Google's own example is `TTS the following conversation between Joe and Jane:`
+  immediately before the transcript, and the guide says to align *who says it* with *how
+  it sounds*. `conversationDirective()` does both — it names the two speakers and
+  describes each one's timbre (`TtsVoice.timbre`) — and sits **after** the phonetic
+  profile, right against the turns, so it is the last thing read before the dialogue.
+- **The turn label must match `speechConfig` exactly.** The config was keyed on the
+  speaker string while each line was prefixed with the raw `d.speaker`, so a script
+  writing `"Ana (cajera)"` in the dialogue and `"Ana"` in the config gave the model a
+  speaker it had no voice for. `canonicalSpeakerLabel()` strips acotaciones and stray
+  punctuation, `assignmentFor()` routes each turn to its owner (longest match first, so
+  `Ana María` never steals `Ana`'s turns), and if the two labels are still
+  indistinguishable — identical, or one contained in the other — both fall back to
+  `Hablante 1` / `Hablante 2`. **A split turn keeps its label**: `splitOversizedLine()`
+  re-prefixes every piece, because the second half of a long turn used to arrive as text
+  with no owner, which is exactly the case where the model keeps the previous voice.
+- **A chunk with one speaker is sent as single-speaker.** Asking for
+  `multiSpeakerVoiceConfig` where only one person talks hands the model an attribution
+  it does not have to solve and a spare voice to get wrong.
+- **The returned audio is measured** (`services/ttsVoiceCheck.ts`). `checkTwoVoices()`
+  segments the PCM by silences, estimates F0 per segment by autocorrelation, and counts
+  *evidence per voice*: segments falling within ~3 semitones of each assigned voice's
+  reference pitch. It deliberately does **not** just cluster the pitches into two groups
+  — one expressive voice spreads its segments over 4 semitones and would pass. What a
+  single voice cannot fake is turning up where it is not: if nothing lands near 119 Hz,
+  Fenrir was never used. When the two references are too close to separate, or there is
+  too little audio, the verdict is `conclusive: false` and nothing is retried — a false
+  alarm costs a request out of ten.
+- **Repair, in order**: the chunk is re-requested once with an insistent directive
+  (`conversationDirective(owners, true)`, which spells out that the voices must differ
+  and which one is higher); if it still comes back single-voiced, the chunk is
+  synthesised **turn by turn**, one request per turn with a single voice configured.
+  That last path cannot fail by construction — one request, one voice, one turn — at the
+  cost of one request per turn and of the natural hand-off between réplicas. It is the
+  floor, not the plan: an audio that sounds a little less conversational still works for
+  segmenting turns; an audio with one voice does not.
+- Returns base64-encoded audio data.
+- Error handling for "non-audio response" rejections.
 - **Chunked at turn boundaries** (`chunkDialogueLines`): the phonetic profile prepended to every request eats 2196-3407 of the 5000-character budget, and the old code just did `substring(0, 5000)` — a `Largo` dialogue in Buenos Aires or Lima silently lost its last turns mid-sentence while the exercises kept asking about them. `ttsDialogueBudget(accent)` computes what is actually left, and no turn is ever dropped. Chunks are also used for speed above `TURNS_BEFORE_SPLITTING` turns, generated with `TTS_CONCURRENCY = 2` (three in parallel gets 429/503 from the API) and concatenated with a 5 ms fade at each seam (`concatPcmChunks`). **Each chunk is one more request against the TTS quota**, so short lessons deliberately stay in a single call. The chunking is internal to `generateAudio()`: it still takes the same arguments, still reports through `ProgressReporter`, and still returns one base64 PCM track.
 
 ### Ambient Sound System
@@ -393,11 +459,24 @@ Models defined as constants in `geminiService.ts`:
 
 Automated checks (no API key or network needed) — run all with `npm test`:
 - `npm run typecheck` — `tsc --noEmit`.
-- `npm run check:audio` — asserts the TTS chunking never exceeds the per-accent character budget, never loses a turn (the `substring(0, 5000)` bug), keeps short dialogues in a single request, splits an oversized single turn by sentence instead of truncating it, that the PCM concatenation preserves every sample while fading only the seam, and that `assignSpeakerVoices()` gives two speakers two different voices in every configuration (same gender, missing character sheets, acotaciones in the label, one name contained in the other) while still drawing from the right pool per gender.
+- `npm run check:audio` — asserts the TTS chunking never exceeds the per-accent character budget, never loses a turn (the `substring(0, 5000)` bug), keeps short dialogues in a single request, splits an oversized single turn by sentence instead of truncating it **while re-prefixing every piece with the speaker label**, that the PCM concatenation preserves every sample while fading only the seam, that `assignSpeakerVoices()` gives two speakers two voices that are both different *and* at least 4.5 semitones apart in every configuration (same gender, missing character sheets, acotaciones in the label, one name contained in the other) while keeping the declared gender wherever the catalogue allows it, and that the voice verifier works: it finds the pitch of a synthetic voice without reading it an octave low, accepts a two-voice track, rejects a one-voice track naming the voice that is missing, and declares itself inconclusive on too little audio or on two references too close to separate.
 - `npm run check:syllabus` — walks `getBlueprint()` across the **126** valid level × text-type × mode × length combinations and asserts the pedagogical invariants: the three budgets (cards per level × length, discrete answers, reading load), **monotonicity by duration** (Short ⊆ Medium ⊆ Long), **at least one slot backed against the transcript**, **B1-B2 and C1 not sharing a `format:skill` signature**, no format outside its level or text-type range, nothing presupposing two speakers in single-voice audio, A0 free of ordering/matching/scale/V-F-NG/spot-the-difference, C1 free of basic decoding formats (`data_capture`, `dictation`, `chunk_order`), every lesson covering at least two stages and three distinct skills, stage order preserved, unique slot ids, existing engine fallbacks, no `preferEngine` without one, and Vocabulary/text-type variants genuinely differing from one another. It also prints the per-level load table, so the budget can be read instead of deduced from the slot tables.
 - `npm run check:ambience` — asserts that all 148 scenario labels resolve to a curated scene (none falling through to the generic fallback, which is how 108 of them behaved before), that no scene monopolises the place-based dialogue catalogue (max 15%, where the old `OFFICE` profile held 75%), that each non-dialogue format has its own default scene, that every stem a recipe names exists and none is orphaned, that every `EventKind` has a registered synth, that the runtime's stem-level table matches what was baked, and the acoustic floor: per stem, energy below 250 Hz and short-term loudness range within the targets declared in `stems.mjs`, plus a minimum spectral+dynamic distance between the character stems, how much of each stem's energy falls in its single fullest octave (the crowd stems once held 53-77% in one octave and passed every other bound), and that no stem steps at its loop point. It cannot tell you whether a café *sounds* like a café — `npm run ambience:preview` is for that.
 - `npm run check:ambience:runtime` — instantiates the **real** `AmbienceEngine` against a fake `AudioContext` (`scripts/ambience/fakeWebAudio.mjs`, with virtual timers so minutes of scene time run deterministically) and asserts what the tables alone cannot: that a source actually starts for every layer of all 42 scenes, that loading does not depend on `start()` having been called, that `stop()` cancels an in-flight load, that every bed source reaches the destination, that the scheduler keeps firing over minutes, and the mix contract — every bed lands in −40..−22 dBFS and no event sits more than 8 dB over its bed. This check exists because a 100% reproducible "no stem ever plays" bug shipped while all of `check:ambience` was green: it inspects tables and baked WAVs, and nothing exercised the engine.
 - `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text. It also pins the dictated-datum path: a phone said in words and a phone said as `654 32 18` must both yield one `Teléfono` field, and focused minimal pairs must contrast the digits rather than the greeting. And the precision contract of `dictation`: a reconstruction whose sequence is not heard contiguously is rejected, a position may not offer the solution twice, the engine rebuilds `seis cinco cuatro treinta y dos dieciocho` / `654 32 18` / `catorce con noventa` / `cinco y media` exactly (with `con` as a fixed piece, not a control), no position offers another position's value, a `multiple_choice` tagged with the datum's `slotId` does not take that slot, and exercises outside the blueprint never reach the lesson.
+
+Checks that need an API key, network and quota (**not** part of `npm test`):
+- `GEMINI_API_KEY=… npm run check:tts:live [repeticiones]` — the only check that can
+  actually assert the two voices, because the one who decides is the model and the
+  decision is only visible in the audio. Calls `generateAudio()` exactly as the app does
+  (repair loop included) for a mixed-gender pair, two women and two men, measures the
+  returned PCM and fails if any generation ends up single-voiced. Leaves the WAVs in
+  `.tts-live/` — the number does not replace listening to it.
+- `GEMINI_API_KEY=… npm run tts:voices [voz,voz,…]` — regenerates the `pitchHz` column
+  of `TTS_VOICES` by measuring each catalogue voice on the same sentence. Run it when
+  the TTS model changes: the pitch table is what makes both the pair selection and the
+  verification possible, and a table copied from another model is a table that lies.
+  Responses are cached in `.tts-voice-cache/`.
 
 Manual checklist (needs an API key):
 1. All three modes (Standard, Vocabulary, AccentChallenge).
@@ -408,5 +487,5 @@ Manual checklist (needs an API key):
 4c. A B1-B2 lesson: `spot_the_difference` must render and be answerable — this is the first release in which that format reaches a learner at all (engine, renderer and verifier existed, no slot used them).
 4d. Stage sections: only the first open, the `n/m resueltos` counter tracking submits, and the whole thing reset when a new lesson is generated.
 5. Rendering and submit/feedback for the newer formats (`dictation`, `data_capture`, `minimal_pairs`, `spot_the_difference`, `matching`, `scale`, `true_false_notgiven`, `chunk_order`), including the `sourceTurns` reveal. For `dictation`, check on a narrow screen that a long datum wraps instead of overflowing.
-6. Audio generation across accent/gender combinations; localStorage persistence; error handling for invalid keys.
+6. Audio generation across accent/gender combinations; localStorage persistence; error handling for invalid keys. **Listen to a dialogue whose two characters share a gender** — the case with the least margin — and confirm the two speakers are told apart without reading the transcript. If the loading log says «tramo devuelto con una sola voz», the repair fired and the lesson is fine; if it says it twice for the same chunk, the model is drifting and the pitch table is the first thing to re-measure.
 7. Ambience: confirm the player's `N/M capas` counter reaches the total (it is the tell for a silent bed). Play a `Café / Restaurante`, a `Taxi / Transporte`, a `Taller Mecánico`, an `Aeropuerto / Aerolínea`, an `El Tiempo` (RadioNews) and a `Mi Rutina Diaria` (Podcast) — they should be recognisable blind and clearly different from one another. Check that the bed ducks under speech without pumping between syllables, that the volume/intensity/ducking/mute settings survive generating a new lesson, and that deleting `public/ambience/` degrades to a working player rather than an error.
