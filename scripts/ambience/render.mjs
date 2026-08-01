@@ -20,7 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
   mulberry32, hashStringToSeed, rand, randInt,
-  decodeWav, renderIR, convolve, poissonTimes,
+  decodeWav, renderIR, convolve, poissonTimes, ROOM_SIZES,
   filter, scale, addAt, rms, softClip, panMono, decorrelate,
 } from './dsp.mjs';
 
@@ -96,6 +96,25 @@ export const EVENT_RENDERERS = {
   applause: (sr, rng) => E.applause(sr, { rng, durationS: rand(rng, 3.5, 7) }),
 };
 
+/** Offline mirror of `buildToneChain` in services/ambienceEngine.ts: the same shelves
+ *  in the same order, so a coloured scene auditions and measures as it will play. */
+function applyTone(buf, tone) {
+  if (!tone) return buf;
+  let out = buf;
+  const shelf = (type, freq, gainDb, q) => {
+    if (!gainDb) return;
+    out = filter(out, { type, freq, gainDb, q: q ?? 0.7, sampleRate: SAMPLE_RATE });
+  };
+  if (tone.tiltDb) {
+    shelf('lowshelf', 500, -tone.tiltDb / 2);
+    shelf('highshelf', 2500, tone.tiltDb / 2);
+  }
+  if (tone.lowShelf) shelf('lowshelf', tone.lowShelf.hz, tone.lowShelf.db);
+  if (tone.highShelf) shelf('highshelf', tone.highShelf.hz, tone.highShelf.db);
+  if (tone.peak) shelf('peaking', tone.peak.hz, tone.peak.db, tone.peak.q ?? 1.4);
+  return out;
+}
+
 /** Fallback floor material, used when a recipe does not name one. Mirrors
  *  `surfaceForRoom` in services/ambienceEngine.ts. */
 export function surfaceForRoom(size) {
@@ -121,8 +140,9 @@ async function loadMixModule() {
       contents: `
         export { SCENE_RECIPES, SCENE_IDS, bedLevel } from './services/ambiencePresets';
         export {
-          STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST, BED_REVERB_SEND,
-          eventRateScale, onsetsPerMinute,
+          STEM_MAKEUP, BED_REVERB_SEND,
+          bedBoost, eventScaleFor, busCutoffs, toneMakeupDb,
+          eventRateScale, onsetsPerMinute, sceneOnsetBudget,
         } from './services/ambienceEngine';
       `,
       resolveDir: ROOT,
@@ -176,8 +196,9 @@ export async function loadSceneRenderer() {
   const mix = await loadMixModule();
   const {
     SCENE_RECIPES, SCENE_IDS, bedLevel,
-    STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST, BED_REVERB_SEND,
-    eventRateScale, onsetsPerMinute,
+    STEM_MAKEUP, BED_REVERB_SEND,
+    bedBoost, eventScaleFor, busCutoffs, toneMakeupDb,
+    eventRateScale, onsetsPerMinute, sceneOnsetBudget,
   } = mix;
 
   function renderScene(sceneId, { seconds = 20, seed = 'a' } = {}) {
@@ -189,10 +210,11 @@ export async function loadSceneRenderer() {
     // so the same event sits the same distance above the bed in every scene. Quiet
     // scenes get the same lift the engine applies, to bed and events together.
     const rawBed = bedLevel(recipe);
-    const bedBoost = Math.min(MAX_BED_BOOST, Math.max(1, rawBed > 0 ? BED_FLOOR / rawBed : 1));
-    const eventScale = rawBed * bedBoost * EVENT_OVER_BED;
-    const bedGain = STEM_MAKEUP * bedBoost;
+    const boost = bedBoost(rawBed);
+    const eventScale = eventScaleFor(recipe, rawBed * boost);
+    const bedGain = STEM_MAKEUP * boost * Math.pow(10, -toneMakeupDb(recipe.tone) / 20);
     const rateScale = eventRateScale(recipe, 0.6);
+    const cutoffs = busCutoffs(recipe.room);
     const surface = recipe.surface ?? surfaceForRoom(recipe.room.size);
     const left = new Float32Array(n);
     const right = new Float32Array(n);
@@ -213,19 +235,23 @@ export async function loadSceneRenderer() {
         let out = buf;
         if (layer.highpass) out = filter(out, { type: 'highpass', freq: layer.highpass, q: 0.7, sampleRate: SAMPLE_RATE });
         if (layer.lowpass) out = filter(out, { type: 'lowpass', freq: layer.lowpass, q: 0.7, sampleRate: SAMPLE_RATE });
-        // The engine high-passes the whole stem bus to free headroom below 80 Hz.
-        return filter(out, { type: 'highpass', freq: 80, q: 0.7, sampleRate: SAMPLE_RATE });
+        out = applyTone(out, layer.tone);
+        // The engine high-passes the whole stem bus to free headroom below 80 Hz,
+        // then colours it. Both mirror buildSceneGraph().
+        out = filter(out, { type: 'highpass', freq: 80, q: 0.7, sampleRate: SAMPLE_RATE });
+        return applyTone(out, recipe.tone);
       };
+      const layerGain = layer.gain * Math.pow(10, -toneMakeupDb(layer.tone) / 20);
       const sl = shape(l);
       const sr2 = shape(r);
       // Loop the stem across the render length, entering at a random offset exactly
       // as the engine does.
       const offset = Math.floor(rng() * sl.length);
       for (let i = 0; i < n; i++) {
-        left[i] += sl[(i + offset) % sl.length] * layer.gain;
-        right[i] += sr2[(i + offset) % sr2.length] * layer.gain;
+        left[i] += sl[(i + offset) % sl.length] * layerGain;
+        right[i] += sr2[(i + offset) % sr2.length] * layerGain;
       }
-      stemLayers.push({ sl, sr2, offset, gain: layer.gain });
+      stemLayers.push({ sl, sr2, offset, gain: layerGain });
     }
 
     // --- events ---
@@ -270,8 +296,7 @@ export async function loadSceneRenderer() {
         // Far events are lowpassed and go mostly to the room; near events stay dry.
         // That split is what produces depth.
         if (far || mid) {
-          const outdoor = recipe.room.size === 'outdoor';
-          const cut = far ? (outdoor ? 2600 : 1900) : (outdoor ? 6500 : 5000);
+          const cut = far ? cutoffs.far : cutoffs.mid;
           bl = filter(bl, { type: 'lowpass', freq: cut, q: 0.7, sampleRate: SAMPLE_RATE });
           br = filter(br, { type: 'lowpass', freq: cut, q: 0.7, sampleRate: SAMPLE_RATE });
         }
@@ -288,7 +313,11 @@ export async function loadSceneRenderer() {
     }
 
     // --- room ---
-    const ir = renderIR(SAMPLE_RATE, { size: recipe.room.size, rng });
+    const ir = renderIR(SAMPLE_RATE, {
+      size: recipe.room.size, rng,
+      rt60: (ROOM_SIZES[recipe.room.size] ?? ROOM_SIZES.medium).rt60 * (recipe.room.rt60Scale ?? 1),
+      damping: recipe.room.damping,
+    });
     const revL = convolve(wetL, ir[0], { circular: true });
     const revR = convolve(wetR, ir[1] ?? ir[0], { circular: true });
 

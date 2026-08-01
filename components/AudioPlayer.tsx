@@ -193,6 +193,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     engineRef.current?.setDucking(prefs.ducking);
   }, [prefs.ducking]);
 
+  useEffect(() => {
+    engineRef.current?.setIntensity(prefs.intensity);
+  }, [prefs.intensity]);
+
   // --- AUDIO GRAPH LIFECYCLE ---------------------------------------------
   const ensureAudioContext = useCallback((): AudioContext | null => {
     if (webAudioSupportedRef.current === false) return null;
@@ -400,14 +404,18 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // Rebuild ambience if the scene changes mid-playback. Intensity is part of the
-  // graph (it sets event rates), so it belongs here; volume and ducking apply live.
+  // Rebuild ambience only when the scene itself changes. Intensity used to be in this
+  // dependency list, because the rate scale was computed once in the constructor and
+  // there was no other way to update it — so every nudge of the slider tore the engine
+  // down and rebuilt it, restarting every stem from a new random offset. That is an
+  // audible jump, and it was happening on a control whose whole job is to be tweaked.
+  // `setIntensity()` now applies live, like volume and ducking.
   useEffect(() => {
     if (!isPlaying) return;
     startAmbience();
     startDuckingLoop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scene.id, prefs.intensity]);
+  }, [scene.id]);
 
   // Tear everything down on unmount.
   useEffect(() => {
