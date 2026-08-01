@@ -6,6 +6,7 @@ import { DATA_POINTS, inferDataPoint } from "../data/dataPoints";
 import { fillMissingSlots } from "./exerciseEngines";
 import { MODEL_SELECTABLE_SCENES, isSceneId } from "./ambiencePresets";
 import { verifyExercises } from "./exerciseVerification";
+import { checkTwoVoices } from "./ttsVoiceCheck";
 import {
   ProgressListener,
   ProgressReporter,
@@ -1229,23 +1230,37 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-/** Parte una línea que por sí sola no cabe, primero por frases y luego por palabras. */
+/**
+ * Parte una línea que por sí sola no cabe, primero por frases y luego por
+ * palabras.
+ *
+ * Cada trozo vuelve a llevar la etiqueta del hablante. Sin eso, la segunda
+ * mitad de un turno largo llegaba al modelo como texto sin dueño: en un tramo
+ * multi-hablante, una línea sin etiqueta es exactamente el caso en el que el
+ * modelo se queda con la voz anterior, y el turno partido cambiaba de persona a
+ * mitad de frase o arrastraba la voz equivocada hasta el final del tramo.
+ */
 function splitOversizedLine(line: string, limit: number): string[] {
   if (line.length <= limit) return [line];
 
+  const prefix = (line.match(/^([^:\n]{1,60}): /) || [])[0] || "";
+  const body = line.slice(prefix.length);
+  // La etiqueta se repite en cada trozo, así que ocupa sitio en cada trozo.
+  const limitForBody = Math.max(40, limit - prefix.length);
+
   const pieces: string[] = [];
   let current = "";
-  const units = line.match(/[^.!?…]+[.!?…]*\s*/g) ?? line.split(/(?<=\s)/);
+  const units = body.match(/[^.!?…]+[.!?…]*\s*/g) ?? body.split(/(?<=\s)/);
 
   for (const unit of units) {
-    if (current && current.length + unit.length > limit) {
+    if (current && current.length + unit.length > limitForBody) {
       pieces.push(current.trim());
       current = "";
     }
-    if (unit.length > limit) {
+    if (unit.length > limitForBody) {
       // Ni una frase suelta cabe: se corta por palabras.
       for (const word of unit.split(/\s+/)) {
-        if (current && current.length + word.length + 1 > limit) {
+        if (current && current.length + word.length + 1 > limitForBody) {
           pieces.push(current.trim());
           current = "";
         }
@@ -1256,7 +1271,7 @@ function splitOversizedLine(line: string, limit: number): string[] {
     }
   }
   if (current.trim()) pieces.push(current.trim());
-  return pieces.filter(Boolean);
+  return pieces.filter(Boolean).map(piece => `${prefix}${piece}`);
 }
 
 /** Agrupa líneas en tramos sin pasar de `limit` caracteres, sin partir turnos. */
@@ -1286,9 +1301,18 @@ function packLines(lines: string[], joiner: string, limit: number): string[][] {
  */
 export function ttsDialogueBudget(accent: Accent): number {
   const profile = TTS_PHONETIC_PROFILES[accent] || "";
-  const headerLength = profile ? profile.length + "\n\n---BEGIN DIALOGUE---\n\n".length : 0;
-  return Math.max(600, TTS_PROMPT_LIMIT - headerLength - 200);
+  const headerLength = profile ? profile.length + 2 : 0;
+  return Math.max(600, TTS_PROMPT_LIMIT - headerLength - TTS_DIRECTIVE_ALLOWANCE);
 }
+
+/**
+ * Lo que `ttsDialogueBudget` reserva para la consigna y el margen de seguridad.
+ * La consigna de la conversación —quién habla, con qué timbre, y la versión
+ * insistente del segundo intento— ronda los 400 caracteres y viaja en la misma
+ * petición: sin descontarla, el tramo se pasa del techo justo cuando el
+ * verificador pide repetirlo.
+ */
+const TTS_DIRECTIVE_ALLOWANCE = 600;
 
 /**
  * Trocea el diálogo en fronteras de turno.
@@ -1396,20 +1420,57 @@ async function synthesizeWithProgress(
 }
 
 /**
- * Voces prefabricadas del TTS de Gemini, agrupadas por el timbre que proyectan.
- * Hacen falta **varias por género**: si los dos personajes son del mismo género
- * —dos clientas, dos periodistas, dos amigos— la asignación anterior devolvía
- * `Kore` (o `Fenrir`) para ambos y el diálogo salía con una sola voz aunque los
- * nombres fueran distintos. Al alumno le queda un audio en el que no puede
- * separar los turnos, que es justamente lo que la mitad de los ejercicios pide.
+ * Catálogo de voces del TTS con su **tono medido**, no supuesto.
+ *
+ * `pitchHz` es la F0 mediana de cada voz leyendo la misma frase española,
+ * medida contra la API (`scripts/measure-tts-voices.mjs`). Hacía falta medirlo
+ * porque la separación real entre voces no se parece a lo que sugieren los
+ * nombres: dentro de un mismo género las voces del catálogo caen casi encima
+ * unas de otras —las femeninas entre 176 y 233 Hz, las masculinas entre 119 y
+ * 135— así que «otra voz del mismo grupo» no garantizaba que el alumno pudiera
+ * distinguir los turnos, que es justamente lo que la mitad de los ejercicios le
+ * pide. Con los números a la vista se puede exigir una separación mínima.
+ *
+ * `timbre` viaja al prompt. No es decoración: la limitación documentada del
+ * modelo es la «inconsistencia de voz respecto al prompt», y se manifiesta
+ * cuando el texto no dice nada sobre quién habla y la asignación de timbres
+ * queda solo en la configuración. Describiendo cada voz en el propio texto, lo
+ * que se pide y lo que se configura dicen lo mismo.
  */
-const TTS_VOICE_POOLS: Record<Character['gender'], readonly string[]> = {
-  Female: ['Kore', 'Aoede', 'Leda', 'Autonoe'],
-  Male: ['Fenrir', 'Puck', 'Charon', 'Orus']
-};
+interface TtsVoice {
+  name: string;
+  gender: Character['gender'];
+  pitchHz: number;
+  timbre: string;
+}
 
-/** Orden de reserva cuando el guion no dice de qué género es el personaje. */
-const TTS_FALLBACK_VOICES: readonly string[] = ['Fenrir', 'Kore', 'Puck', 'Aoede', 'Charon', 'Leda'];
+const TTS_VOICES: readonly TtsVoice[] = [
+  { name: 'Zephyr', gender: 'Female', pitchHz: 233, timbre: 'a bright, high-pitched female voice' },
+  { name: 'Leda', gender: 'Female', pitchHz: 212, timbre: 'a young, light female voice' },
+  { name: 'Achernar', gender: 'Female', pitchHz: 201, timbre: 'a soft female voice' },
+  { name: 'Aoede', gender: 'Female', pitchHz: 194, timbre: 'a natural female voice' },
+  { name: 'Kore', gender: 'Female', pitchHz: 185, timbre: 'a firm female voice' },
+  { name: 'Autonoe', gender: 'Female', pitchHz: 176, timbre: 'a warm, low female voice' },
+  { name: 'Orus', gender: 'Male', pitchHz: 135, timbre: 'a clear male voice' },
+  { name: 'Puck', gender: 'Male', pitchHz: 122, timbre: 'a lively male voice' },
+  { name: 'Charon', gender: 'Male', pitchHz: 120, timbre: 'a calm, deep male voice' },
+  { name: 'Fenrir', gender: 'Male', pitchHz: 119, timbre: 'a deep, low-pitched male voice' }
+];
+
+/** Distancia entre dos tonos, en semitonos: la unidad en que se oye la diferencia. */
+const pitchDistance = (a: number, b: number) => Math.abs(12 * Math.log2(a / b));
+
+/**
+ * Separación mínima exigida entre las dos voces de un diálogo.
+ *
+ * Por debajo de esto no es que suenen «parecidas»: es que el alumno no puede
+ * usar el timbre para segmentar los turnos, y el verificador tampoco puede
+ * comprobar que el modelo respetó la asignación. 4,5 semitonos es lo que dejan
+ * las dos voces femeninas más separadas del catálogo (Zephyr 233 Hz y Autonoe
+ * 176 Hz, 4,8 semitonos), así que el umbral se puede cumplir sin cambiar de
+ * género salvo entre dos hombres, donde el catálogo entero cabe en 2,2.
+ */
+const MIN_VOICE_SEPARATION_SEMITONES = 4.5;
 
 export interface SpeakerVoiceAssignment {
   /** La etiqueta tal como viene en el guion. */
@@ -1417,6 +1478,10 @@ export interface SpeakerVoiceAssignment {
   /** La etiqueta que viaja al TTS, en el `speechConfig` y delante de cada turno. */
   label: string;
   voice: string;
+  /** Tono de referencia de la voz asignada; con él se verifica el audio. */
+  pitchHz: number;
+  /** Descripción de la voz que se le da al modelo dentro del prompt. */
+  timbre: string;
 }
 
 /** Minúsculas, sin tildes, sin acotaciones ni puntuación. Solo para comparar. */
@@ -1464,25 +1529,68 @@ function findCharacter(speaker: string, characters: Character[]): Character | un
 }
 
 /**
- * Asigna una voz distinta a cada hablante. Distinta **siempre**: el género solo
- * decide de qué grupo se sirve, nunca puede hacer que dos personajes compartan
- * timbre. Se calcula una vez para todo el diálogo y se reutiliza en cada tramo.
+ * Elige el par de voces para dos hablantes.
+ *
+ * La regla no es «una voz de su grupo a cada uno», que es lo que se hacía y lo
+ * que dejaba pares separados por un par de semitonos. La regla es: **de todos
+ * los pares que respetan el género declarado, el más separado; y si ninguno
+ * llega al mínimo audible, se sacrifica el género antes que la distinción.**
+ * Entre dos hombres no hay alternativa —el catálogo masculino entero cabe en
+ * 2,2 semitonos—, y un diálogo en el que no se distingue quién habla no sirve
+ * para un ejercicio de comprensión auditiva, que es para lo que existe el audio.
+ */
+function pickVoicePair(genders: Array<Character['gender'] | undefined>): [TtsVoice, TtsVoice] {
+  const pairs: Array<{ a: TtsVoice; b: TtsVoice; gap: number; matches: number }> = [];
+
+  for (const a of TTS_VOICES) {
+    for (const b of TTS_VOICES) {
+      if (a.name === b.name) continue;
+      const matches = (genders[0] && a.gender === genders[0] ? 1 : 0) + (genders[1] && b.gender === genders[1] ? 1 : 0);
+      pairs.push({ a, b, gap: pitchDistance(a.pitchHz, b.pitchHz), matches });
+    }
+  }
+
+  const separated = pairs.filter(p => p.gap >= MIN_VOICE_SEPARATION_SEMITONES);
+  const eligible = separated.length ? separated : pairs;
+
+  // Primero el que respeta más géneros; si hay que sacrificar uno, que sea el
+  // del hablante con menos turnos (los hablantes llegan ordenados por peso);
+  // a igualdad, el par más separado.
+  eligible.sort(
+    (x, y) =>
+      y.matches - x.matches ||
+      Number(y.a.gender === genders[0]) - Number(x.a.gender === genders[0]) ||
+      y.gap - x.gap
+  );
+  const best = eligible[0];
+  return [best.a, best.b];
+}
+
+/**
+ * Asigna una voz distinta a cada hablante. Distinta **y separable**: no basta
+ * con que el nombre de la voz sea otro. Se calcula una vez para todo el diálogo
+ * y se reutiliza en cada tramo y en cada reintento.
  */
 export function assignSpeakerVoices(speakers: string[], characters: Character[]): SpeakerVoiceAssignment[] {
   const labels = canonicalSpeakerLabels(speakers);
-  const used = new Set<string>();
+  const genders = speakers.map(s => findCharacter(s, characters)?.gender);
+
+  if (speakers.length === 1) {
+    // Sin diálogo no hay nada que separar, así que no interesa un extremo del
+    // catálogo: se toma la voz central de su grupo.
+    const pool = TTS_VOICES.filter(v => v.gender === (genders[0] || 'Female'));
+    const voice = pool[Math.floor(pool.length / 2)] || TTS_VOICES[0];
+    return [{ speaker: speakers[0], label: labels[0], voice: voice.name, pitchHz: voice.pitchHz, timbre: voice.timbre }];
+  }
+
+  const [first, second] = pickVoicePair([genders[0], genders[1]]);
+  const chosen = [first, second];
 
   return speakers.map((speaker, i) => {
-    const gender = findCharacter(speaker, characters)?.gender;
-    const preference = gender
-      ? [...TTS_VOICE_POOLS[gender], ...TTS_VOICE_POOLS[gender === 'Female' ? 'Male' : 'Female']]
-      : [...TTS_FALLBACK_VOICES.slice(i), ...TTS_FALLBACK_VOICES];
-
-    const every = [...preference, ...TTS_VOICE_POOLS.Female, ...TTS_VOICE_POOLS.Male];
-    const voice = every.find(v => !used.has(v)) || preference[0];
-    used.add(voice);
-
-    return { speaker, label: labels[i], voice };
+    // Un tercer hablante no llega nunca al `multiSpeakerVoiceConfig` (el modelo
+    // admite dos), pero si llegara aquí no puede repetir voz.
+    const voice = chosen[i] || TTS_VOICES.find(v => !chosen.some(c => c.name === v.name)) || TTS_VOICES[i % TTS_VOICES.length];
+    return { speaker, label: labels[i], voice: voice.name, pitchHz: voice.pitchHz, timbre: voice.timbre };
   });
 }
 
@@ -1522,6 +1630,56 @@ function assignmentFor(
   );
 }
 
+/**
+ * La consigna que precede al diálogo en un tramo a dos voces.
+ *
+ * Es una copia deliberada del formato que documenta Google para el modo
+ * multi-hablante («TTS the following conversation between Joe and Jane:»), y no
+ * un adorno: lo que había antes era el perfil fonético seguido de un separador
+ * `---BEGIN DIALOGUE---`, sin nombrar a nadie ni decir que aquello fuera una
+ * conversación a dos voces. Medido contra la API, con ese formato el hablante
+ * grave desaparecía en dos de cada tres generaciones.
+ *
+ * Se describe además el timbre de cada uno. La limitación conocida del modelo
+ * es la inconsistencia entre el prompt y la configuración de voces: cuando el
+ * texto no dice nada de quién habla, la asignación queda solo en el
+ * `speechConfig` y el modelo se siente libre de leerlo todo igual. Aquí el
+ * texto y la configuración dicen lo mismo.
+ */
+function conversationDirective(assignments: SpeakerVoiceAssignment[], insist: boolean): string {
+  const [a, b] = assignments;
+  const base =
+    `TTS the following conversation between ${a.label} and ${b.label}. ` +
+    `${a.label} and ${b.label} are two different people with two different voices: ` +
+    `${a.label} speaks with ${a.timbre}, ${b.label} speaks with ${b.timbre}. ` +
+    `Switch voice on every turn according to the name that opens it.`;
+
+  if (!insist) return base;
+  return (
+    `${base} The two voices MUST sound clearly different from each other: ` +
+    `never read ${b.label}'s turns with ${a.label}'s voice or the other way round. ` +
+    `${a.label} is noticeably higher pitched than ${b.label}.`
+  );
+}
+
+/** La consigna de un tramo con un solo hablante (monólogo, o un tramo suelto). */
+function singleVoiceDirective(assignment: SpeakerVoiceAssignment): string {
+  return `Read the following aloud with ${assignment.timbre}, and keep that same voice throughout.`;
+}
+
+/** De quién es la línea, por la etiqueta con la que se construyó. */
+function ownerOfLine(
+  line: string,
+  assignments: SpeakerVoiceAssignment[]
+): SpeakerVoiceAssignment | undefined {
+  return assignments.find(a => line.startsWith(`${a.label}: `));
+}
+
+/** Silencio en PCM, para separar turnos sintetizados por separado. */
+function silencePcm(ms: number): Uint8Array {
+  return new Uint8Array(Math.round((TTS_SAMPLE_RATE * ms) / 1000) * 2);
+}
+
 export const generateAudio = async (
   dialogue: LessonPlan['dialogue'],
   characters: Character[],
@@ -1545,30 +1703,30 @@ export const generateAudio = async (
   if (sortedSpeakers.length === 0) return "";
 
   const isMultiSpeaker = sortedSpeakers.length >= 2;
-  let speechConfig;
   // El diálogo viaja como lista de turnos: el troceado corta en fronteras de
   // turno, nunca a mitad de frase.
   let lines: string[] = [];
   let joiner = '\n';
-  const assignedVoices: string[] = [];
+
+  const assignments = assignSpeakerVoices(sortedSpeakers.slice(0, 2), characters);
+  const assignedVoices = assignments.map(
+    a => `${a.label}→${a.voice} ${Math.round(a.pitchHz)} Hz`
+  );
+
+  /** Configuración de voces de un tramo, según quién hable realmente en él. */
+  const configFor = (owners: SpeakerVoiceAssignment[]) =>
+    owners.length >= 2
+      ? {
+          multiSpeakerVoiceConfig: {
+            speakerVoiceConfigs: owners.map(a => ({
+              speaker: a.label,
+              voiceConfig: { prebuiltVoiceConfig: { voiceName: a.voice } }
+            }))
+          }
+        }
+      : { voiceConfig: { prebuiltVoiceConfig: { voiceName: owners[0].voice } } };
 
   if (isMultiSpeaker) {
-    // Dos voces distintas, garantizado: `assignSpeakerVoices` nunca repite
-    // timbre aunque los dos personajes sean del mismo género.
-    const assignments = assignSpeakerVoices(sortedSpeakers.slice(0, 2), characters);
-    for (const a of assignments) assignedVoices.push(`${a.label}→${a.voice}`);
-
-    speechConfig = {
-      multiSpeakerVoiceConfig: {
-        speakerVoiceConfigs: assignments.map(a => ({
-          speaker: a.label,
-          voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: a.voice }
-          }
-        }))
-      }
-    };
-
     joiner = '\n';
     // La etiqueta que encabeza cada turno tiene que ser *exactamente* la del
     // `speechConfig`. Si el guion escribe "Ana (cajera):" y la configuración
@@ -1584,20 +1742,6 @@ export const generateAudio = async (
       .filter((l): l is string => Boolean(l)); // Remove nulls
 
   } else {
-    // Single Speaker Logic
-    const s1 = sortedSpeakers[0];
-    const [assignment] = assignSpeakerVoices([s1], characters);
-    const voice = assignment.voice;
-    assignedVoices.push(`${assignment.label}→${voice}`);
-
-    speechConfig = {
-      voiceConfig: {
-        prebuiltVoiceConfig: {
-          voiceName: voice
-        }
-      }
-    };
-
     joiner = '\n\n';
     lines = dialogue
       .map(d => sanitizeForTTS(d.text))
@@ -1616,7 +1760,10 @@ export const generateAudio = async (
   // This is the "bulletproof" accent system - we prepend pronunciation rules
   // so the TTS model knows exactly how to pronounce each dialect
   const phoneticProfile = TTS_PHONETIC_PROFILES[accent] || "";
-  const header = phoneticProfile ? `${phoneticProfile}\n\n---BEGIN DIALOGUE---\n\n` : "";
+  // La consigna de la conversación va **después** del perfil, pegada al texto:
+  // es lo último que lee el modelo antes de los turnos. Donde estaba el
+  // separador `---BEGIN DIALOGUE---` ahora se dice quién habla y con qué voz.
+  const header = phoneticProfile ? `${phoneticProfile}\n\n` : "";
 
   // El perfil fonético se come entre 2196 y 3407 de los 5000 caracteres que
   // acepta la API. Antes el texto se recortaba con `substring(0, 5000)` y un
@@ -1654,6 +1801,10 @@ export const generateAudio = async (
     const bytesPerChunk = new Array<number>(totalChunks).fill(0);
     const streamPartsPerChunk = new Array<number>(totalChunks).fill(0);
     let doneChunks = 0;
+    // Peticiones por encima de una por tramo: reintentos e insistencias del
+    // verificador de voces. Se cuentan para que la pantalla de carga diga la
+    // verdad sobre lo que se ha gastado de cuota.
+    let extraRequests = 0;
 
     const publish = () => {
       const totalBytes = bytesPerChunk.reduce((n, b) => n + b, 0);
@@ -1686,28 +1837,37 @@ export const generateAudio = async (
       });
     };
 
-    const parts = await mapWithConcurrency(chunks, TTS_CONCURRENCY, async (chunkLines, index) => {
-      const continuation = index > 0
-        ? `(Continuación de la misma conversación; mantén exactamente las mismas voces, ritmo y acento.)\n\n`
-        : "";
-      const textPrompt = `${header}${continuation}${chunkLines.join(joiner)}`;
+    /** Quién habla de verdad en este tramo. */
+    const ownersOf = (chunkLines: string[]): SpeakerVoiceAssignment[] => {
+      if (!isMultiSpeaker) return assignments.slice(0, 1);
+      const present = assignments.filter(a => chunkLines.some(l => ownerOfLine(l, assignments) === a));
+      // Un tramo con un solo hablante no es una conversación: pedirlo con
+      // `multiSpeakerVoiceConfig` es darle al modelo una atribución que no
+      // tiene que resolver, y una voz de más entre la que elegir.
+      return present.length ? present : assignments.slice(0, 1);
+    };
 
-      const bytes = await synthesizeWithProgress(
+    /** Con una sola voz configurada, la etiqueta sobra: se leería en alto. */
+    const stripLabel = (line: string) => line.replace(/^[^:\n]{1,60}: /, '');
+
+    const ask = async (
+      text: string,
+      owners: SpeakerVoiceAssignment[],
+      index: number,
+      onBytes?: (bytes: number, parts: number) => void
+    ) =>
+      synthesizeWithProgress(
         ai,
         {
           model: AUDIO_MODEL,
-          contents: [{ parts: [{ text: textPrompt }] }],
+          contents: [{ parts: [{ text }] }],
           config: {
             responseModalities: [Modality.AUDIO],
-            speechConfig: speechConfig
+            speechConfig: configFor(owners)
           }
         },
         {
-          onAudio: (totalBytes, chunkCount) => {
-            bytesPerChunk[index] = totalBytes;
-            streamPartsPerChunk[index] = chunkCount;
-            publish();
-          },
+          onAudio: (totalBytes, chunkCount) => onBytes?.(totalBytes, chunkCount),
           onRetry: (attempt, received, reason) => {
             reporter.log(
               `Síntesis del tramo ${index + 1}/${totalChunks} interrumpida tras ${formatBytes(received)} ` +
@@ -1725,6 +1885,100 @@ export const generateAudio = async (
         }
       );
 
+    /**
+     * Última línea de defensa: cada turno en su propia petición, con una única
+     * voz configurada.
+     *
+     * Aquí ya no hay atribución que el modelo pueda equivocar —una petición,
+     * una voz, un turno—, así que el resultado es correcto por construcción.
+     * Cuesta una petición por turno y pierde el encadenado natural entre
+     * réplicas, por eso solo se llega hasta aquí cuando la conversación entera
+     * ha vuelto en una sola voz dos veces seguidas: un audio con menos
+     * naturalidad sigue sirviendo para segmentar turnos; uno con una sola voz,
+     * no.
+     */
+    const turnByTurn = async (chunkLines: string[], index: number): Promise<Uint8Array> => {
+      reporter.log(
+        `Tramo ${index + 1}/${totalChunks}: se sintetiza turno a turno ` +
+          `(${plural(chunkLines.length, 'petición', 'peticiones')}) para garantizar las dos voces`,
+        'warn'
+      );
+
+      const rendered = await mapWithConcurrency(chunkLines, TTS_CONCURRENCY, async (line) => {
+        const owner = ownerOfLine(line, assignments) || assignments[0];
+        const text = `${header}${singleVoiceDirective(owner)}\n\n${stripLabel(line)}`;
+        const bytes = await ask(text, [owner], index);
+        extraRequests++;
+        return [bytes, silencePcm(240)];
+      });
+
+      const joined = concatPcmChunks(rendered.flat());
+      // No hay reintento después de esto —cada turno ya vino de su propia
+      // petición con una sola voz configurada—, pero sí se mide y se dice, para
+      // que el registro no afirme algo que no se ha comprobado.
+      const verdict = checkTwoVoices(joined, assignments[0].pitchHz, assignments[1].pitchHz);
+      reporter.log(
+        `Tramo ${index + 1}/${totalChunks} rehecho turno a turno: ${verdict.reason}`,
+        verdict.ok ? 'info' : 'warn'
+      );
+      return joined;
+    };
+
+    const parts = await mapWithConcurrency(chunks, TTS_CONCURRENCY, async (chunkLines, index) => {
+      const owners = ownersOf(chunkLines);
+      const body = owners.length >= 2
+        ? chunkLines.join(joiner)
+        : chunkLines.map(stripLabel).join(joiner);
+      const continuation = index > 0
+        ? ' This is the continuation of the same conversation: keep exactly the same voices, pace and accent.'
+        : '';
+
+      let bytes = new Uint8Array(0);
+
+      // Dos intentos con el modelo y, si insiste en leerlo todo igual, el
+      // troceado por turnos. Cada intento se comprueba contra el audio.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const directive = owners.length >= 2
+          ? conversationDirective(owners, attempt > 0)
+          : singleVoiceDirective(owners[0]);
+
+        bytes = await ask(
+          `${header}${directive}${continuation}\n\n${body}`,
+          owners,
+          index,
+          (totalBytes, chunkCount) => {
+            bytesPerChunk[index] = totalBytes;
+            streamPartsPerChunk[index] = chunkCount;
+            publish();
+          }
+        );
+        if (attempt > 0) extraRequests++;
+
+        if (owners.length < 2) break;
+
+        const verdict = checkTwoVoices(bytes, owners[0].pitchHz, owners[1].pitchHz);
+        if (verdict.ok) {
+          if (attempt > 0) {
+            reporter.log(`Tramo ${index + 1}/${totalChunks} corregido: ${verdict.reason}`, 'info');
+          }
+          break;
+        }
+
+        reporter.log(
+          `Tramo ${index + 1}/${totalChunks} devuelto con una sola voz — ${verdict.reason}. ` +
+            (attempt === 0
+              ? 'Se repite insistiendo en el timbre de cada hablante.'
+              : 'El modelo insiste: se abandona la petición conjunta.'),
+          'warn'
+        );
+
+        if (attempt === 1) {
+          bytes = await turnByTurn(chunkLines, index);
+          bytesPerChunk[index] = bytes.length;
+          publish();
+        }
+      }
+
       doneChunks++;
       publish();
       return bytes;
@@ -1741,7 +1995,10 @@ export const generateAudio = async (
     reporter.finish(
       'synthesis',
       `${formatSeconds(totalSeconds)} de audio · ${formatBytes(audioBytes.length)}` +
-        (totalChunks > 1 ? ` · ${plural(totalChunks, 'tramo unido', 'tramos unidos')}` : '')
+        (totalChunks > 1 ? ` · ${plural(totalChunks, 'tramo unido', 'tramos unidos')}` : '') +
+        (extraRequests > 0
+          ? ` · ${plural(extraRequests, 'petición adicional', 'peticiones adicionales')} para separar las voces`
+          : '')
     );
 
     reporter.start('encode');

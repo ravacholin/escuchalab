@@ -27,3 +27,12 @@ dist-ssr
 
 # Offline ambience auditions (npm run ambience:preview)
 .ambience-preview/
+
+# Audio del TTS descargado por scripts/measure-tts-voices.mjs
+.tts-voice-cache/
+.measure-*/
+
+# Audio de scripts/check-tts-live.mjs
+.tts-live/
+.tts-live-*/
+.probe/

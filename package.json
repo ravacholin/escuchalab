@@ -11,6 +11,8 @@
     "check:syllabus": "node scripts/check-syllabus.mjs",
     "check:exercises": "node scripts/check-exercises.mjs",
     "check:audio": "node scripts/check-audio.mjs",
+    "check:tts:live": "node scripts/check-tts-live.mjs",
+    "tts:voices": "node scripts/measure-tts-voices.mjs",
     "check:ambience": "node scripts/check-ambience.mjs",
     "check:ambience:runtime": "node scripts/check-ambience-runtime.mjs",
     "ambience:build": "node scripts/generate-ambience-beds.mjs",
