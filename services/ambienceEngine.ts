@@ -1,11 +1,16 @@
 import {
   bedLevel,
+  eventHeadroomDb,
   EventKind,
   EventSpec,
   ResolvedAmbience,
   RoomSize,
   SceneRecipe,
+  SceneRoom,
+  sceneOnsetCeiling,
+  SceneTone,
   StemId,
+  Surface,
 } from './ambiencePresets';
 import { loadStem } from './ambienceLibrary';
 
@@ -68,6 +73,26 @@ export const STEM_MAKEUP = 2.6;    // bundled continuous textures
  * rather than sitting on top of it.
  */
 export const EVENT_OVER_BED = 10.4;
+
+/**
+ * Turn a scene's declared event headroom into the scale its events are fired at.
+ *
+ * The old arithmetic multiplied bed gain and event scale by the same boost, which made
+ * the event-over-bed ratio a scene-independent constant — the loudest spec of every
+ * scene in the catalogue landed at exactly +6.0 dB. That is a defensible default and a
+ * terrible law: a library is a quiet bed with loud discrete events, a market is a wall
+ * of bed with events barely above it, and forcing both to +6 removes the contrast that
+ * tells them apart. `eventHeadroomDb()` reproduces the old value where a recipe stays
+ * silent, so the two coexist while the catalogue is annotated.
+ */
+export function eventScaleFor(recipe: SceneRecipe, bedAmp: number): number {
+  const loudest = recipe.events.reduce((m, e) => Math.max(m, e.gain), 0);
+  if (loudest <= 0) return bedAmp * EVENT_OVER_BED;
+  const headroomDb = eventHeadroomDb(recipe, EVENT_OVER_BED / STEM_MAKEUP);
+  // Invert `spec.gain * eventScale / (bedAmp * STEM_MAKEUP)` at the loudest spec.
+  return (bedAmp * STEM_MAKEUP * Math.pow(10, headroomDb / 20)) / loudest;
+}
+
 const REVERB_RETURN = 0.9;
 
 /** Reverb send for the bed. A pure distance ratio: `room.wet` is applied at the
@@ -96,6 +121,27 @@ const STEREO_SIDE_SCALE = 0.7;
  */
 export const BED_FLOOR = 0.0101;
 export const MAX_BED_BOOST = 3;
+
+/**
+ * The floor is a compressor, not a clamp.
+ *
+ * `min(MAX_BED_BOOST, max(1, FLOOR / raw))` lifted every scene below the floor to
+ * *exactly* the floor: measured, 12 scenes — the four studios, the therapy room, the
+ * library, the courtroom, the gallery, the venue, the wine bar, the meeting room and
+ * the home — arrived at an identical bed level and an identical event scale. The
+ * 18 dB spread the recipes describe collapsed to 11.5 dB with a hard pile-up at the
+ * bottom, so a radio booth and a library were the same loudness. Loudness is one of
+ * the strongest cues for what kind of room you are in, and the device meant to keep
+ * quiet scenes audible was destroying the ordering it existed to protect.
+ *
+ * A ratio lift is strictly monotonic: quiet scenes come up, and they stay in order.
+ */
+export const BED_KNEE_RATIO = 0.5;
+
+export function bedBoost(rawBed: number): number {
+  if (rawBed <= 0 || rawBed >= BED_FLOOR) return 1;
+  return Math.min(MAX_BED_BOOST, Math.pow(BED_FLOOR / rawBed, BED_KNEE_RATIO));
+}
 
 /** Below this, laptop speakers reproduce nothing but the port noise, and it eats
  *  headroom that the audible bands need. The old beds put 85-97% of their energy
@@ -256,11 +302,13 @@ const ROOM_PARAMS: Record<RoomSize, { rt60: number; preDelayMs: number; damping:
  * (scripts/ambience/stems.mjs). A stem baked at 8 kHz carries nothing above 4 kHz no
  * matter how the browser resamples it.
  */
-const STEM_BANDWIDTH_HZ: Record<StemId, number> = {
+export const STEM_BANDWIDTH_HZ: Record<StemId, number> = {
   babble_close: 8000, babble_hall: 8000, babble_open: 8000,
   traffic_near: 8000, traffic_far: 4000,
   kitchen: 12000, hvac_office: 4000, room_tone: 4000, studio_tone: 4000,
   transit_hum: 6000, rain: 12000, wind_leaves: 12000,
+  office_life: 6000, pa_concourse: 6000, tiled_corridor: 6000, home_life: 6000,
+  booth_tight: 4000, workshop_tools: 6000, crowd_far: 4000, sports_hall: 6000,
 };
 
 /**
@@ -275,7 +323,87 @@ function sceneBandwidthHz(recipe: SceneRecipe): number {
     const stemTop = Math.min(STEM_BANDWIDTH_HZ[layer.stem], layer.lowpass ?? Infinity);
     widest = Math.max(widest, stemTop);
   }
-  return Math.min(14000, widest * 1.5);
+  // A heavily damped room may not have events brighter than its own air.
+  const ceiling = (recipe.room.brightnessHz ?? Infinity) * 1.8;
+  return Math.min(14000, ceiling, widest * 1.5);
+}
+
+/**
+ * Air ceilings for the mid and far event buses.
+ *
+ * These were `outdoor ? 6500 : 5000` and `outdoor ? 2600 : 1900` — a boolean, and 111
+ * of 159 event specs (70%) passed through one of the two indoor values. So every
+ * material's identity above 5 kHz was erased in exactly the same way in every indoor
+ * scene in the catalogue: a coin in a bank and a fork in a restaurant became the same
+ * tick. A room's brightness is a continuous property of its surfaces, and the default
+ * here reproduces the old binary for any recipe that has not been given one.
+ */
+export const FAR_BRIGHTNESS_RATIO = 0.38;
+
+export function busCutoffs(room: SceneRoom): { mid: number; far: number } {
+  const mid = room.brightnessHz ?? (room.size === 'outdoor' ? 6500 : 5000);
+  return { mid, far: mid * FAR_BRIGHTNESS_RATIO };
+}
+
+/**
+ * Build the filter chain for a `SceneTone`, or null when there is nothing to do.
+ *
+ * `tiltDb` is realised as a complementary shelf pair rather than a real tilt filter:
+ * the point is a broadband sense of "hard and bright" vs "soft and absorptive", and
+ * two shelves get there for two nodes.
+ */
+function buildToneChain(
+  ctx: AudioContext,
+  tone: SceneTone | undefined,
+  track: (node: AudioNode) => void,
+): { input: AudioNode; output: AudioNode } | null {
+  if (!tone) return null;
+  const nodes: BiquadFilterNode[] = [];
+  const add = (
+    type: BiquadFilterType, hz: number, db: number, q?: number,
+  ) => {
+    if (db === 0) return;
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.value = hz;
+    f.gain.value = db;
+    if (q !== undefined) f.Q.value = q;
+    nodes.push(f);
+    track(f);
+  };
+
+  if (tone.tiltDb) {
+    add('lowshelf', 500, -tone.tiltDb / 2);
+    add('highshelf', 2500, tone.tiltDb / 2);
+  }
+  if (tone.lowShelf) add('lowshelf', tone.lowShelf.hz, tone.lowShelf.db);
+  if (tone.highShelf) add('highshelf', tone.highShelf.hz, tone.highShelf.db);
+  if (tone.peak) add('peaking', tone.peak.hz, tone.peak.db, tone.peak.q ?? 1.4);
+
+  if (nodes.length === 0) return null;
+  for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]);
+  return { input: nodes[0], output: nodes[nodes.length - 1] };
+}
+
+/**
+ * Rough makeup for a tone chain, so colouring a scene does not silently change how
+ * loud its bed is or how far its events sit above it. A pink-weighted estimate: each
+ * shelf/peak contributes its gain scaled by the fraction of a pink spectrum it covers.
+ */
+export function toneMakeupDb(tone: SceneTone | undefined): number {
+  if (!tone) return 0;
+  let db = 0;
+  // A shelf at `hz` covers roughly this share of the audible power of a pink source.
+  const shareBelow = (hz: number) => Math.min(1, Math.max(0, Math.log2(hz / 20) / Math.log2(16000 / 20)));
+  if (tone.tiltDb) {
+    db += (-tone.tiltDb / 2) * shareBelow(500);
+    db += (tone.tiltDb / 2) * (1 - shareBelow(2500));
+  }
+  if (tone.lowShelf) db += tone.lowShelf.db * shareBelow(tone.lowShelf.hz);
+  if (tone.highShelf) db += tone.highShelf.db * (1 - shareBelow(tone.highShelf.hz));
+  // A peaking filter of Q ~1.4 covers about one octave.
+  if (tone.peak) db += tone.peak.db * (1 / Math.log2(16000 / 20));
+  return db;
 }
 
 /**
@@ -341,14 +469,81 @@ export const onsetsPerMinute = (recipe: SceneRecipe, intensity: number): number 
   return total;
 };
 
-/** Factor to stretch every `everyS` by so the scene fits under the budget. 1 = as authored. */
-export function eventRateScale(recipe: SceneRecipe, intensity: number): number {
-  const rate = onsetsPerMinute(recipe, intensity);
-  return rate > MAX_EVENT_ONSETS_PER_MIN ? rate / MAX_EVENT_ONSETS_PER_MIN : 1;
+/**
+ * The scene's onset budget at a given intensity.
+ *
+ * At the default intensity (0.6) the multiplier is exactly 1, so a recipe that does
+ * not declare an `activity` keeps the old global ceiling and behaves as before.
+ */
+export function sceneOnsetBudget(recipe: SceneRecipe, intensity: number): number {
+  return sceneOnsetCeiling(recipe) * (0.55 + 0.75 * intensity);
 }
 
-function createRoomImpulse(ctx: AudioContext, size: RoomSize, rng: Rng): AudioBuffer {
-  const params = ROOM_PARAMS[size];
+/**
+ * Above the budget the scene is compressed, not clamped.
+ *
+ * The old rule pinned every over-budget scene to *exactly* the ceiling, which had two
+ * consequences. The obvious one: 26 of 42 scenes fired at 26.00 onsets/min, so a
+ * bustling market and a quiet plaza were equally eventful. The subtle one: because
+ * `onsetsPerMinute` is proportional to 1/(1.6 - i) and the scheduler interval is
+ * multiplied by (1.6 - i), a hard clamp makes the two cancel exactly — moving the
+ * intensity slider changed event *loudness* and never event *rate*, in 26 of 42
+ * scenes. No amount of retuning fixes that; only a soft knee does, because a scene
+ * that always exactly fills a fixed budget cannot respond to anything.
+ */
+export const ONSET_SOFT_KNEE = 0.65;
+export const ABSOLUTE_MAX_ONSETS_PER_MIN = 62;
+
+/**
+ * The intensity at which the budget is evaluated — always, whatever the user's slider
+ * says.
+ *
+ * This is the whole fix for the cancellation. `onsetsPerMinute` is proportional to
+ * 1/(1.6 - i) and the scheduler interval is multiplied by (1.6 - i); if the rate scale
+ * is computed at the live intensity, those two divide out and the slider stops moving
+ * density altogether. Pinning the evaluation makes `rateScale` a per-scene constant,
+ * so the (1.6 - i) in the interval is the only place intensity acts — and it acts.
+ *
+ * The recipe's own bias is still folded in, because that is a property of the scene
+ * rather than of the slider.
+ */
+export const RATE_REFERENCE_INTENSITY = 0.6;
+
+/**
+ * How far past its own budget a scene may be carried by having been authored busy.
+ *
+ * Without this bound the knee inverts the classes: `newsroom`, `call_center`,
+ * `open_office` and `restaurant` are authored at 125-220 onsets/min, and a plain
+ * exponent let all four land *above* the market — a call centre busier than a market
+ * is not a nuance, it is the ordering being decided by how liberally someone typed
+ * `everyS` rather than by what the place is.
+ */
+export const ONSET_KNEE_MAX = 1.15;
+
+/** Factor to stretch every `everyS` by so the scene fits under the budget. 1 = as authored. */
+export function eventRateScale(recipe: SceneRecipe, _intensity?: number): number {
+  const reference = clamp01(RATE_REFERENCE_INTENSITY + (recipe.intensityBias ?? 0));
+  const rate = onsetsPerMinute(recipe, reference);
+  const budget = sceneOnsetBudget(recipe, reference);
+  if (rate <= budget) return 1;
+  // The knee keeps a scene authored well over budget slightly busier than one authored
+  // just over it, so a class is a band rather than a single value — but only slightly.
+  const allowed = Math.min(
+    budget * Math.min(ONSET_KNEE_MAX, Math.pow(rate / budget, 1 - ONSET_SOFT_KNEE)),
+    ABSOLUTE_MAX_ONSETS_PER_MIN,
+  );
+  return Math.max(1, rate / allowed);
+}
+
+function createRoomImpulse(ctx: AudioContext, room: SceneRoom, rng: Rng): AudioBuffer {
+  const preset = ROOM_PARAMS[room.size];
+  // Two `large` rooms are not equally live, and two `small` ones are not equally
+  // absorptive. The size preset sets the scale; the recipe adjusts it.
+  const params = {
+    ...preset,
+    rt60: preset.rt60 * (room.rt60Scale ?? 1),
+    damping: room.damping ?? preset.damping,
+  };
   const sampleRate = ctx.sampleRate;
   const length = Math.max(64, Math.floor(params.rt60 * 1.2 * sampleRate));
   const buffer = ctx.createBuffer(2, length, sampleRate);
@@ -716,9 +911,10 @@ function oneFootstep(c: EventContext, surface: keyof typeof SURFACES, strength: 
   );
 }
 
-/** Which floor a scene has. Hearing heels on tile in a carpeted therapy room, or
- *  a soft pad on a station concourse, is immediately wrong. */
-function surfaceForRoom(size: RoomSize): keyof typeof SURFACES {
+/** Fallback when a recipe does not name its floor. Deriving the surface from room
+ *  size alone gave every `large` scene concrete — a workshop, a gym, a library, a bank
+ *  and a police station walked on the same floor because they shared a reverb preset. */
+function surfaceForRoom(size: RoomSize): Surface {
   switch (size) {
     case 'outdoor': return 'asphalt';
     case 'hall': return 'tile';
@@ -726,6 +922,12 @@ function surfaceForRoom(size: RoomSize): keyof typeof SURFACES {
     case 'medium': return 'wood';
     default: return 'carpet';
   }
+}
+
+/** Which floor this scene has. Hearing heels on tile in a carpeted therapy room, or
+ *  a soft pad on a station concourse, is immediately wrong. */
+function surfaceFor(recipe: SceneRecipe): Surface {
+  return recipe.room.surface ?? surfaceForRoom(recipe.room.size);
 }
 
 type EventSynth = (c: EventContext, scene: SceneRecipe) => void;
@@ -755,10 +957,26 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     }
   },
   glass: (c) => material(c, 'glass', rand(c.rng, 0.4, 1), rand(c.rng, -0.7, 0.7)),
+  /**
+   * A dropped coin ACCELERATES: each bounce is closer to the last and quieter, until
+   * it spins down flat. Rendered as evenly spaced hits it was the same event as
+   * `cutlery`, whose frequency range it overlaps almost entirely.
+   */
   coin: (c) => {
     const pan = rand(c.rng, -0.4, 0.4);
-    for (let i = 0; i < randInt(c.rng, 1, 4); i++) {
-      material({ ...c, at: c.at + i * rand(c.rng, 0.03, 0.11) }, 'coin', rand(c.rng, 0.3, 0.8), pan);
+    const bounces = randInt(c.rng, 3, 7);
+    let gap = rand(c.rng, 0.075, 0.13);
+    let t = c.at;
+    let level = rand(c.rng, 0.6, 0.9);
+    for (let i = 0; i < bounces; i++) {
+      material({ ...c, at: t }, 'coin', level, pan);
+      t += gap;
+      gap *= rand(c.rng, 0.62, 0.78);
+      level *= rand(c.rng, 0.62, 0.8);
+    }
+    // The spin-down: a fast tremolo as it settles onto the flat.
+    for (let i = 0; i < randInt(c.rng, 4, 9); i++) {
+      material({ ...c, at: t + i * 0.022, gain: c.gain * 0.16 }, 'coin', 0.3, pan);
     }
   },
   metalClank: (c) => material(c, 'metal', rand(c.rng, 0.5, 1), rand(c.rng, -0.8, 0.8)),
@@ -768,7 +986,7 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
   footstep: (c, scene) => {
     // Never a single isolated step: people walk. The old engine played one thump
     // every 1.7-6.5 s, which reads as a metronome, not as a person.
-    const surface = surfaceForRoom(scene.room.size);
+    const surface = surfaceFor(scene);
     const steps = randInt(c.rng, 2, 5);
     const interval = 1 / rand(c.rng, 1.7, 2.2);
     const pan = rand(c.rng, -0.6, 0.6);
@@ -783,7 +1001,7 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
   },
   footstepRun: (c, scene) => {
     // Someone crossing the space: more steps, and the pan sweeps as they pass.
-    const surface = surfaceForRoom(scene.room.size);
+    const surface = surfaceFor(scene);
     const steps = randInt(c.rng, 5, 10);
     const interval = 1 / rand(c.rng, 1.8, 2.4);
     const from = c.rng() < 0.5 ? -0.9 : 0.9;
@@ -793,16 +1011,31 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
       oneFootstep(c, surface, Math.max(0.25, proximity), from * (1 - 2 * t), c.at + i * interval);
     }
   },
+  /**
+   * A chair moving is STICK-SLIP: the leg grips, releases, grips again. Rendered as
+   * one smooth band-passed swell it was the same sound as `creak`, whose band overlaps
+   * it — and the two appear together in eight scenes.
+   */
   chairScrape: (c) => {
-    noiseBurst(c, {
-      durationMs: rand(c.rng, 180, 600),
-      filterType: 'bandpass',
-      freq: rand(c.rng, 600, 1500),
-      q: 3.2,
-      gain: c.gain * 0.7,
-      pan: rand(c.rng, -0.6, 0.6),
-      attackMs: 25,
-    });
+    const pan = rand(c.rng, -0.6, 0.6);
+    const total = rand(c.rng, 180, 600);
+    const grabs = randInt(c.rng, 2, 5);
+    let t = c.at;
+    for (let i = 0; i < grabs; i++) {
+      const seg = (total / grabs) * rand(c.rng, 0.6, 1.3);
+      noiseBurst({ ...c, at: t }, {
+        durationMs: seg,
+        filterType: 'bandpass',
+        freq: rand(c.rng, 700, 1700),
+        q: 3.6,
+        gain: c.gain * 0.7 * rand(c.rng, 0.55, 1),
+        pan,
+        attackMs: 8,
+      });
+      t += (seg / 1000) * rand(c.rng, 0.7, 1.1);
+    }
+    // The leg landing at the end of the push.
+    material({ ...c, at: t, gain: c.gain * 0.35 }, 'wood', rand(c.rng, 0.3, 0.7), pan);
   },
   cough: (c) => {
     // A cough is a glottal release, not a puff: a hard noisy burst with a voiced
@@ -941,29 +1174,57 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
       });
     }
   },
+  /**
+   * A printer, not a motor.
+   *
+   * `printer`, `grinder` and `compressor` were the same synth three times over — a
+   * sawtooth ramping up into a lowpass with a trapezoid envelope — separated only by
+   * their frequency band and duration. Through the mid bus's lowpass they arrived as
+   * one machine at three speeds, which is a large part of why an office, a café and a
+   * workshop did not sound like different kinds of place.
+   *
+   * What identifies a printer is the STEPPER: a train of discrete ticks at a rate you
+   * can count, plus the paper being dragged through. The motor whine is the least
+   * characteristic part of it.
+   */
   printer: (c) => {
     const { ctx, at } = c;
     const dur = rand(c.rng, 0.9, 2.2);
+    const pan = rand(c.rng, -0.3, 0.3);
+
+    // The carriage: discrete steps, fast enough to buzz but slow enough to count.
+    const stepHz = rand(c.rng, 34, 58);
+    const steps = Math.floor(dur * stepHz);
+    for (let i = 0; i < steps; i++) {
+      const t = at + (i / stepHz) + rand(c.rng, -0.0015, 0.0015);
+      modalHit(
+        { ...c, at: t, gain: c.gain * 0.1 * (0.7 + 0.3 * Math.sin(i * 0.4)) },
+        [{ freq: rand(c.rng, 1500, 2400), decayS: 0.01, amp: 1 }],
+        { pan },
+      );
+    }
+    // Paper being pulled through the rollers.
+    noiseBurst(c, {
+      durationMs: dur * 1000, filterType: 'bandpass', freq: rand(c.rng, 2600, 4200), q: 0.9,
+      gain: c.gain * 0.18, pan, attackMs: 90, color: 'pink',
+    });
+    // The feed motor underneath, quiet: it is context, not identity.
     const osc = ctx.createOscillator();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(90, at);
-    osc.frequency.linearRampToValueAtTime(220, at + dur * 0.5);
-    osc.frequency.linearRampToValueAtTime(95, at + dur);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(rand(c.rng, 150, 210), at);
     const flt = ctx.createBiquadFilter();
-    flt.type = 'lowpass'; flt.frequency.value = 2200;
+    flt.type = 'lowpass'; flt.frequency.value = 900;
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, at);
-    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.25), at + 0.08);
-    env.gain.setValueAtTime(c.gain * 0.25, at + dur * 0.8);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.09), at + 0.08);
+    env.gain.setValueAtTime(c.gain * 0.09, at + dur * 0.85);
     env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     osc.connect(flt); flt.connect(env); env.connect(c.dest); env.connect(c.send);
     osc.start(at); osc.stop(at + dur + 0.02);
-    c.track(osc, at + dur + 0.05); c.track(flt, at + dur + 0.05); c.track(env, at + dur + 0.05);
-    noiseBurst(c, {
-      durationMs: dur * 1000, filterType: 'bandpass', freq: 1600, q: 0.8,
-      gain: c.gain * 0.12, pan: rand(c.rng, -0.3, 0.3), attackMs: 60,
-    });
+    const done = at + dur + 0.05;
+    c.track(osc, done); c.track(flt, done); c.track(env, done);
   },
+
   phoneRing: (c) => {
     const pan = rand(c.rng, -0.7, 0.7);
     const base = rand(c.rng, 900, 1400);
@@ -1100,29 +1361,46 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     const done = at + dur + 0.1;
     c.track(src, done); c.track(flt, done); c.track(panner, done); c.track(env, done);
   },
+  /**
+   * A burr grinder. What tells it apart from any other motor is that it BOGS: beans
+   * feed in unevenly, the load fluctuates, and the pitch and level wobble with it.
+   * A steady ramp up and down is a fan.
+   */
   grinder: (c) => {
     const { ctx, at } = c;
     const dur = rand(c.rng, 1.6, 3);
     const osc = ctx.createOscillator();
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(40, at);
-    osc.frequency.linearRampToValueAtTime(115, at + 0.35);
-    osc.frequency.setValueAtTime(115, at + dur - 0.3);
+    osc.frequency.linearRampToValueAtTime(rand(c.rng, 105, 125), at + 0.35);
+    // Load fluctuation: the motor dips whenever it catches.
+    const wobble = ctx.createOscillator();
+    wobble.type = 'sine';
+    wobble.frequency.value = rand(c.rng, 5.5, 11);
+    const wobbleDepth = ctx.createGain();
+    wobbleDepth.gain.value = rand(c.rng, 9, 18);
+    wobble.connect(wobbleDepth); wobbleDepth.connect(osc.frequency);
+    osc.frequency.setValueAtTime(rand(c.rng, 105, 125), at + dur - 0.3);
     osc.frequency.linearRampToValueAtTime(45, at + dur);
+
     const flt = ctx.createBiquadFilter();
     flt.type = 'lowpass'; flt.frequency.value = 1800;
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, at);
-    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.35), at + 0.2);
-    env.gain.setValueAtTime(c.gain * 0.35, at + dur - 0.25);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.32), at + 0.2);
+    env.gain.setValueAtTime(c.gain * 0.32, at + dur - 0.25);
     env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     osc.connect(flt); flt.connect(env); env.connect(c.dest); env.connect(c.send);
     osc.start(at); osc.stop(at + dur + 0.02);
+    wobble.start(at); wobble.stop(at + dur + 0.02);
     const done = at + dur + 0.1;
-    c.track(osc, done); c.track(flt, done); c.track(env, done);
+    c.track(osc, done); c.track(wobble, done); c.track(wobbleDepth, done);
+    c.track(flt, done); c.track(env, done);
+
+    // The burr itself: hard fragments rattling, bright and dense.
     noiseBurst(c, {
-      durationMs: dur * 1000, filterType: 'bandpass', freq: 2600, q: 0.6,
-      gain: c.gain * 0.2, pan: 0, attackMs: 200,
+      durationMs: dur * 1000, filterType: 'highpass', freq: rand(c.rng, 2400, 3400),
+      gain: c.gain * 0.26, pan: 0, attackMs: 180,
     });
   },
 
@@ -1206,10 +1484,28 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
       { pan: rand(c.rng, -0.4, 0.4), bodyAmount: 0.22, bodyHz: f * 1.5, bodyMs: 14 },
     );
   },
+  /**
+   * A weight plate is heavy: it lands low, rings long, and settles against the stack.
+   * `metalClank` is a light metal hit — the two were the same `material('metal')`
+   * call, one of them twice, and `impactWrench` is that call again 8-20 times.
+   */
   weightClank: (c) => {
     const pan = rand(c.rng, -0.7, 0.7);
-    material(c, 'metal', rand(c.rng, 0.7, 1), pan);
-    if (c.rng() < 0.6) material({ ...c, at: c.at + rand(c.rng, 0.05, 0.14), gain: c.gain * 0.6 }, 'metal', 0.5, pan);
+    modalHit(
+      { ...c, gain: c.gain * 0.9 },
+      [
+        { freq: rand(c.rng, 78, 140), decayS: rand(c.rng, 0.5, 0.95), amp: 1 },
+        { freq: rand(c.rng, 210, 330), decayS: 0.34, amp: 0.5 },
+        { freq: rand(c.rng, 520, 780), decayS: 0.12, amp: 0.22 },
+      ],
+      { pan },
+    );
+    for (let i = 0; i < randInt(c.rng, 1, 3); i++) {
+      material(
+        { ...c, at: c.at + 0.07 + i * rand(c.rng, 0.05, 0.11), gain: c.gain * (0.4 / (i + 1)) },
+        'metal', rand(c.rng, 0.4, 0.7), pan,
+      );
+    }
   },
   impactWrench: (c) => {
     // Rattle-gun: a burst of very fast metallic hammer blows.
@@ -1219,27 +1515,40 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
       material({ ...c, at: c.at + i * rand(c.rng, 0.022, 0.033), gain: c.gain * rand(c.rng, 0.5, 1) }, 'metal', 0.5, pan);
     }
   },
+  /**
+   * An air compressor: it builds pressure at a steady load and then CUTS OUT, and the
+   * relief valve blows off. That final hiss is the whole signature — without it this
+   * is indistinguishable from a printer an octave down.
+   */
   compressor: (c) => {
     const { ctx, at } = c;
     const dur = rand(c.rng, 3, 7);
     const osc = ctx.createOscillator();
     osc.type = 'sawtooth';
     osc.frequency.setValueAtTime(28, at);
-    osc.frequency.linearRampToValueAtTime(52, at + 0.6);
-    osc.frequency.setValueAtTime(52, at + dur - 0.5);
-    osc.frequency.linearRampToValueAtTime(26, at + dur);
+    // Pressure builds: the motor works progressively harder rather than plateauing.
+    osc.frequency.linearRampToValueAtTime(46, at + 0.6);
+    osc.frequency.linearRampToValueAtTime(rand(c.rng, 54, 62), at + dur - 0.12);
     const flt = ctx.createBiquadFilter();
     flt.type = 'lowpass'; flt.frequency.value = 700;
     const env = ctx.createGain();
     env.gain.setValueAtTime(0.0001, at);
     env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.4), at + 0.4);
-    env.gain.setValueAtTime(c.gain * 0.4, at + dur - 0.4);
+    env.gain.setValueAtTime(c.gain * 0.4, at + dur - 0.1);
+    // Cut-out, not fade-out: a compressor stops.
     env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     osc.connect(flt); flt.connect(env); env.connect(c.dest); env.connect(c.send);
     osc.start(at); osc.stop(at + dur + 0.02);
     const done = at + dur + 0.1;
     c.track(osc, done); c.track(flt, done); c.track(env, done);
+
+    // The relief valve, right on the cut-out.
+    noiseBurst({ ...c, at: at + dur - 0.04 }, {
+      durationMs: rand(c.rng, 320, 700), filterType: 'highpass', freq: rand(c.rng, 1800, 3200),
+      gain: c.gain * 0.4, pan: rand(c.rng, -0.4, 0.4), attackMs: 4,
+    });
   },
+
   hairDryer: (c) => {
     const { ctx, at } = c;
     const dur = rand(c.rng, 3, 8);
@@ -1260,6 +1569,23 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     src.start(at, c.rng() * 4); src.stop(at + dur + 0.05);
     const done = at + dur + 0.1;
     c.track(src, done); c.track(flt, done); c.track(panner, done); c.track(env, done);
+
+    // A hair dryer has a motor in it; steam and a sizzle do not. Without this the
+    // three looped-noise-through-one-filter events are one sound at three centres.
+    const motor = ctx.createOscillator();
+    motor.type = 'sawtooth';
+    motor.frequency.setValueAtTime(rand(c.rng, 118, 168), at);
+    const motorFlt = ctx.createBiquadFilter();
+    motorFlt.type = 'lowpass'; motorFlt.frequency.value = 620;
+    const motorEnv = ctx.createGain();
+    motorEnv.gain.setValueAtTime(0.0001, at);
+    motorEnv.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.14), at + 0.25);
+    motorEnv.gain.setValueAtTime(c.gain * 0.14, at + dur - 0.3);
+    motorEnv.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    motor.connect(motorFlt); motorFlt.connect(motorEnv);
+    motorEnv.connect(c.dest); motorEnv.connect(c.send);
+    motor.start(at); motor.stop(at + dur + 0.05);
+    c.track(motor, done); c.track(motorFlt, done); c.track(motorEnv, done);
   },
 
   bird: (c) => {
@@ -1340,20 +1666,66 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     c.track(osc, done); c.track(panner, done); c.track(env, done);
   },
 
+  /**
+   * A creak RISES. Wood under a slowly increasing load shifts its resonance upward —
+   * that glide is what tells it apart from a chair being pushed, which is a series of
+   * grabs at a roughly constant pitch.
+   */
   creak: (c) => {
-    noiseBurst(c, {
-      durationMs: rand(c.rng, 120, 400), filterType: 'bandpass', freq: rand(c.rng, 380, 900),
-      q: 5, gain: c.gain * 0.5, pan: rand(c.rng, -0.6, 0.6), attackMs: 30,
-    });
+    const { ctx, at } = c;
+    const dur = rand(c.rng, 0.14, 0.45);
+    const src = ctx.createBufferSource();
+    src.buffer = c.noise.get('white');
+    const flt = ctx.createBiquadFilter();
+    flt.type = 'bandpass';
+    flt.Q.value = 8;
+    const start = rand(c.rng, 320, 620);
+    flt.frequency.setValueAtTime(start, at);
+    flt.frequency.exponentialRampToValueAtTime(start * rand(c.rng, 1.6, 2.6), at + dur);
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = rand(c.rng, -0.6, 0.6);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.5), at + dur * 0.55);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(flt); flt.connect(panner); panner.connect(env);
+    env.connect(c.dest); env.connect(c.send);
+    src.start(at, c.rng() * 4); src.stop(at + dur + 0.02);
+    const done = at + dur + 0.05;
+    c.track(src, done); c.track(flt, done); c.track(panner, done); c.track(env, done);
   },
+  /**
+   * A page turning is one gesture: a rising sweep as the sheet lifts, then the snap of
+   * it landing. `paperRustle` is the granular one — the two used the same granulated
+   * synth with different grain counts, and they share a scene in the library.
+   */
   pageTurn: (c) => {
+    const { ctx, at } = c;
     const pan = rand(c.rng, -0.4, 0.4);
-    for (let i = 0; i < randInt(c.rng, 4, 9); i++) {
-      noiseBurst({ ...c, at: c.at + c.rng() * 0.28 }, {
-        durationMs: rand(c.rng, 8, 40), filterType: 'bandpass', freq: rand(c.rng, 2200, 6000),
-        q: 1.2, gain: c.gain * rand(c.rng, 0.3, 0.9), pan, attackMs: 1.5,
-      });
-    }
+    const dur = rand(c.rng, 0.18, 0.32);
+    const src = ctx.createBufferSource();
+    src.buffer = c.noise.get('white');
+    const flt = ctx.createBiquadFilter();
+    flt.type = 'bandpass';
+    flt.Q.value = 1.1;
+    flt.frequency.setValueAtTime(rand(c.rng, 1400, 2200), at);
+    flt.frequency.exponentialRampToValueAtTime(rand(c.rng, 5000, 7000), at + dur);
+    const panner = ctx.createStereoPanner();
+    panner.pan.value = pan;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, c.gain * 0.5), at + dur * 0.7);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(flt); flt.connect(panner); panner.connect(env);
+    env.connect(c.dest); env.connect(c.send);
+    src.start(at, c.rng() * 4); src.stop(at + dur + 0.02);
+    const done = at + dur + 0.06;
+    c.track(src, done); c.track(flt, done); c.track(panner, done); c.track(env, done);
+    // The sheet settling.
+    noiseBurst({ ...c, at: at + dur * 0.92 }, {
+      durationMs: rand(c.rng, 14, 30), filterType: 'bandpass', freq: rand(c.rng, 900, 1600),
+      q: 1.6, gain: c.gain * 0.4, pan, attackMs: 1,
+    });
   },
   applause: (c) => {
     // A crowd clapping is a dense wash with a few near claps standing out of it, not
@@ -1479,10 +1851,11 @@ export class AmbienceEngine {
     this.scene = scene;
     this.intensity = opts.intensity;
     const rawBed = bedLevel(scene.recipe);
-    const boost = Math.min(MAX_BED_BOOST, Math.max(1, rawBed > 0 ? BED_FLOOR / rawBed : 1));
-    this.bedGain = STEM_MAKEUP * boost;
-    // Boosted alongside the bed, so the event-over-bed ratio is scene-independent.
-    this.eventScale = rawBed * boost * EVENT_OVER_BED;
+    const boost = bedBoost(rawBed);
+    this.bedGain = STEM_MAKEUP * boost * (scene.presence ?? 1);
+    // Derived from the headroom this scene declares, so the number a recipe writes is
+    // the number the ear gets. Unannotated recipes reproduce the old fixed ratio.
+    this.eventScale = eventScaleFor(scene.recipe, rawBed * boost) * (scene.presence ?? 1);
 
     // Scene identity seeds the character; the salt reseeds per playback so the same
     // scenario never sounds identical twice.
@@ -1519,8 +1892,10 @@ export class AmbienceEngine {
     const { ctx } = this;
     const recipe = this.scene.recipe;
 
+    const cutoffs = busCutoffs(recipe.room);
+
     this.convolver = ctx.createConvolver();
-    this.convolver.buffer = createRoomImpulse(ctx, recipe.room.size, this.rng);
+    this.convolver.buffer = createRoomImpulse(ctx, recipe.room, this.rng);
     this.reverbReturn = ctx.createGain();
     this.reverbReturn.gain.value = recipe.room.wet * REVERB_RETURN;
     this.convolver.connect(this.reverbReturn);
@@ -1558,7 +1933,7 @@ export class AmbienceEngine {
     // thirds of all event specs are `mid`, so the depth system was mostly bypassed.
     this.eventMidFilter = ctx.createBiquadFilter();
     this.eventMidFilter.type = 'lowpass';
-    this.eventMidFilter.frequency.value = recipe.room.size === 'outdoor' ? 6500 : 5000;
+    this.eventMidFilter.frequency.value = cutoffs.mid;
     this.eventMid = ctx.createGain();
     this.eventMid.gain.value = 0.62;
     this.eventMidFilter.connect(this.eventMid);
@@ -1572,7 +1947,7 @@ export class AmbienceEngine {
     // is a large part of why the mix felt flat and "in your head".
     this.eventFarFilter = ctx.createBiquadFilter();
     this.eventFarFilter.type = 'lowpass';
-    this.eventFarFilter.frequency.value = recipe.room.size === 'outdoor' ? 2600 : 1900;
+    this.eventFarFilter.frequency.value = cutoffs.far;
     this.eventFar = ctx.createGain();
     this.eventFar.gain.value = 0.5;
     this.eventFarFilter.connect(this.eventFar);
@@ -1587,20 +1962,64 @@ export class AmbienceEngine {
     this.stemHighpass.frequency.value = BED_HIGHPASS_HZ;
     this.stemHighpass.Q.value = 0.7;
     this.stemBus = ctx.createGain();
-    this.stemBus.gain.value = this.bedGain;
-    this.stemHighpass.connect(this.stemBus);
+    // The tone's own makeup is taken back out of the bus gain, so colouring a scene
+    // changes what it sounds like and not how loud it is — the event-over-bed
+    // relationship the recipe declares survives the EQ.
+    this.stemBus.gain.value = this.bedGain * Math.pow(10, -toneMakeupDb(recipe.tone) / 20);
+
+    // Scene colour, between the bus high-pass and the bus gain. Inserting it here
+    // rather than inside attachStem means the three places a stem connects to
+    // `stemHighpass` are untouched.
+    const toneChain = buildToneChain(ctx, recipe.tone, (n) => this.liveNodes.add(n));
+    if (toneChain) {
+      this.stemHighpass.connect(toneChain.input);
+      toneChain.output.connect(this.stemBus);
+    } else {
+      this.stemHighpass.connect(this.stemBus);
+    }
     this.stemBus.connect(this.userGain);
 
     // Event schedule, with the first occurrence spread out so a scene doesn't open
     // with everything firing at once.
-    const effIntensity = clamp01(this.intensity + (recipe.intensityBias ?? 0));
     const now = ctx.currentTime;
-    this.rateScale = eventRateScale(recipe, effIntensity);
+    this.rateScale = this.scaledRate(this.effectiveIntensity());
     this.schedule = recipe.events.map((spec) => ({
       spec,
       nextAt: now + rand(this.rng, 0.4, Math.max(1.2, spec.everyS * this.rateScale)),
     }));
-    this.intensity = effIntensity;
+  }
+
+  /** Interval stretch for this scene, including the presence factor: a place we are
+   *  recording *in* puts fewer things in front of the listener than the place itself. */
+  private scaledRate(eff: number): number {
+    return eventRateScale(this.scene.recipe, eff) / Math.max(0.2, this.scene.presence ?? 1);
+  }
+
+  /** The recipe's bias folded into the user's setting. Kept as a function rather than
+   *  written back over `this.intensity`, which made the bias compound every time the
+   *  slider moved. */
+  private effectiveIntensity(): number {
+    return clamp01(this.intensity + (this.scene.recipe.intensityBias ?? 0));
+  }
+
+  /**
+   * Change how busy the scene is without rebuilding it.
+   *
+   * AudioPlayer used to tear down and reconstruct the whole engine on every slider
+   * move, which restarted every stem from a new random offset — an audible jump — and
+   * was the only way to update the rate scale at all, since it was computed once in
+   * the constructor. Pulling `nextAt` forward means a move takes effect now rather
+   * than after the current interval has elapsed.
+   */
+  setIntensity(intensity: number) {
+    this.intensity = clamp01(intensity);
+    const eff = this.effectiveIntensity();
+    this.rateScale = this.scaledRate(eff);
+    const now = this.ctx.currentTime;
+    for (const entry of this.schedule) {
+      const interval = entry.spec.everyS * (1.6 - eff) * this.rateScale;
+      entry.nextAt = Math.min(entry.nextAt, now + Math.max(0.12, interval));
+    }
   }
 
   private async loadStems(onReady?: (loaded: number, total: number) => void) {
@@ -1676,10 +2095,19 @@ export class AmbienceEngine {
       node.connect(lp); node = lp;
       this.liveNodes.add(lp);
     }
+    // Per-layer colour. 62% of layers in the catalogue had no shaping at all, which is
+    // how `room_tone` came out identical in the 29 scenes that use it.
+    const layerTone = buildToneChain(ctx, layer.tone, (n) => this.liveNodes.add(n));
+    if (layerTone) {
+      node.connect(layerTone.input);
+      node = layerTone.output;
+    }
 
     const gain = ctx.createGain();
     gain.gain.setValueAtTime(0, ctx.currentTime);
-    gain.gain.linearRampToValueAtTime(layer.gain, ctx.currentTime + 2);
+    gain.gain.linearRampToValueAtTime(
+      layer.gain * Math.pow(10, -toneMakeupDb(layer.tone) / 20), ctx.currentTime + 2,
+    );
     node.connect(gain);
     this.liveNodes.add(gain);
 
@@ -1826,8 +2254,10 @@ export class AmbienceEngine {
           }
         }
 
-        // Higher intensity means more often, not just louder.
-        const scale = (1.6 - this.intensity) * this.rateScale;
+        // Higher intensity means more often, not just louder. With the old hard
+        // clamp this was a lie in 26 of 42 scenes: `rateScale` carried a 1/(1.6 - i)
+        // that cancelled this factor exactly.
+        const scale = (1.6 - this.effectiveIntensity()) * this.rateScale;
         entry.nextAt = at + poissonInterval(this.rng, entry.spec.everyS * scale);
       }
     }
@@ -1844,6 +2274,7 @@ export class AmbienceEngine {
     // Distance is now carried by the bus (filtering + reverb send), not by a gain trim.
     const dest = far ? this.eventFarFilter : mid ? this.eventMidFilter : this.eventNear;
     const send = far ? this.farSend : mid ? this.midSend : this.nearSend;
+    const eff = this.effectiveIntensity();
     try {
       synth(
         {
@@ -1853,8 +2284,8 @@ export class AmbienceEngine {
           dest,
           send,
           at,
-          intensity: this.intensity,
-          gain: spec.gain * this.eventScale * (0.55 + this.intensity * 0.75),
+          intensity: eff,
+          gain: spec.gain * this.eventScale * (0.55 + eff * 0.75),
           track: this.trackNode,
         },
         this.scene.recipe,

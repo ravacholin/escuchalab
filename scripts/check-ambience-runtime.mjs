@@ -42,9 +42,12 @@ async function bundle() {
   writeFileSync(entry, `
     export {
       AmbienceEngine, STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST,
-      MAX_EVENT_ONSETS_PER_MIN, onsetsPerMinute, eventRateScale, PLAYHEADS_PER_STEM,
+      MAX_EVENT_ONSETS_PER_MIN, ABSOLUTE_MAX_ONSETS_PER_MIN, onsetsPerMinute,
+      eventRateScale, sceneOnsetBudget, bedBoost, eventScaleFor, PLAYHEADS_PER_STEM,
     } from '${enginePath}';
-    export { SCENE_RECIPES, SCENE_IDS, bedLevel } from '${presetsPath}';
+    export {
+      SCENE_RECIPES, SCENE_IDS, bedLevel, eventHeadroomDb, sceneOnsetCeiling,
+    } from '${presetsPath}';
   `);
   await build({
     entryPoints: [entry],
@@ -59,8 +62,8 @@ async function bundle() {
 
 const {
   AmbienceEngine, SCENE_RECIPES, SCENE_IDS, bedLevel,
-  STEM_MAKEUP, EVENT_OVER_BED, BED_FLOOR, MAX_BED_BOOST,
-  MAX_EVENT_ONSETS_PER_MIN, onsetsPerMinute, eventRateScale, PLAYHEADS_PER_STEM,
+  STEM_MAKEUP, ABSOLUTE_MAX_ONSETS_PER_MIN,
+  onsetsPerMinute, eventRateScale, bedBoost, eventScaleFor, PLAYHEADS_PER_STEM,
 } = await bundle();
 
 const restore = installBrowserGlobals();
@@ -202,7 +205,16 @@ try {
     const BED_MAX_DBFS = -22;   // above this it competes with the dialogue
     // A transient may sit clearly above a continuous bed; it may not dominate it.
     // Before this work the loudest cafe event peaked ~19 dB over its (silent) bed.
-    const EVENT_MAX_OVER_BED_DB = 8;
+    //
+    // This is now a global ceiling, not the law. Every scene used to land on exactly
+    // +6.0 dB, because bed gain and event scale were multiplied by the same boost —
+    // so a library and a market had the same relationship between their quiet moments
+    // and their loud ones, which is a large part of why they sounded alike. Each
+    // recipe declares its own headroom; what is asserted here is that none of them is
+    // deafening, and that they are not all the same number.
+    const EVENT_MAX_OVER_BED_DB = 20;
+    const MIN_DISTINCT_HEADROOMS = 6;
+    const MIN_HEADROOM_SPREAD_DB = 8;
 
     const VOLUME = 0.6;
     let bedFailures = 0;
@@ -210,15 +222,14 @@ try {
     let quietest = { id: null, db: Infinity };
     let loudestEvent = { id: null, db: -Infinity };
 
-    // eventScale = rawBed * boost * EVENT_OVER_BED and the bed bus carries
-    // STEM_MAKEUP * boost, so the event-over-bed ratio reduces to a scene-independent
-    // constant — which is the whole point of scaling events against the bed.
-    const ratioForGain = (gain) => 20 * Math.log10(gain * EVENT_OVER_BED / STEM_MAKEUP);
+    // The headroom each recipe declares, read back through the engine's own inversion
+    // so this measures what the mix does rather than what the table says.
+    const headrooms = [];
 
     for (const sceneId of SCENE_IDS) {
       const recipe = SCENE_RECIPES[sceneId];
       const raw = bedLevel(recipe);
-      const boost = Math.min(MAX_BED_BOOST, Math.max(1, raw > 0 ? BED_FLOOR / raw : 1));
+      const boost = bedBoost(raw);
       const bedDb = 20 * Math.log10(raw * STEM_MAKEUP * boost * VOLUME);
 
       if (bedDb < BED_MIN_DBFS || bedDb > BED_MAX_DBFS) {
@@ -227,7 +238,10 @@ try {
       }
       if (bedDb < quietest.db) quietest = { id: sceneId, db: bedDb };
 
-      const ratioDb = ratioForGain(Math.max(...recipe.events.map((e) => e.gain)));
+      const loudestGain = Math.max(...recipe.events.map((e) => e.gain));
+      const scale = eventScaleFor(recipe, raw * boost);
+      const ratioDb = 20 * Math.log10((loudestGain * scale) / (raw * boost * STEM_MAKEUP));
+      headrooms.push(Math.round(ratioDb * 2) / 2);
       if (ratioDb > EVENT_MAX_OVER_BED_DB) {
         fail(`scene "${sceneId}": loudest event sits ${ratioDb.toFixed(1)} dB over the bed (max ${EVENT_MAX_OVER_BED_DB})`);
         eventFailures++;
@@ -237,15 +251,37 @@ try {
 
     if (!bedFailures) ok(`every scene's bed lands in ${BED_MIN_DBFS}..${BED_MAX_DBFS} dBFS (quietest: ${quietest.id} at ${quietest.db.toFixed(1)})`);
     if (!eventFailures) ok(`loudest event over bed is ${loudestEvent.db.toFixed(1)} dB (${loudestEvent.id}), max ${EVENT_MAX_OVER_BED_DB}`);
+
+    // The inverse assertion, and the one that matters for this defect: the ceilings
+    // must not all be the same number. A bound that every scene satisfies identically
+    // is not a contract, it is a constant.
+    const distinct = new Set(headrooms);
+    const spread = Math.max(...headrooms) - Math.min(...headrooms);
+    if (distinct.size < MIN_DISTINCT_HEADROOMS || spread < MIN_HEADROOM_SPREAD_DB) {
+      fail(
+        `event headroom is nearly uniform: ${distinct.size} distinct values spanning ` +
+        `${spread.toFixed(1)} dB (need ${MIN_DISTINCT_HEADROOMS} and ${MIN_HEADROOM_SPREAD_DB} dB) — ` +
+        `a library and a market cannot have the same relationship between bed and event`,
+      );
+    } else {
+      ok(`event headroom spans ${spread.toFixed(1)} dB across ${distinct.size} distinct values`);
+    }
   }
 
   // -------------------------------------------------------------------------
   // 7. EVENT DENSITY. A place is mostly bed with occasional things happening in
-  //    it. The recipes were authored at up to ~60 onsets/minute, which is one
-  //    discrete noise every second for the length of a lesson.
+  //    it — but how occasional is part of what tells you which place it is.
+  //
+  //    The old rule was one global ceiling of 26 onsets/min, and 26 of 42 scenes were
+  //    authored over it, so they all landed on exactly 26.00: a full restaurant, a
+  //    market, a call centre and a newsroom were equally eventful. The budget is now
+  //    per scene with a soft knee, so what is asserted is the absolute ceiling AND
+  //    that the catalogue actually uses the range.
   // -------------------------------------------------------------------------
   {
     const INTENSITY = 0.6;
+    const MIN_DENSITY_RATIO = 5;      // busiest / quietest scene
+    const MAX_SCENES_AT_ONE_RATE = 6; // how many may sit within 1% of each other
     let over = 0;
     const rates = [];
     for (const sceneId of SCENE_IDS) {
@@ -253,18 +289,82 @@ try {
       const authored = onsetsPerMinute(recipe, INTENSITY);
       const effective = authored / eventRateScale(recipe, INTENSITY);
       rates.push({ sceneId, authored, effective });
-      if (effective > MAX_EVENT_ONSETS_PER_MIN + 0.01) {
-        fail(`scene "${sceneId}": ${effective.toFixed(1)} onsets/min after scaling (budget ${MAX_EVENT_ONSETS_PER_MIN})`);
+      if (effective > ABSOLUTE_MAX_ONSETS_PER_MIN + 0.01) {
+        fail(
+          `scene "${sceneId}": ${effective.toFixed(1)} onsets/min after scaling ` +
+          `(absolute max ${ABSOLUTE_MAX_ONSETS_PER_MIN})`,
+        );
         over++;
       }
     }
     if (!over) {
-      rates.sort((a, b) => b.authored - a.authored);
-      const worst = rates[0];
+      const sorted = [...rates].sort((a, b) => b.effective - a.effective);
       ok(
-        `every scene within ${MAX_EVENT_ONSETS_PER_MIN} onsets/min ` +
-        `(busiest authored: ${worst.sceneId} at ${worst.authored.toFixed(0)}, held to ${worst.effective.toFixed(0)})`,
+        `busiest scene is ${sorted[0].sceneId} at ${sorted[0].effective.toFixed(0)} onsets/min, ` +
+        `quietest ${sorted[sorted.length - 1].sceneId} at ${sorted[sorted.length - 1].effective.toFixed(1)}`,
       );
+    }
+
+    const lo = Math.min(...rates.map((r) => r.effective));
+    const hi = Math.max(...rates.map((r) => r.effective));
+    if (hi / Math.max(lo, 0.1) < MIN_DENSITY_RATIO) {
+      fail(
+        `event density spans only ${(hi / Math.max(lo, 0.1)).toFixed(1)}x across the catalogue ` +
+        `(need ${MIN_DENSITY_RATIO}x) — every scene is equally eventful`,
+      );
+    } else {
+      ok(`event density spans ${(hi / Math.max(lo, 0.1)).toFixed(1)}x (${lo.toFixed(1)}-${hi.toFixed(0)} onsets/min)`);
+    }
+
+    // The specific shape of the old bug: a pile-up at the ceiling.
+    let worstCluster = 0;
+    for (const r of rates) {
+      const n = rates.filter((o) => Math.abs(o.effective - r.effective) < r.effective * 0.01).length;
+      worstCluster = Math.max(worstCluster, n);
+    }
+    if (worstCluster > MAX_SCENES_AT_ONE_RATE) {
+      fail(
+        `${worstCluster} scenes fire at effectively the same rate (max ${MAX_SCENES_AT_ONE_RATE}) — ` +
+        `the budget is clamping rather than shaping`,
+      );
+    } else {
+      ok(`no more than ${worstCluster} scenes share an event rate`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 8. INTENSITY MOVES DENSITY.
+  //
+  //    The direct regression test for the cancellation bug. `onsetsPerMinute` carries
+  //    a 1/(1.6 - i) and the scheduler interval carries a (1.6 - i); with a hard clamp
+  //    `rateScale` was exactly onsets(i)/ceiling, so the two cancelled and the slider
+  //    changed only how loud events were — in 26 of 42 scenes it did nothing to how
+  //    often they happened, which is what a listener actually reads as "busier".
+  // -------------------------------------------------------------------------
+  {
+    const MIN_RATE_CHANGE = 0.35; // between intensity 0.2 and 0.9
+    let flat = 0;
+    const samples = [];
+    for (const sceneId of SCENE_IDS) {
+      const recipe = SCENE_RECIPES[sceneId];
+      // Effective interval for a representative spec, as the scheduler computes it.
+      const intervalAt = (i) => (1.6 - i) * eventRateScale(recipe, i);
+      const slow = intervalAt(0.2);
+      const fast = intervalAt(0.9);
+      const change = (slow - fast) / slow;
+      samples.push({ sceneId, change });
+      if (change < MIN_RATE_CHANGE) flat++;
+    }
+    if (flat > 0) {
+      const worst = samples.sort((a, b) => a.change - b.change).slice(0, 5);
+      fail(
+        `${flat} scene(s) barely change event rate between intensity 0.2 and 0.9 ` +
+        `(min ${(MIN_RATE_CHANGE * 100).toFixed(0)}%): ` +
+        worst.map((w) => `${w.sceneId} ${(w.change * 100).toFixed(0)}%`).join(', '),
+      );
+    } else {
+      const avg = samples.reduce((a, b) => a + b.change, 0) / samples.length;
+      ok(`intensity moves event rate in every scene (mean ${(avg * 100).toFixed(0)}% faster at 0.9 than 0.2)`);
     }
   }
 } finally {
