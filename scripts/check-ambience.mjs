@@ -443,6 +443,7 @@ if (measurements.size === STEM_IDS.length) {
 const CHARACTER_STEMS = [
   'babble_close', 'babble_hall', 'babble_open', 'traffic_near',
   'kitchen', 'rain', 'wind_leaves', 'transit_hum',
+  'office_life', 'pa_concourse', 'home_life', 'workshop_tools', 'crowd_far', 'sports_hall',
 ];
 const MIN_DISTANCE = 6;
 
@@ -485,7 +486,7 @@ if (closestPair && closestPair.dist < MIN_DISTANCE) {
 // ---------------------------------------------------------------------------
 // 7. Asset budget
 // ---------------------------------------------------------------------------
-const MAX_TOTAL_MB = 10;
+const MAX_TOTAL_MB = 14;
 let totalBytes = 0;
 const strays = [];
 for (const file of readdirSync(AMBIENCE_DIR)) {

@@ -29,11 +29,24 @@ export type StemId =
   | 'studio_tone'
   | 'transit_hum'
   | 'rain'
-  | 'wind_leaves';
+  | 'wind_leaves'
+  // Character stems added to break up the support cluster: `room_tone` was in 29 of
+  // 42 scenes and `hvac_office` in 20, which is why so many places were made of the
+  // same thing.
+  | 'office_life'
+  | 'pa_concourse'
+  | 'tiled_corridor'
+  | 'home_life'
+  | 'booth_tight'
+  | 'workshop_tools'
+  | 'crowd_far'
+  | 'sports_hall';
 
 export const STEM_IDS: StemId[] = [
   'babble_close', 'babble_hall', 'babble_open', 'traffic_near', 'traffic_far',
   'kitchen', 'hvac_office', 'room_tone', 'studio_tone', 'transit_hum', 'rain', 'wind_leaves',
+  'office_life', 'pa_concourse', 'tiled_corridor', 'home_life', 'booth_tight',
+  'workshop_tools', 'crowd_far', 'sports_hall',
 ];
 
 /**
@@ -58,6 +71,14 @@ export const STEM_LEVELS_DBFS: Record<StemId, number> = {
   transit_hum: -28,
   rain: -27,
   wind_leaves: -30,
+  office_life: -30,
+  pa_concourse: -30,
+  tiled_corridor: -34,
+  home_life: -33,
+  booth_tight: -44,
+  workshop_tools: -28,
+  crowd_far: -31,
+  sports_hall: -29,
 };
 
 /**
@@ -321,8 +342,10 @@ export const SCENE_RECIPES = {
   wine_tasting: {
     label: 'Cata / sala privada',
     stems: [
-      { stem: 'room_tone', gain: 0.45 },
-      { stem: 'babble_close', gain: 0.14, lowpass: 2400, width: 0.7 },
+      // Glass and bottles carry this room; the voices are few and close.
+      { stem: 'kitchen', gain: 0.24, lowpass: 5200 },
+      { stem: 'room_tone', gain: 0.34 },
+      { stem: 'babble_close', gain: 0.16, lowpass: 2400, width: 0.7 },
     ],
     room: { size: 'medium', wet: 0.22, rt60Scale: 0.85, brightnessHz: 6200, surface: 'tile' },
     events: [
@@ -440,9 +463,9 @@ export const SCENE_RECIPES = {
   plaza: {
     label: 'Plaza',
     stems: [
-      { stem: 'babble_open', gain: 0.5, width: 1 },
+      { stem: 'crowd_far', gain: 0.46 },
+      { stem: 'babble_open', gain: 0.24, width: 1 },
       { stem: 'traffic_far', gain: 0.3 },
-      { stem: 'wind_leaves', gain: 0.18, lowpass: 6000 },
     ],
     room: { size: 'outdoor', wet: 0.08, brightnessHz: 8000, surface: 'concrete' },
     events: [
@@ -479,8 +502,9 @@ export const SCENE_RECIPES = {
   office: {
     label: 'Oficina',
     stems: [
-      { stem: 'hvac_office', gain: 0.55 },
-      { stem: 'room_tone', gain: 0.3 },
+      { stem: 'office_life', gain: 0.34 },
+      { stem: 'hvac_office', gain: 0.42 },
+      { stem: 'room_tone', gain: 0.2 },
     ],
     room: { size: 'medium', wet: 0.1, rt60Scale: 0.8, damping: 0.6, brightnessHz: 4000, surface: 'carpet' },
     events: [
@@ -499,9 +523,9 @@ export const SCENE_RECIPES = {
   open_office: {
     label: 'Oficina abierta',
     stems: [
-      { stem: 'hvac_office', gain: 0.45 },
+      { stem: 'office_life', gain: 0.5 },
       { stem: 'babble_close', gain: 0.26, lowpass: 2800, width: 0.9 },
-      { stem: 'room_tone', gain: 0.2 },
+      { stem: 'hvac_office', gain: 0.32 },
     ],
     room: { size: 'large', wet: 0.13, rt60Scale: 0.6, damping: 0.65, brightnessHz: 3800, surface: 'carpet' },
     events: [
@@ -521,6 +545,8 @@ export const SCENE_RECIPES = {
     stems: [
       { stem: 'room_tone', gain: 0.42 },
       { stem: 'hvac_office', gain: 0.3 },
+      // Work happening on the other side of the door, well muffled.
+      { stem: 'office_life', gain: 0.12, lowpass: 1500 },
     ],
     room: { size: 'medium', wet: 0.14, rt60Scale: 0.85, damping: 0.55, brightnessHz: 4400, surface: 'carpet' },
     events: [
@@ -538,8 +564,11 @@ export const SCENE_RECIPES = {
   call_center: {
     label: 'Centro de atención',
     stems: [
-      { stem: 'babble_close', gain: 0.4, lowpass: 3400, width: 0.95 },
-      { stem: 'hvac_office', gain: 0.4 },
+      // Almost all voice and almost no machinery: everyone is talking at once, into
+      // headsets, and the room is carpeted to stop it becoming unbearable.
+      { stem: 'babble_close', gain: 0.5, lowpass: 3400, width: 0.95 },
+      { stem: 'office_life', gain: 0.2, lowpass: 4000 },
+      { stem: 'hvac_office', gain: 0.34 },
     ],
     room: { size: 'large', wet: 0.12, rt60Scale: 0.55, damping: 0.7, brightnessHz: 3200, surface: 'carpet' },
     events: [
@@ -555,9 +584,9 @@ export const SCENE_RECIPES = {
   newsroom: {
     label: 'Redacción',
     stems: [
-      { stem: 'babble_close', gain: 0.34, lowpass: 3200, width: 0.9 },
-      { stem: 'hvac_office', gain: 0.4 },
-      { stem: 'room_tone', gain: 0.18 },
+      { stem: 'office_life', gain: 0.56 },
+      { stem: 'babble_close', gain: 0.24, lowpass: 3200, width: 0.9 },
+      { stem: 'room_tone', gain: 0.16 },
     ],
     room: { size: 'large', wet: 0.13, rt60Scale: 0.6, damping: 0.6, brightnessHz: 4600, surface: 'carpet' },
     events: [
@@ -575,9 +604,9 @@ export const SCENE_RECIPES = {
   workshop_garage: {
     label: 'Taller',
     stems: [
-      { stem: 'hvac_office', gain: 0.35, lowpass: 3000 },
-      { stem: 'transit_hum', gain: 0.35, lowpass: 1600 },
-      { stem: 'room_tone', gain: 0.2 },
+      // Was office air plus a bus cabin. Neither of those is a workshop.
+      { stem: 'workshop_tools', gain: 0.6 },
+      { stem: 'transit_hum', gain: 0.22, lowpass: 1600 },
     ],
     room: { size: 'large', wet: 0.26, rt60Scale: 1.35, damping: 0.22, brightnessHz: 7000, surface: 'concrete' },
     events: [
@@ -596,9 +625,8 @@ export const SCENE_RECIPES = {
   gym: {
     label: 'Gimnasio',
     stems: [
-      { stem: 'hvac_office', gain: 0.45 },
-      { stem: 'babble_close', gain: 0.16, lowpass: 2400, width: 0.8 },
-      { stem: 'room_tone', gain: 0.2 },
+      { stem: 'sports_hall', gain: 0.6 },
+      { stem: 'hvac_office', gain: 0.28 },
     ],
     room: { size: 'large', wet: 0.22, rt60Scale: 1.35, damping: 0.25, brightnessHz: 6600, surface: 'wood' },
     events: [
@@ -637,10 +665,10 @@ export const SCENE_RECIPES = {
     stems: [
       { stem: 'babble_hall', gain: 0.34, lowpass: 2600, width: 0.85 },
       // `hvac_office` and `room_tone` are both low-frequency by nature, so leaning on
-      // both at once buries the waiting room under rumble. Highpassed and pulled back
-      // so the voices, not the air handling, carry the scene.
-      { stem: 'hvac_office', gain: 0.26, highpass: 140 },
-      { stem: 'room_tone', gain: 0.16, highpass: 120 },
+      // both at once buries the waiting room under rumble. The hard-surface stem
+      // carries the room instead, which is also what separates this from an office.
+      { stem: 'tiled_corridor', gain: 0.3 },
+      { stem: 'hvac_office', gain: 0.2, highpass: 140 },
     ],
     room: { size: 'medium', wet: 0.16, rt60Scale: 0.9, brightnessHz: 6400, surface: 'tile' },
     events: [
@@ -659,8 +687,8 @@ export const SCENE_RECIPES = {
   clinic_room: {
     label: 'Consultorio',
     stems: [
-      { stem: 'room_tone', gain: 0.45 },
-      { stem: 'hvac_office', gain: 0.3 },
+      { stem: 'tiled_corridor', gain: 0.44 },
+      { stem: 'hvac_office', gain: 0.24 },
     ],
     room: { size: 'small', wet: 0.11, rt60Scale: 0.8, damping: 0.35, brightnessHz: 7200, surface: 'tile' },
     events: [
@@ -678,8 +706,10 @@ export const SCENE_RECIPES = {
   hospital: {
     label: 'Hospital',
     stems: [
-      { stem: 'babble_hall', gain: 0.3, lowpass: 2800, width: 0.9 },
-      { stem: 'hvac_office', gain: 0.45 },
+      { stem: 'tiled_corridor', gain: 0.5 },
+      // A hospital pages people. It is the single most recognisable thing about one.
+      { stem: 'pa_concourse', gain: 0.3, lowpass: 2600 },
+      { stem: 'babble_hall', gain: 0.2, lowpass: 2800, width: 0.9 },
     ],
     room: { size: 'hall', wet: 0.2, rt60Scale: 0.85, damping: 0.24, brightnessHz: 7600, surface: 'tile' },
     events: [
@@ -713,9 +743,10 @@ export const SCENE_RECIPES = {
   bank: {
     label: 'Banco',
     stems: [
-      { stem: 'hvac_office', gain: 0.42 },
-      { stem: 'babble_hall', gain: 0.16, lowpass: 2200, width: 0.8 },
-      { stem: 'room_tone', gain: 0.22 },
+      { stem: 'tiled_corridor', gain: 0.28 },
+      // Behind the counter it is an office, and that is what you actually hear.
+      { stem: 'office_life', gain: 0.3, lowpass: 4200 },
+      { stem: 'hvac_office', gain: 0.28 },
     ],
     room: { size: 'large', wet: 0.18, damping: 0.3, brightnessHz: 7000, surface: 'tile' },
     events: [
@@ -733,9 +764,9 @@ export const SCENE_RECIPES = {
   police_station: {
     label: 'Comisaría',
     stems: [
-      { stem: 'hvac_office', gain: 0.42 },
-      { stem: 'babble_close', gain: 0.24, lowpass: 2600, width: 0.85 },
-      { stem: 'room_tone', gain: 0.2 },
+      { stem: 'babble_close', gain: 0.3, lowpass: 2600, width: 0.85 },
+      { stem: 'office_life', gain: 0.24, lowpass: 3400 },
+      { stem: 'hvac_office', gain: 0.3 },
     ],
     room: { size: 'large', wet: 0.19, rt60Scale: 0.85, brightnessHz: 5000, surface: 'concrete' },
     events: [
@@ -772,9 +803,13 @@ export const SCENE_RECIPES = {
   classroom: {
     label: 'Aula',
     stems: [
-      { stem: 'room_tone', gain: 0.38 },
-      { stem: 'babble_close', gain: 0.14, lowpass: 2200, width: 0.75 },
-      { stem: 'hvac_office', gain: 0.26 },
+      // A school is never one room: there are other classes down the corridor, and
+      // that distant, reverberant layer is most of what says "school" rather than
+      // "any quiet room with people in it".
+      { stem: 'crowd_far', gain: 0.28, lowpass: 2000 },
+      { stem: 'tiled_corridor', gain: 0.22 },
+      { stem: 'babble_close', gain: 0.2, lowpass: 2200, width: 0.75 },
+      { stem: 'room_tone', gain: 0.2 },
     ],
     room: { size: 'medium', wet: 0.18, rt60Scale: 1.1, damping: 0.42, brightnessHz: 5600, surface: 'wood' },
     events: [
@@ -784,7 +819,7 @@ export const SCENE_RECIPES = {
       ev('cough', 24, 0.22, { distance: 'far' }),
     ],
     intensityBias: -0.15,
-    activity: 'calm',
+    activity: 'busy',
     eventHeadroomDb: 11,
     tone: { tiltDb: 1.5 },
   },
@@ -816,8 +851,8 @@ export const SCENE_RECIPES = {
   gallery: {
     label: 'Galería',
     stems: [
-      { stem: 'room_tone', gain: 0.36 },
-      { stem: 'babble_hall', gain: 0.14, lowpass: 2000, width: 0.8 },
+      { stem: 'tiled_corridor', gain: 0.4 },
+      { stem: 'babble_hall', gain: 0.12, lowpass: 2000, width: 0.8 },
     ],
     room: { size: 'hall', wet: 0.28, rt60Scale: 1.15, damping: 0.2, brightnessHz: 8200, surface: 'concrete' },
     events: [
@@ -834,7 +869,7 @@ export const SCENE_RECIPES = {
     label: 'Vestíbulo',
     stems: [
       { stem: 'babble_hall', gain: 0.42, width: 0.95 },
-      { stem: 'room_tone', gain: 0.22 },
+      { stem: 'tiled_corridor', gain: 0.3 },
     ],
     room: { size: 'hall', wet: 0.24, damping: 0.26, brightnessHz: 7400, surface: 'tile' },
     events: [
@@ -851,7 +886,8 @@ export const SCENE_RECIPES = {
   station: {
     label: 'Estación',
     stems: [
-      { stem: 'babble_hall', gain: 0.5, width: 1 },
+      { stem: 'babble_hall', gain: 0.44, width: 1 },
+      { stem: 'pa_concourse', gain: 0.42 },
       { stem: 'transit_hum', gain: 0.22, lowpass: 900 },
     ],
     room: { size: 'hall', wet: 0.26, rt60Scale: 1.25, damping: 0.2, brightnessHz: 8000, surface: 'tile' },
@@ -871,8 +907,11 @@ export const SCENE_RECIPES = {
   airport: {
     label: 'Aeropuerto',
     stems: [
-      { stem: 'babble_hall', gain: 0.45, width: 1 },
-      { stem: 'hvac_office', gain: 0.4 },
+      // Same public address as a station, but the room is bigger and softer and the
+      // air handling is the loudest thing in it.
+      { stem: 'babble_hall', gain: 0.38, width: 1 },
+      { stem: 'pa_concourse', gain: 0.26, lowpass: 3200 },
+      { stem: 'hvac_office', gain: 0.48 },
     ],
     room: { size: 'hall', wet: 0.24, rt60Scale: 1.4, damping: 0.22, brightnessHz: 6800, surface: 'tile' },
     events: [
@@ -910,7 +949,7 @@ export const SCENE_RECIPES = {
     stems: [
       { stem: 'babble_hall', gain: 0.26, lowpass: 3000, width: 0.9 },
       { stem: 'hvac_office', gain: 0.38 },
-      { stem: 'room_tone', gain: 0.22 },
+      { stem: 'home_life', gain: 0.14, lowpass: 1800 },
     ],
     room: { size: 'hall', wet: 0.22, rt60Scale: 0.75, damping: 0.5, brightnessHz: 4000, surface: 'carpet' },
     events: [
@@ -930,8 +969,8 @@ export const SCENE_RECIPES = {
   home: {
     label: 'Casa',
     stems: [
-      { stem: 'room_tone', gain: 0.55 },
-      { stem: 'traffic_far', gain: 0.16, lowpass: 700 },
+      { stem: 'home_life', gain: 0.55 },
+      { stem: 'room_tone', gain: 0.24 },
     ],
     room: { size: 'small', wet: 0.1, rt60Scale: 0.8, damping: 0.6, brightnessHz: 3600, surface: 'wood' },
     events: [
@@ -949,7 +988,11 @@ export const SCENE_RECIPES = {
   studio_radio: {
     label: 'Estudio de radio',
     stems: [
-      { stem: 'studio_tone', gain: 0.6 },
+      // A treated booth is a small box, not silence: a strong low mode and no air
+      // above 3 kHz. All four studios used to be studio_tone + room_tone, and being
+      // below the old bed floor they arrived at exactly the same level too.
+      { stem: 'booth_tight', gain: 0.62 },
+      { stem: 'studio_tone', gain: 0.34 },
     ],
     room: { size: 'small', wet: 0.05, rt60Scale: 0.4, damping: 0.8, brightnessHz: 2800, surface: 'carpet' },
     events: [
@@ -986,7 +1029,8 @@ export const SCENE_RECIPES = {
     label: 'Estudio de podcast',
     stems: [
       { stem: 'studio_tone', gain: 0.5 },
-      { stem: 'room_tone', gain: 0.22 },
+      { stem: 'booth_tight', gain: 0.3 },
+      { stem: 'room_tone', gain: 0.2 },
     ],
     room: { size: 'small', wet: 0.08, rt60Scale: 0.45, damping: 0.75, brightnessHz: 3400, surface: 'carpet' },
     events: [
@@ -1006,8 +1050,11 @@ export const SCENE_RECIPES = {
     // than a booth. Drier and warmer than the podcast studio, with a little more of
     // the room's own life — someone recording at their desk, not in a facility.
     stems: [
-      { stem: 'room_tone', gain: 0.42 },
-      { stem: 'studio_tone', gain: 0.28 },
+      // Recorded at home rather than in a booth — that is the difference between
+      // this and the podcast studio, and it needs to be audible.
+      { stem: 'home_life', gain: 0.3, lowpass: 2600 },
+      { stem: 'room_tone', gain: 0.34 },
+      { stem: 'studio_tone', gain: 0.22 },
     ],
     room: { size: 'small', wet: 0.06, rt60Scale: 0.5, damping: 0.72, brightnessHz: 3000, surface: 'carpet' },
     events: [
@@ -1024,7 +1071,8 @@ export const SCENE_RECIPES = {
   venue_stage: {
     label: 'Auditorio',
     stems: [
-      { stem: 'babble_hall', gain: 0.16, lowpass: 1600, width: 0.9 },
+      // An audience that is listening, not talking: distant, and never near you.
+      { stem: 'crowd_far', gain: 0.2, lowpass: 1600 },
       { stem: 'room_tone', gain: 0.3 },
     ],
     room: { size: 'hall', wet: 0.3, rt60Scale: 1.1, damping: 0.32, brightnessHz: 5800, surface: 'wood' },

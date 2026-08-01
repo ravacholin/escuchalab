@@ -19,7 +19,7 @@ import {
   whiteNoise, pinkNoise, brownNoise, filter, filterChain,
   mix, scale, addAt, normalizeRms, rms, peak, softClip,
   envelopeSwell, applyEnvelope, applyDistance, panMono, convolve,
-  renderIR, poissonTimes, makeSeamlessLoop, decorrelate, dcBlock,
+  renderIR, poissonTimes, makeSeamlessLoop, decorrelate, dcBlock, octaveConcentration,
 } from './dsp.mjs';
 
 import { renderBabble, renderAnnouncement } from './voice.mjs';
@@ -30,6 +30,7 @@ import {
   printerPass, chairScrape, cashDrawer, sizzle, steamHiss, grinder,
   rain as rainEvent, windGust, leafRustle, bird,
   hvac, mainsHum, cabinRumble, motorCycle, luggageWheels,
+  phoneRing, compressor, impactWrench, weightClank, applause, laugh, creak,
 } from './events.mjs';
 
 export const CROSSFADE_SECONDS = 2.5;
@@ -82,6 +83,60 @@ function addPairInto([dl, dr], [sl, sr], gain = 1) {
 function swellStereo([l, r], sampleRate, { rng, depthDb }) {
   const env = envelopeSwell(l.length, sampleRate, { depthDb, rng });
   return [applyEnvelope(l, env), applyEnvelope(r, env)];
+}
+
+
+/**
+ * Fill a stem's weakest octaves until no single one dominates it.
+ *
+ * A place is broadband: it has a floor, a body and some air, because it is made of
+ * many objects and a volume of moving air. A synthesised texture is not, because it
+ * is made of one or two generators — `office_life` is keystrokes and paper, which
+ * both live at 1-2 kHz, and it measured 72% of its energy inside that one octave.
+ * `check:ambience` rejects that, and it is right to: a stem concentrated in one
+ * octave reads as an effect, not as somewhere you are standing.
+ *
+ * Tuning this by hand is a loop of guesses — and worse, of guesses measured with a
+ * different instrument than the one that judges the result. This drives the fill from
+ * `octaveConcentration()` itself, the exact function `check:ambience` uses, and raises
+ * the floor until the measurement passes. The fill carries a slow swell of its own: a
+ * flat fill closes the gaps between events and destroys the loudness range, which is
+ * the property that separates a place from noise.
+ */
+function fillSpectrum(buf, sampleRate, { rng, target = 0.44, depthDb = 7, maxRounds = 7 }) {
+  const nyquist = sampleRate / 2;
+  const centres = [];
+  for (let f = 90; f < nyquist * 0.78; f *= 1.6) centres.push(f);
+  const bandOf = (src, freq) => filter(src, { type: 'bandpass', freq, q: 1.1, sampleRate });
+
+  const pink = pinkNoise(buf.length, forkRng(rng, 'spectrum-fill'));
+  const env = envelopeSwell(buf.length, sampleRate, { depthDb, rng: forkRng(rng, 'fill-env') });
+  const pinkBands = centres.map((f) => bandOf(pink, f));
+
+  let out = Float32Array.from(buf);
+  for (let round = 0; round < maxRounds; round++) {
+    const { share } = octaveConcentration(out, sampleRate);
+    if (share <= target) break;
+    // Each round lifts the floor. Starting low keeps the stem's own shape where the
+    // shape is already broad enough, and only the stubborn cases end up near flat.
+    const floorRatio = 0.2 + round * 0.13;
+    const energies = centres.map((f) => rms(bandOf(out, f)));
+    const loudest = Math.max(...energies);
+    if (loudest <= 0) break;
+    const next = Float32Array.from(out);
+    for (let i = 0; i < centres.length; i++) {
+      const want = loudest * floorRatio;
+      if (energies[i] >= want) continue;
+      const have = rms(pinkBands[i]);
+      if (have <= 0) continue;
+      // Power-complement: supply only the shortfall, not the whole band.
+      const need = Math.sqrt(Math.max(0, want * want - energies[i] * energies[i]));
+      const g = need / have;
+      for (let k = 0; k < next.length; k++) next[k] += pinkBands[i][k] * env[k] * g;
+    }
+    out = next;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -597,6 +652,452 @@ export const STEMS = {
       ], sampleRate);
       for (let i = 0; i < n; i++) out[i] += base[i] * 0.18;
       return out;
+    },
+  },
+  // -------------------------------------------------------------------------
+  // Character stems added to break up the support cluster.
+  //
+  // Measured before these existed: twelve stems covered 42 scenes, `room_tone`
+  // appeared in 29 of them and `hvac_office` in 20 — between the two, half of every
+  // stem layer in the catalogue. There were 22 distinct stem combinations for 42
+  // scenes, one of them shared by 8, and 16 pairs of scenes whose stem sets matched
+  // with gain differences under half a decibel. No amount of per-scene EQ fixes a
+  // palette that small; at some point two places have to be made of different things.
+  // -------------------------------------------------------------------------
+
+  /**
+   * A working office, as opposed to the air in an empty one.
+   *
+   * `hvac_office` is deliberately featureless and was carrying 20 scenes on its own,
+   * so an office, an open-plan floor, a call centre and a newsroom differed only in
+   * how much crowd was mixed over the same plant noise. This is the other half: the
+   * work itself, at a distance, dense enough to be a texture rather than a set of
+   * one-shots.
+   */
+  office_life: {
+    sampleRate: 12000,
+    durationS: 20,
+    channels: 1,
+    targetRms: -30,
+    expect: { maxLowRatio: 0.4, minLoudnessRange: 6 },
+    render(n, rng, sampleRate) {
+      const durationS = n / sampleRate;
+      const out = new Float32Array(n);
+
+      scatterMono(out, sampleRate, {
+        // Work comes in bursts with real lulls between them; a steady sprinkle of
+        // keystrokes measures as noise however broadband it is.
+        rng, durationS, ratePerSecond: 0.5, burst: 0.75,
+        make: (r) => typingBurst(sampleRate, { rng: r, keys: randInt(r, 6, 18) }),
+        gain: 0.6, distanceRange: [1.5, 7],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.32, burst: 0.3,
+        make: (r) => paperRustle(sampleRate, { rng: r }),
+        gain: 0.45, distanceRange: [1.2, 5],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.1,
+        make: (r) => printerPass(sampleRate, { rng: r }),
+        gain: 0.4, distanceRange: [4, 12],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.07,
+        make: (r) => phoneRing(sampleRate, { rng: r }),
+        gain: 0.3, distanceRange: [6, 16],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.11,
+        make: (r) => chairScrape(sampleRate, { rng: r }),
+        gain: 0.38, distanceRange: [2, 8],
+      });
+
+      // Just enough plant noise to sit the transients in a room rather than in a void
+      // — and deliberately spread across the spectrum. Keystrokes and paper both live
+      // at 1-2 kHz, so without a body below and some air above, the stem measured 72%
+      // of its energy inside that single octave and read as a typewriter, not a room.
+      const air = hvac(sampleRate, { rng, durationS, bladeHz: rand(rng, 19, 26), warmth: 0.4 });
+      for (let i = 0; i < n; i++) out[i] += air[i] * 0.22;
+
+      // A deep swell on the fill: an office is not a steady hiss, it has lulls. With a
+      // shallower one the spectral fill closed the gaps between keystrokes and the
+      // stem measured 4.9 dB of loudness range — statistically, noise.
+      const filled = fillSpectrum(out, sampleRate, { rng, depthDb: 16 });
+      return applyEnvelope(filled, envelopeSwell(n, sampleRate, { depthDb: 7, rng }));
+    },
+  },
+
+  /**
+   * A concourse: public address you cannot make out, in a very large space.
+   *
+   * A station and an airport were `babble_hall` plus one support stem each, which is
+   * why they measured 4.4 apart — the single most confusable pair in the catalogue.
+   * The announcement is what actually says "transport hub", and it has to be
+   * unintelligible: heavily lowpassed, smeared through a long tail, so it reads as
+   * information being broadcast rather than as someone talking near you.
+   */
+  pa_concourse: {
+    sampleRate: 12000,
+    durationS: 22,
+    channels: 1,
+    targetRms: -30,
+    expect: { maxLowRatio: 0.45, minLoudnessRange: 7 },
+    render(n, rng, sampleRate) {
+      const durationS = n / sampleRate;
+      const out = new Float32Array(n);
+      const ir = renderIR(sampleRate, { size: 'hall', rt60: 3.2, damping: 0.22, rng, stereo: false });
+
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.22,
+        make: (r) => {
+          const speech = renderAnnouncement(sampleRate, { rng: r, durationS: rand(r, 3, 6) });
+          const mono = Array.isArray(speech) ? speech[0] : speech;
+          // Through a ceiling horn, then through the building.
+          const horn = filterChain(mono, [
+            { type: 'bandpass', freq: 900, q: 0.32 },
+            { type: 'lowpass', freq: 2400, q: 0.7 },
+          ], sampleRate);
+          return convolve(horn, ir[0] ?? ir, { circular: false });
+        },
+        gain: 0.85, distanceRange: [12, 40],
+      });
+
+      // The chime that precedes an announcement — the most recognisable single sound
+      // in a station, and worth having even at this distance.
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.08,
+        make: (r) => convolve(doorChime(sampleRate, { rng: r }), ir[0] ?? ir, { circular: false }),
+        gain: 0.22, distanceRange: [15, 45],
+      });
+
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.22,
+        make: (r) => luggageWheels(sampleRate, { rng: r, durationS: rand(r, 2, 5) }),
+        gain: 0.4, distanceRange: [4, 18],
+      });
+
+      // A concourse is never silent between announcements: the volume of air in it
+      // is itself a sound. Without this the stem measured a 31 dB loudness range —
+      // isolated bangs over nothing, which is the texture the whole rebuild was
+      // meant to get away from.
+      const air = hvac(sampleRate, { rng, durationS, bladeHz: 0, warmth: 0.6 });
+      const wash = filterChain(pinkNoise(n, forkRng(rng, 'concourse-air')), [
+        { type: 'lowpass', freq: 3200, q: 0.5 },
+        { type: 'highpass', freq: 70, q: 0.6 },
+      ], sampleRate);
+      const rumble = filterChain(brownNoise(n, forkRng(rng, 'concourse-low')), [
+        { type: 'lowpass', freq: 260, q: 0.6 },
+      ], sampleRate);
+      for (let i = 0; i < n; i++) out[i] += air[i] * 0.55 + wash[i] * 0.5 + rumble[i] * 0.55;
+
+      return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 5, rng }));
+    },
+  },
+
+  /**
+   * Hard tiled room: bright, reflective, and audibly empty.
+   *
+   * The clinics, the courtroom, the gallery, the bank and the hospital were all
+   * `room_tone` — a stem written to be a quiet domestic room and explicitly "never
+   * identifiable on its own". A tiled corridor is the opposite of domestic: it has no
+   * absorption, so its air noise keeps its top end and the room rings.
+   */
+  tiled_corridor: {
+    sampleRate: 12000,
+    durationS: 18,
+    channels: 1,
+    targetRms: -34,
+    expect: { maxLowRatio: 0.42, minLoudnessRange: 4 },
+    render(n, rng, sampleRate) {
+      const durationS = n / sampleRate;
+      const ir = renderIR(sampleRate, { size: 'large', rt60: 1.9, damping: 0.15, rng, stereo: false });
+      const air = hvac(sampleRate, { rng, durationS, bladeHz: rand(rng, 14, 22), warmth: 0.2 });
+      const out = filterChain(air, [
+        { type: 'highpass', freq: 150, q: 0.6 },
+        { type: 'highshelf', freq: 2200, gainDb: 5, q: 0.7 },
+      ], sampleRate);
+
+      // Distant footsteps on tile, with the room's own tail on them. In a corridor
+      // you hear people you cannot see, and you hear the corridor doing it.
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.16,
+        make: (r) => convolve(
+          footstepRun(sampleRate, { surface: 'tile', rng: r, steps: randInt(r, 4, 9), tempoHz: rand(r, 1.6, 2.1) }).buffer,
+          ir[0] ?? ir, { circular: false },
+        ),
+        gain: 0.34, distanceRange: [6, 22],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.09,
+        make: (r) => convolve(doorLatch(sampleRate, { rng: r }), ir[0] ?? ir, { circular: false }),
+        gain: 0.3, distanceRange: [8, 25],
+      });
+      // A tiled corridor is bright by definition: nothing in it absorbs. The air
+      // alone put 77% of the stem inside one low-mid octave, which is the spectrum of
+      // a duct rather than of a hard room.
+      const hum = mainsHum(sampleRate, { durationS, fundamental: 50, level: 0.3 });
+      for (let i = 0; i < n; i++) out[i] += hum[i] * 0.25;
+
+      // Tilted up on the way in: nothing in a tiled corridor absorbs, so the fill
+      // should leave it bright rather than merely broad.
+      const bright = filterChain(
+        fillSpectrum(out, sampleRate, { rng, depthDb: 6 }),
+        [{ type: 'highshelf', freq: 1900, gainDb: 4, q: 0.7 }], sampleRate,
+      );
+      return applyEnvelope(bright, envelopeSwell(n, sampleRate, { depthDb: 5, rng }));
+    },
+  },
+
+  /**
+   * A lived-in home: the fridge, a clock, the street through double glazing, a
+   * television two rooms away.
+   *
+   * `home` and `clinic_room` measured 2.4 apart — the second-closest pair in the
+   * catalogue — because both were `room_tone` plus a little air. What makes a home
+   * recognisable is not its quietness but its specific, slow, domestic events.
+   */
+  home_life: {
+    sampleRate: 12000,
+    durationS: 20,
+    channels: 1,
+    targetRms: -33,
+    expect: { maxLowRatio: 0.6, minLoudnessRange: 5 },
+    render(n, rng, sampleRate) {
+      const durationS = n / sampleRate;
+      // Fridge compressor: on for a long stretch, then off. The cycling is the point.
+      const fridge = motorCycle(sampleRate, { rng, durationS, hz: rand(rng, 46, 58) });
+      const fridgeEnv = new Float32Array(n);
+      {
+        let on = rng() < 0.6;
+        let i = 0;
+        while (i < n) {
+          const runS = on ? rand(rng, 5, 11) : rand(rng, 4, 9);
+          const runN = Math.min(n - i, Math.floor(runS * sampleRate));
+          const ramp = Math.floor(0.35 * sampleRate);
+          for (let k = 0; k < runN; k++) {
+            const fade = Math.min(1, k / ramp, (runN - k) / ramp);
+            fridgeEnv[i + k] = on ? Math.max(0, fade) : 0;
+          }
+          i += runN;
+          on = !on;
+        }
+      }
+      const out = new Float32Array(n);
+      for (let i = 0; i < n; i++) out[i] = fridge[i] * fridgeEnv[i] * 0.55;
+
+      // Street through glass: everything above 700 Hz gone. `trafficWash` hands back a
+      // stereo pair, so it is folded before filtering — passing the pair straight into
+      // `filterChain` silently produces NaN rather than an error.
+      const [washL, washR] = trafficWash(sampleRate, { rng, durationS, density: 1.4 });
+      const washMono = new Float32Array(n);
+      for (let i = 0; i < n; i++) washMono[i] = (washL[i] + washR[i]) * 0.5;
+      const street = filterChain(washMono, [
+        { type: 'lowpass', freq: 620, q: 0.6 },
+        { type: 'highpass', freq: 55, q: 0.6 },
+      ], sampleRate);
+      // A television or a radio in another room: speech with no consonants left.
+      const [tvL] = renderBabble(sampleRate, {
+        durationS, rng: forkRng(rng, 'home-tv'), voices: 3,
+        distanceRange: [9, 16], talkRatio: 0.65, spread: 0.2,
+      });
+      const tv = filterChain(tvL, [
+        { type: 'lowpass', freq: 900, q: 0.6 },
+        { type: 'highpass', freq: 180, q: 0.6 },
+      ], sampleRate);
+      for (let i = 0; i < n; i++) out[i] += street[i] * 0.3 + tv[i] * 0.22;
+
+      // The clock, and the building.
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.12,
+        make: (r) => impact(sampleRate, { material: 'wood', rng: r, strength: rand(r, 0.2, 0.5) }),
+        gain: 0.3, distanceRange: [2, 6],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.06,
+        make: (r) => creak(sampleRate, { rng: r }), gain: 0.28, distanceRange: [3, 8],
+      });
+
+      return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 6, rng }));
+    },
+  },
+
+  /**
+   * A treated voice booth: small, dead, and with one room mode it cannot lose.
+   *
+   * The four studio scenes shared `studio_tone` + `room_tone` and, being below the
+   * old bed floor, arrived at exactly the same level — so a radio booth, a podcast
+   * table and an intimate narration were the same recording. A real booth is not
+   * silence: it is a very small box, and small boxes have a strong low resonance and
+   * almost no air above 3 kHz.
+   */
+  booth_tight: {
+    sampleRate: 8000,
+    durationS: 14,
+    channels: 1,
+    targetRms: -44,
+    expect: { maxLowRatio: 0.85, minLoudnessRange: 1 },
+    render(n, rng, sampleRate) {
+      const durationS = n / sampleRate;
+      const base = filterChain(pinkNoise(n, forkRng(rng, 'booth')), [
+        { type: 'lowpass', freq: 640, q: 0.6 },
+        { type: 'highpass', freq: 32, q: 0.6 },
+        // The box mode. A booth you have sat in has exactly this.
+        { type: 'peaking', freq: 178, gainDb: 7, q: 7 },
+      ], sampleRate);
+      const hum = mainsHum(sampleRate, { durationS, fundamental: 50, level: 0.22 });
+      const out = mix([base, hum], [0.7, 0.3]);
+      return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 1.6, rng }));
+    },
+  },
+
+  /**
+   * A working machine shop.
+   *
+   * `workshop_garage` was `hvac_office` + `transit_hum` — office air and a bus cabin.
+   * Nothing in it was a workshop. This is: a compressor cycling, an impact wrench
+   * somewhere across the floor, metal being handled, all in a hard room.
+   */
+  workshop_tools: {
+    sampleRate: 12000,
+    durationS: 18,
+    channels: 1,
+    targetRms: -28,
+    expect: { maxLowRatio: 0.55, minLoudnessRange: 8 },
+    render(n, rng, sampleRate) {
+      const durationS = n / sampleRate;
+      const ir = renderIR(sampleRate, { size: 'large', rt60: 1.7, damping: 0.18, rng, stereo: false });
+      const out = new Float32Array(n);
+      const room = (buf) => convolve(buf, ir[0] ?? ir, { circular: false });
+
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.09,
+        make: (r) => room(compressor(sampleRate, { rng: r, durationS: rand(r, 3, 6.5) })),
+        gain: 0.55, distanceRange: [4, 12],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.12,
+        make: (r) => room(impactWrench(sampleRate, { rng: r })),
+        gain: 0.45, distanceRange: [5, 16],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.95, burst: 0.55,
+        make: (r) => room(impact(sampleRate, { material: 'metal', rng: r, strength: rand(r, 0.3, 0.9) })),
+        gain: 0.34, distanceRange: [2, 9],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.08,
+        make: (r) => room(grinder(sampleRate, { rng: r, durationS: rand(r, 2, 4) })),
+        gain: 0.4, distanceRange: [4, 12],
+      });
+
+      // A shop has a floor of plant noise under the work; without it the tools are
+      // isolated bangs rather than a place where tools are being used.
+      const extractor = motorCycle(sampleRate, { rng, durationS, hz: rand(rng, 34, 46) });
+      const air = hvac(sampleRate, { rng, durationS, bladeHz: 0, warmth: 0.3 });
+      for (let i = 0; i < n; i++) out[i] += extractor[i] * 0.62 + air[i] * 0.46;
+
+      return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 6, rng }));
+    },
+  },
+
+  /**
+   * A crowd heard across an open space, with no near voices at all.
+   *
+   * `babble_open` puts its nearest talkers 1.5 m away, which is right for a market
+   * stall and wrong for a square, a park or an audience before a performance. Removing
+   * the foreground entirely is what makes a crowd read as *over there*.
+   */
+  crowd_far: {
+    sampleRate: 8000,
+    durationS: 20,
+    channels: 1,
+    targetRms: -31,
+    expect: { maxLowRatio: 0.5, minLoudnessRange: 5 },
+    render(n, rng, sampleRate) {
+      const durationS = n / sampleRate;
+      const ir = renderIR(sampleRate, { size: 'outdoor', rt60: 0.95, damping: 0.55, rng, stereo: false });
+      const [l, r] = renderBabble(sampleRate, {
+        durationS, rng: forkRng(rng, 'crowd-far'), voices: 22,
+        distanceRange: [22, 70], rateRange: [4.4, 6.4], talkRatio: 0.4, childRatio: 0.2, spread: 1,
+      });
+      const summed = new Float32Array(n);
+      for (let i = 0; i < n; i++) summed[i] = (l[i] + r[i]) * 0.5;
+      const out = convolve(
+        filterChain(summed, [{ type: 'lowpass', freq: 3400, q: 0.6 }, { type: 'highpass', freq: 120, q: 0.6 }], sampleRate),
+        ir[0] ?? ir, { circular: true },
+      );
+      // Open air around the crowd, so the stem is a place and not just voices.
+      const openAir = fillSpectrum(out, sampleRate, { rng, depthDb: 8 });
+      out.set(openAir);
+
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.05,
+        make: (r2) => applause(sampleRate, { rng: r2, durationS: rand(r2, 2.5, 5) }),
+        gain: 0.22, distanceRange: [25, 60],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.07,
+        make: (r2) => laugh(sampleRate, { rng: r2 }), gain: 0.3, distanceRange: [15, 40],
+      });
+
+      return applyEnvelope(out, envelopeSwell(n, sampleRate, { depthDb: 6, rng }));
+    },
+  },
+
+  /**
+   * A sports hall: shoes on a sprung floor, weights, and voices in a very live box.
+   *
+   * `gym` was `hvac_office` + a little `babble_close`, which measured within 4.5 of a
+   * bank. What a gym sounds like is impact and squeak in a room with no soft surfaces.
+   */
+  sports_hall: {
+    sampleRate: 12000,
+    durationS: 18,
+    channels: 1,
+    targetRms: -29,
+    expect: { maxLowRatio: 0.5, minLoudnessRange: 7 },
+    render(n, rng, sampleRate) {
+      const durationS = n / sampleRate;
+      const ir = renderIR(sampleRate, { size: 'hall', rt60: 2.2, damping: 0.2, rng, stereo: false });
+      const out = new Float32Array(n);
+      // The tail of a live hall is overwhelmingly low-mid, and convolving every
+      // impact through it put 73% of the stem inside one octave around 200 Hz. A hall
+      // that big has no boundary close enough to support that band anyway.
+      const room = (buf) => filterChain(
+        convolve(buf, ir[0] ?? ir, { circular: false }),
+        [{ type: 'highpass', freq: 220, q: 0.7 }], sampleRate,
+      );
+
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.8, burst: 0.5,
+        make: (r) => room(footstepRun(sampleRate, {
+          surface: 'tile', rng: r, steps: randInt(r, 3, 8), tempoHz: rand(r, 2.2, 3.1),
+        }).buffer),
+        gain: 0.32, distanceRange: [3, 14],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.2,
+        make: (r) => room(weightClank(sampleRate, { rng: r })),
+        gain: 0.5, distanceRange: [3, 12],
+      });
+      scatterMono(out, sampleRate, {
+        rng, durationS, ratePerSecond: 0.35, burst: 0.4,
+        make: (r) => room(impact(sampleRate, { material: 'plastic', rng: r, strength: rand(r, 0.4, 0.9) })),
+        gain: 0.32, distanceRange: [4, 16],
+      });
+
+      const [vl, vr] = renderBabble(sampleRate, {
+        durationS, rng: forkRng(rng, 'gym-voices'), voices: 6,
+        distanceRange: [5, 20], talkRatio: 0.3, spread: 0.8,
+      });
+      const air = hvac(sampleRate, { rng, durationS, bladeHz: rand(rng, 16, 24), warmth: 0.35 });
+      // The air alone is very low-heavy and the hall reverb piles onto the same
+      // octave; the squeak band is what makes it a sports hall rather than a plant room.
+      const airHp = filterChain(air, [{ type: 'highpass', freq: 230, q: 0.6 }], sampleRate);
+      for (let i = 0; i < n; i++) out[i] += (vl[i] + vr[i]) * 0.4 + airHp[i] * 0.3;
+
+      const filled = fillSpectrum(out, sampleRate, { rng, depthDb: 8 });
+      return applyEnvelope(filled, envelopeSwell(n, sampleRate, { depthDb: 6, rng }));
     },
   },
 };

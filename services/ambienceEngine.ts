@@ -307,6 +307,8 @@ const STEM_BANDWIDTH_HZ: Record<StemId, number> = {
   traffic_near: 8000, traffic_far: 4000,
   kitchen: 12000, hvac_office: 4000, room_tone: 4000, studio_tone: 4000,
   transit_hum: 6000, rain: 12000, wind_leaves: 12000,
+  office_life: 6000, pa_concourse: 6000, tiled_corridor: 6000, home_life: 6000,
+  booth_tight: 4000, workshop_tools: 6000, crowd_far: 4000, sports_hall: 6000,
 };
 
 /**
