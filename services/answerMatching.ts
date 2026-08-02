@@ -100,16 +100,26 @@ export function countNumerals(literal: string): number {
   return splitTokens(literal).filter(t => NUMBER_LEXICON.has(normalizeText(t))).length;
 }
 
-/** ¿Este literal es plausiblemente EL dato que la lección anunció? */
+/**
+ * ¿Este literal es plausiblemente EL dato que la lección anunció?
+ *
+ * Para un teléfono se cuentan las cifras DEL DATO, no las que estén escritas con
+ * cifras: `digitsOnly()` pasa antes los numerales a números, así que "seis cinco
+ * cuatro treinta y dos dieciocho" y "654 32 18" valen los mismos siete dígitos y
+ * "654, treinta y dos" —media cifra— no llega, aunque tenga tres dígitos
+ * escritos y dos numerales. Contarlos por separado era lo que dejaba pasar un
+ * trozo del teléfono como si fuera el teléfono.
+ */
 export function isFocusLiteral(literal: string, focus: DataPointKind): boolean {
-  const digits = literal.replace(/\D/g, '').length;
+  const digits = digitsOnly(literal).length;
   const numerals = countNumerals(literal);
   const spelled = SPELLED_TEST.test(literal);
 
   switch (focus) {
     case 'phone':
+      return digits >= 6 || spelled;
     case 'code':
-      return digits >= 6 || numerals >= 5 || spelled;
+      return digits >= 4 || numerals >= 4 || spelled;
     case 'price':
       return /[.,]\d{2}$/.test(literal) || /\bcon\b/i.test(literal);
     case 'time':
@@ -178,13 +188,21 @@ const FILLER_WORDS = new Set(['el', 'la', 'los', 'las', 'de', 'del', 'a', 'al', 
  * comparar frases y ruinoso para comparar un correo o una hora.
  */
 function soften(text: string): string {
-  return (text || '')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/[^\p{L}\p{N}@._,:\-\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    (text || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '')
+      .replace(/[^\p{L}\p{N}@._,:\-\s]/gu, ' ')
+      // Un punto o una coma que no lleva cifra detrás separa dos piezas, no las
+      // une: en "654, treinta y dos" la coma se quedaba pegada al 654 y el token
+      // "654," no era ningún número conocido, así que el teléfono se corregía
+      // como si le faltaran tres cifras. El decimal ("14,90") lleva cifra detrás
+      // y no se toca.
+      .replace(/[.,](?!\d)/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 /**
