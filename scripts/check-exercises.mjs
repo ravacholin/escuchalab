@@ -28,6 +28,7 @@ async function loadModules() {
     entry,
     `export * from '${join(ROOT, 'services/exerciseVerification.ts')}';
      export * from '${join(ROOT, 'services/exerciseEngines.ts')}';
+     export * from '${join(ROOT, 'services/answerMatching.ts')}';
      export * from '${join(ROOT, 'services/textUtils.ts')}';`
   );
 
@@ -46,7 +47,7 @@ async function loadModules() {
   return mod;
 }
 
-const { verifyExercise, buildTranscriptIndex, fillMissingSlots } = await loadModules();
+const { verifyExercise, buildTranscriptIndex, fillMissingSlots, matchesDatum } = await loadModules();
 
 // Silencia los console.warn de diagnóstico durante las pruebas.
 const realWarn = console.warn;
@@ -209,31 +210,38 @@ const REJECT_CASES = [
     }
   ],
   [
-    'dictado cuya secuencia reconstruida no se dice de corrido',
+    'dictado cuyo dato no se dice de corrido',
     {
       type: 'dictation',
-      question: 'Reconstruí el precio',
-      fields: [
-        { id: 'd1', label: '1', options: [{ id: 'd1a', text: '14' }, { id: 'd1b', text: '40' }] },
-        { id: 'd2', label: '2', options: [{ id: 'd2a', text: '55' }, { id: 'd2b', text: '95' }] }
-      ],
-      separators: [','],
+      question: 'Escribí el precio',
       // "14,55" no se dice: el audio dice "14,95".
-      correctAnswer: { d1: 'd1a', d2: 'd2a' },
+      expected: '14,55',
+      dataKind: 'price',
+      correctAnswer: '14,55',
       explanation: ''
     }
   ],
   [
-    'dictado con la solución repetida entre las opciones de una posición',
+    'dictado sin dato que anotar',
     {
       type: 'dictation',
-      question: 'Reconstruí el precio',
-      fields: [
-        { id: 'd1', label: '1', options: [{ id: 'd1a', text: '14' }, { id: 'd1b', text: '14' }] },
-        { id: 'd2', label: '2', options: [{ id: 'd2a', text: '95' }, { id: 'd2b', text: '55' }] }
-      ],
-      separators: [','],
-      correctAnswer: { d1: 'd1a', d2: 'd2a' },
+      question: 'Escribí el precio',
+      expected: '   ',
+      correctAnswer: '',
+      explanation: ''
+    }
+  ],
+  [
+    'dictado con una variante aceptada que no es el mismo dato',
+    {
+      type: 'dictation',
+      question: 'Escribí el precio',
+      expected: '14,95',
+      // Aceptar "14,55" daría por buena una respuesta falsa, que es peor que
+      // rechazar una verdadera.
+      accepts: ['14,55'],
+      dataKind: 'price',
+      correctAnswer: '14,95',
       explanation: ''
     }
   ],
@@ -305,16 +313,14 @@ const ACCEPT_CASES = [
     }
   ],
   [
-    'dictado cuya secuencia sí se dice de corrido',
+    'dictado cuyo dato sí se dice de corrido',
     {
       type: 'dictation',
-      question: 'Reconstruí el precio',
-      fields: [
-        { id: 'd1', label: '1', options: [{ id: 'd1a', text: '14' }, { id: 'd1b', text: '40' }] },
-        { id: 'd2', label: '2', options: [{ id: 'd2a', text: '95' }, { id: 'd2b', text: '55' }] }
-      ],
-      separators: [','],
-      correctAnswer: { d1: 'd1a', d2: 'd2a' },
+      question: 'Escribí el precio',
+      expected: '14,95',
+      accepts: ['catorce con noventa y cinco'],
+      dataKind: 'price',
+      correctAnswer: '14,95',
       sourceTurns: [2],
       explanation: ''
     }
@@ -498,7 +504,8 @@ if (groupedFicha) {
   }
 }
 
-// Y los pares mínimos con foco tienen que caer sobre las cifras, no sobre el saludo.
+// Los pares mínimos CON foco siguen cayendo sobre las cifras: es lo que necesita
+// "Adivina el Acento", donde el contraste ES el rasgo dictado.
 const PAIRS_SLOT = {
   slotId: 't-pares-tel',
   stage: 'selectiva',
@@ -510,16 +517,37 @@ const PAIRS_SLOT = {
   focus: 'phone'
 };
 
+const NUMERALS = new Set([
+  'seis', 'cinco', 'cuatro', 'treinta', 'dos', 'dieciocho', 'siete', 'quince',
+  'catorce', 'trece', 'doce', 'diez', 'sesenta', 'cincuenta', 'cuarenta', 'noventa'
+]);
+
 const focusedPairs = fillMissingSlots([], [PAIRS_SLOT], SPOKEN_PHONE).find(
   ex => ex.slotId === 't-pares-tel'
 );
 check(!!focusedPairs, 'los pares mínimos con foco deberían construirse sobre un teléfono dictado');
 if (focusedPairs) {
-  const NUMERALS = new Set(['seis', 'cinco', 'cuatro', 'treinta', 'dos', 'dieciocho']);
   const firstOptions = focusedPairs.fields[0].options.map(o => o.text.toLowerCase());
   check(
     firstOptions.some(text => NUMERALS.has(text)),
-    `el primer par mínimo debería contrastar cifras del teléfono, no otra palabra (${firstOptions.join(' / ')})`
+    `el primer par mínimo con foco debería contrastar cifras del teléfono (${firstOptions.join(' / ')})`
+  );
+}
+
+// Y SIN foco no pueden caer sobre ellas. Es el tercer ejercicio de A0: el dato
+// ya se anota entero en el ejercicio anterior, y volver a preguntar "¿oíste seis
+// o siete?" sobre las cifras de ese mismo teléfono gasta una de las tres
+// tarjetas del nivel en repetir lo que el alumno acaba de escribir.
+const UNFOCUSED_PAIRS_SLOT = { ...PAIRS_SLOT, slotId: 't-pares-libres', focus: undefined };
+const freePairs = fillMissingSlots([], [UNFOCUSED_PAIRS_SLOT], SPOKEN_PHONE).find(
+  ex => ex.slotId === 't-pares-libres'
+);
+check(!!freePairs, 'los pares mínimos sin foco deberían construirse sobre las palabras del diálogo');
+if (freePairs) {
+  const shown = freePairs.fields.flatMap(f => f.options.map(o => o.text.toLowerCase()));
+  check(
+    !shown.some(text => NUMERALS.has(text)),
+    `sin foco, los pares mínimos no deberían ir sobre las cifras del dato (salieron: ${shown.join(' / ')})`
   );
 }
 
@@ -539,10 +567,6 @@ const dictationSlot = (focus, items = 6) => ({
   focus
 });
 
-/** Texto de la solución de un dictado, en el orden de sus posiciones. */
-const solutionOf = ex =>
-  ex.fields.map(f => f.options.find(o => o.id === ex.correctAnswer[f.id]).text);
-
 const buildDictation = (dialogue, focus, items) => {
   const made = fillMissingSlots([], [dictationSlot(focus, items)], dialogue).find(
     e => e.slotId === 't-dictado'
@@ -550,51 +574,45 @@ const buildDictation = (dialogue, focus, items) => {
   return made;
 };
 
-// (a) Teléfono dictado con palabras: una posición por cifra, en orden, y
-//     "treinta y dos" como UNA pieza, que es como se anota.
+/** El dato que el ejercicio pide anotar. */
+const datumOf = ex => (ex && typeof ex.expected === 'string' ? ex.expected : '');
+
+// (a) Teléfono dictado con palabras: el dato ENTERO, no una parte. Y ninguna
+//     opción a la vista: si se puede elegir, no se está anotando.
 const spokenDictation = buildDictation(SPOKEN_PHONE, 'phone');
 check(!!spokenDictation, 'un teléfono dictado con palabras debería producir un dictado');
 if (spokenDictation) {
+  const verdict = verifyExercise(spokenDictation, buildTranscriptIndex(SPOKEN_PHONE));
+  check(verdict.ok, `el dictado del teléfono en palabras no verifica: ${verdict.reason}`);
   check(
-    verifyExercise(spokenDictation, buildTranscriptIndex(SPOKEN_PHONE)).ok,
-    `el dictado del teléfono en palabras no verifica: ${verifyExercise(spokenDictation, buildTranscriptIndex(SPOKEN_PHONE)).reason}`
-  );
-  const solution = solutionOf(spokenDictation);
-  check(
-    solution.join(' ') === 'seis cinco cuatro treinta y dos dieciocho',
-    `la secuencia reconstruida debería ser el teléfono exacto (es: ${solution.join(' | ')})`
+    datumOf(spokenDictation) === 'seis cinco cuatro treinta y dos dieciocho',
+    `el dato debería ser el teléfono completo (es: "${datumOf(spokenDictation)}")`
   );
   check(
-    spokenDictation.fields.every(f => f.options.length >= 2),
-    'cada posición del dictado debería ofrecer alternativas'
+    !spokenDictation.fields && !spokenDictation.options,
+    'el dictado no puede ofrecer nada que elegir: se escribe'
   );
-  // La alternativa de una posición no puede ser el valor de otra: se acertaría
-  // por descarte, sin oír esa cifra concreta.
-  spokenDictation.fields.forEach((field, i) => {
-    const others = new Set(solution.filter((_, k) => k !== i).map(t => t.toLowerCase()));
-    const correctId = spokenDictation.correctAnswer[field.id];
-    for (const option of field.options) {
-      if (option.id === correctId) continue;
-      check(
-        !others.has(option.text.toLowerCase()),
-        `la posición ${field.label} ofrece "${option.text}", que es la solución de otra posición`
-      );
-    }
-  });
+  check(
+    spokenDictation.correctAnswer === datumOf(spokenDictation),
+    'la clave del dictado debería ser el texto del dato'
+  );
+  check(spokenDictation.dataKind === 'phone', 'el dictado debería declarar de qué clase es el dato');
 }
 
-// (b) El mismo teléfono en cifras agrupadas: tres posiciones, no una cadena.
+// (b) El mismo teléfono en cifras agrupadas, y con la trampa que rompía el
+//     formato: `DIGIT_LITERAL` también pesca "654", "32" y "18" por separado, y
+//     el motor antiguo caía en uno de esos fragmentos en cuanto una posición se
+//     quedaba sin distractores. Media cifra no es el dato.
 const groupedDictation = buildDictation(GROUPED_PHONE, 'phone');
 check(!!groupedDictation, 'un teléfono en cifras agrupadas debería producir un dictado');
 if (groupedDictation) {
   check(
-    solutionOf(groupedDictation).join(' ') === '654 32 18',
-    `"654 32 18" debería reconstruirse en tres posiciones (es: ${solutionOf(groupedDictation).join(' | ')})`
+    datumOf(groupedDictation) === '654 32 18',
+    `"654 32 18" debería pedirse entero, no en trozos (es: "${datumOf(groupedDictation)}")`
   );
 }
 
-// (c) Un precio dicho "catorce con noventa": dos posiciones y "con" FIJO entre
-//     ellas. El nexo no es una casilla: no hay nada que discriminar en él.
+// (c) Un precio dicho "catorce con noventa": el dato lleva su nexo dentro.
 const SPOKEN_PRICE = [
   { speaker: 'Cajera', text: 'Son catorce con noventa, por favor.' },
   { speaker: 'Cliente', text: 'Aquí tiene. Muchas gracias.' }
@@ -603,12 +621,8 @@ const priceDictation = buildDictation(SPOKEN_PRICE, 'price');
 check(!!priceDictation, 'un precio dicho con palabras debería producir un dictado');
 if (priceDictation) {
   check(
-    priceDictation.fields.length === 2,
-    `"catorce con noventa" son dos posiciones (son: ${priceDictation.fields.length})`
-  );
-  check(
-    (priceDictation.separators || []).join('') === 'con',
-    `"con" debería ser una pieza fija, no un campo (separadores: ${JSON.stringify(priceDictation.separators)})`
+    datumOf(priceDictation) === 'catorce con noventa',
+    `el precio debería pedirse entero, con su "con" (es: "${datumOf(priceDictation)}")`
   );
   check(
     verifyExercise(priceDictation, buildTranscriptIndex(SPOKEN_PRICE)).ok,
@@ -627,8 +641,8 @@ const timeDictation = buildDictation(SPOKEN_TIME, 'time');
 check(!!timeDictation, 'una hora dicha "cinco y media" debería producir un dictado');
 if (timeDictation) {
   check(
-    solutionOf(timeDictation).join(' ') === 'cinco media',
-    `la hora debería reconstruirse como "cinco" + "media" (es: ${solutionOf(timeDictation).join(' | ')})`
+    datumOf(timeDictation) === 'cinco y media',
+    `la hora debería pedirse entera (es: "${datumOf(timeDictation)}")`
   );
   check(
     verifyExercise(timeDictation, buildTranscriptIndex(SPOKEN_TIME)).ok,
@@ -636,8 +650,8 @@ if (timeDictation) {
   );
 }
 
-// (e) Un correo dictado con "arroba" y "punto": las piezas son las palabras y
-//     los nexos son fijos. La primera pieza es la que va ANTES del arroba.
+// (e) Un correo dictado con "arroba" y "punto": entero, desde la pieza que va
+//     ANTES del arroba.
 const SPOKEN_EMAIL = [
   { speaker: 'Empleado', text: '¿Me deja un correo de contacto?' },
   { speaker: 'Clienta', text: 'Sí, es marta punto ruiz arroba correo punto com.' }
@@ -646,12 +660,8 @@ const emailDictation = buildDictation(SPOKEN_EMAIL, 'email');
 check(!!emailDictation, 'un correo dictado con "arroba" debería producir un dictado');
 if (emailDictation) {
   check(
-    solutionOf(emailDictation).join(' ') === 'marta ruiz correo com',
-    `el correo debería reconstruirse entero desde la primera pieza (es: ${solutionOf(emailDictation).join(' | ')})`
-  );
-  check(
-    (emailDictation.separators || []).includes('arroba'),
-    `"arroba" debería ser una pieza fija (separadores: ${JSON.stringify(emailDictation.separators)})`
+    datumOf(emailDictation) === 'marta punto ruiz arroba correo punto com',
+    `el correo debería pedirse entero desde la primera pieza (es: "${datumOf(emailDictation)}")`
   );
   check(
     verifyExercise(emailDictation, buildTranscriptIndex(SPOKEN_EMAIL)).ok,
@@ -668,8 +678,65 @@ const NOT_AN_EMAIL = [
 const notEmail = buildDictation(NOT_AN_EMAIL, 'email');
 if (notEmail) {
   check(
-    !solutionOf(notEmail).join(' ').includes('en'),
-    `"en punto" no debería leerse como una dirección (salió: ${solutionOf(notEmail).join(' | ')})`
+    !/\ben\b/.test(datumOf(notEmail)),
+    `"en punto" no debería leerse como una dirección (salió: "${datumOf(notEmail)}")`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 6b. La corrección: se corrige lo que se OYÓ, no cómo se escribe
+// ---------------------------------------------------------------------------
+// Es el contrato del formato. Sin él, pedir que se escriba el dato sería más
+// injusto que pedir que se elija: quien oyó bien el teléfono y lo anotó en
+// cifras fallaría por escribirlo distinto de como el modelo lo redactó.
+
+const ACCEPTS = [
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', '654 32 18'],
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', '6543218'],
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', '654-32-18'],
+  ['phone', '654 32 18', 'seis cinco cuatro treinta y dos dieciocho'],
+  ['price', 'catorce con noventa', '14,90'],
+  ['price', 'catorce con noventa', '14.90'],
+  ['price', 'catorce con noventa', '14 con 90'],
+  ['price', '14,90', 'catorce con noventa'],
+  ['time', 'cinco y media', '5:30'],
+  ['time', 'cinco y media', '17:30'],
+  ['time', 'cinco menos cuarto', '4:45'],
+  ['spelling', 'G-A-R-C-Í-A', 'García'],
+  ['spelling', 'G-A-R-C-Í-A', 'garcia'],
+  ['spelling', 'G-A-R-C-Í-A', 'ge a erre ce i a'],
+  ['email', 'marta punto ruiz arroba correo punto com', 'marta.ruiz@correo.com']
+];
+
+for (const [kind, expected, written] of ACCEPTS) {
+  check(
+    matchesDatum(written, [expected], kind),
+    `"${written}" debería valer como "${expected}" (${kind})`
+  );
+}
+
+const REJECTS = [
+  // Lo que el ejercicio mide de verdad: una cifra mal o una cifra de menos.
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', '654 32 19'],
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', '654 32'],
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', 'seis cinco cuatro treinta y dos'],
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', '654 42 18'],
+  ['price', 'catorce con noventa', '14,50'],
+  ['price', 'catorce con noventa', '40,90'],
+  ['price', 'catorce con noventa', '14'],
+  ['time', 'cinco y media', '5:15'],
+  ['time', 'cinco y media', '6:30'],
+  ['spelling', 'G-A-R-C-Í-A', 'garcía y'],
+  ['email', 'marta punto ruiz arroba correo punto com', 'marta.ruiz@correo.es'],
+  // Y no responder no es acertar.
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', ''],
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', '   ']
+];
+
+for (const [kind, expected, written] of REJECTS) {
+  check(
+    !matchesDatum(written, [expected], kind),
+    `"${written}" NO debería valer como "${expected}" (${kind})`
   );
 }
 

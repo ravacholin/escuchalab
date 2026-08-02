@@ -7,7 +7,9 @@ import {
   TRUE_FALSE_COLUMNS,
   TRUE_FALSE_NOTGIVEN_COLUMNS
 } from '../data/listeningSyllabus';
-import { Check, X, ArrowUp, ArrowDown, GripVertical, AlertCircle, Quote, MousePointerClick } from 'lucide-react';
+import { dataPointProfile } from '../data/dataPoints';
+import { inferKindFromLiteral, matchesDatum } from '../services/answerMatching';
+import { Check, X, ArrowUp, ArrowDown, GripVertical, AlertCircle, Quote, MousePointerClick, Pencil } from 'lucide-react';
 
 interface ExerciseCardProps {
   exercise: Exercise;
@@ -90,12 +92,15 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
   const [selectedOptions, setSelectedOptions] = useState<string[]>([]);
   const [orderedList, setOrderedList] = useState<string[]>([]); 
   const [answersMap, setAnswersMap] = useState<Record<string, string>>({});
+  /** Lo que el alumno escribe en el dictado: es texto libre, no un id. */
+  const [textAnswer, setTextAnswer] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   // --- INITIALIZATION ---
   useEffect(() => {
     setSelectedOptions([]);
     setAnswersMap({});
+    setTextAnswer('');
     setIsSubmitted(false);
     
     // Robust Ordering Initialization using safeExercise
@@ -184,6 +189,37 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
       return worst;
   };
 
+  // --- DICTADO ---
+  /** El dato que hay que anotar, con su ortografía real. */
+  const dictationExpected = (): string => {
+      if (typeof safeExercise.expected === 'string' && safeExercise.expected.trim()) {
+          return safeExercise.expected.trim();
+      }
+      return typeof safeExercise.correctAnswer === 'string' ? safeExercise.correctAnswer.trim() : '';
+  };
+
+  /**
+   * De qué clase es el dato: decide qué variaciones de escritura valen y qué
+   * teclado se ofrece. Si nadie lo declaró se deduce del dato mismo, para que un
+   * ejercicio del modelo sin `dataKind` no se corrija con la regla genérica.
+   */
+  const dictationKind = () => safeExercise.dataKind || inferKindFromLiteral(dictationExpected());
+
+  /** Cómo se titula la casilla ("Teléfono", "Precio", "Hora"). */
+  const dictationLabel = (): string => dataPointProfile(dictationKind()).fieldLabel;
+
+  /**
+   * El dato anotado. Se corrige lo que se OYÓ, no cómo se escribe: "654 32 18",
+   * "6543218" y "seis cinco cuatro treinta y dos dieciocho" son el mismo
+   * teléfono, y "14,90" y "catorce con noventa" el mismo precio. Lo que no
+   * perdona es una cifra de menos, que es justo lo que el ejercicio mide.
+   */
+  const isDictationCorrect = () => {
+      const expected = dictationExpected();
+      if (!expected) return false;
+      return matchesDatum(textAnswer, [expected, ...(safeExercise.accepts || [])], dictationKind());
+  };
+
   const isCorrect = () => {
       switch (safeExercise.type) {
           case 'classification':
@@ -191,10 +227,11 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
           case 'scale':
           case 'cloze':
           case 'data_capture':
-          case 'dictation':
           case 'minimal_pairs':
           case 'true_false_notgiven':
               return isAnswerMapCorrect();
+          case 'dictation':
+              return isDictationCorrect();
           case 'true_false':
               return safeExercise.rows ? isAnswerMapCorrect() : isSelectionCorrect();
           case 'ordering':
@@ -226,9 +263,12 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
           case 'true_false_notgiven':
                return Object.keys(answersMap).length === (safeExercise.rows?.length || 0);
           case 'data_capture':
-          case 'dictation':
           case 'minimal_pairs':
                return Object.keys(answersMap).length === (safeExercise.fields?.length || 0);
+          // Una casilla vacía no es una respuesta. Con el mapa de campos bastaba
+          // con que existiera la clave, y una cadena vacía la creaba igual.
+          case 'dictation':
+               return textAnswer.trim().length > 0;
           case 'cloze':
                return Object.keys(answersMap).length === Object.keys(safeExercise.gapOptions || {}).length;
           default:
@@ -766,83 +806,76 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
   };
 
   /**
-   * RECONSTRUIR EL DATO. Comparte estructura con la ficha (campo → opción) pero
-   * no se puede presentar como ella: la ficha apila desplegables a ancho
-   * completo, y un teléfono de nueve piezas serían nueve filas donde se pierde
-   * por completo que son UN dato. Aquí van en línea, en el orden en que suenan,
-   * con las piezas fijas ("con", "arroba") intercaladas como texto.
+   * ANOTAR EL DATO. Una sola casilla abierta con el dato entero.
+   *
+   * Antes era un desplegable por posición, y eso tenía dos defectos que no se
+   * arreglaban por separado. Uno: elegir la cifra entre tres parecidas es
+   * reconocerla, no anotarla, que es la tarea real —te dictan un teléfono y lo
+   * escribís—. Y dos: el motor descartaba el tramo entero si una sola posición
+   * se quedaba sin alternativas, así que caía en un fragmento del número y el
+   * alumno acababa reconstruyendo media cifra.
    */
   const renderDictation = () => {
-    const fields = safeExercise.fields || [];
-    const correctMap = (safeExercise.correctAnswer as Record<string, string>) || {};
-    const separators: string[] = Array.isArray(safeExercise.separators) ? safeExercise.separators : [];
+    const expected = dictationExpected();
 
-    if (fields.length === 0) {
+    if (!expected) {
         return (
             <div className="p-8 flex flex-col items-center justify-center text-zinc-500">
                 <AlertCircle size={32} className="mb-2" />
-                <p className="font-mono text-xs uppercase">Error de datos: no hay posiciones</p>
+                <p className="font-mono text-xs uppercase">Error de datos: no hay dato que anotar</p>
             </div>
         );
     }
 
-    const solution = fields
-        .map((f: any) => (f.options.find((o: any) => o.id === correctMap[f.id]) || {}).text || '?')
-        .reduce((acc: string, text: string, i: number) => {
-            const glue = i > 0 && separators[i - 1] ? ` ${separators[i - 1]} ` : i > 0 ? ' ' : '';
-            return `${acc}${glue}${text}`;
-        }, '');
+    const kind = dictationKind();
+    // Teclado numérico donde el dato es sólo cifras. En "code" y "address" hay
+    // letras, así que ahí el teclado tiene que ser el normal.
+    const numeric = kind === 'phone' || kind === 'price' || kind === 'quantity' || kind === 'time';
+    const solved = isSubmitted && isDictationCorrect();
+
+    let boxClass = 'border-zinc-700 bg-black text-white focus:border-white';
+    if (isSubmitted) {
+        boxClass = solved
+            ? 'border-green-500 bg-green-500/10 text-green-400'
+            : 'border-red-500 bg-red-500/10 text-red-400';
+    }
 
     return (
         <div className="p-6">
-            <div className="flex flex-wrap items-end gap-x-2 gap-y-4">
-                {fields.map((field: any, i: number) => {
-                    const selected = answersMap[field.id] || '';
-                    const correctId = correctMap[field.id];
-                    const isFieldCorrect = isSubmitted && selected === correctId;
+            <label className="block" htmlFor={`dictation_${index}`}>
+                <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 flex items-center gap-2 mb-2">
+                    <Pencil size={12} />
+                    {dictationLabel()}
+                </span>
+                <input
+                    id={`dictation_${index}`}
+                    type="text"
+                    inputMode={numeric ? 'numeric' : 'text'}
+                    value={textAnswer}
+                    onChange={(e) => setTextAnswer(e.target.value)}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && canSubmit()) handleSubmit();
+                    }}
+                    disabled={isSubmitted}
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="Escribí lo que oíste"
+                    className={`w-full border ${boxClass} font-mono text-lg md:text-2xl px-4 py-3 outline-none disabled:opacity-90 transition-colors duration-300 placeholder:text-zinc-700 placeholder:text-base`}
+                />
+            </label>
 
-                    let boxClass = 'border-zinc-700 bg-black text-white';
-                    if (isSubmitted) {
-                        boxClass = isFieldCorrect
-                            ? 'border-green-500 bg-green-500/10 text-green-400'
-                            : 'border-red-500 bg-red-500/10 text-red-400';
-                    }
-
-                    return (
-                        <React.Fragment key={field.id}>
-                            {i > 0 && separators[i - 1] && (
-                                <span className="font-mono text-sm text-zinc-500 pb-2 select-none">
-                                    {separators[i - 1]}
-                                </span>
-                            )}
-                            <div className="flex flex-col gap-1">
-                                <span className="font-mono text-[10px] text-zinc-600 tracking-widest">
-                                    {field.label}
-                                </span>
-                                <select
-                                    value={selected}
-                                    onChange={(e) => setAnswersMap(prev => ({ ...prev, [field.id]: e.target.value }))}
-                                    disabled={isSubmitted}
-                                    aria-label={`Posición ${field.label}`}
-                                    className={`border ${boxClass} font-mono text-base px-2 py-2 outline-none focus:border-white disabled:opacity-80 transition-colors duration-300`}
-                                >
-                                    <option value="" disabled>—</option>
-                                    {field.options.map((o: any) => (
-                                        <option key={o.id} value={o.id} className="bg-black text-white">{o.text}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        </React.Fragment>
-                    );
-                })}
-            </div>
+            <p className="mt-2 font-mono text-[10px] text-zinc-600">
+                Con cifras o con palabras, como prefieras: se corrige lo que oíste.
+            </p>
 
             {isSubmitted && (
                 <div className="mt-6 border-t border-zinc-800 pt-4">
                     <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 mb-1">
-                        Se dictó
+                        Se dijo
                     </p>
-                    <p className="font-mono text-lg text-white break-words">{solution}</p>
+                    <p className="font-mono text-lg text-white break-words">{expected}</p>
                 </div>
             )}
         </div>

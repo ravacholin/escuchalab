@@ -1,3 +1,4 @@
+import { DataPointKind } from '@/data/dataPoints';
 
 export enum Level {
   Intro = 'Inicial Absoluto (A0)',
@@ -96,8 +97,15 @@ export type ListeningSkill =
   | 'estrategia';           // metacognición: qué indicio sirvió
 
 /**
- * FORMATO: la mecánica de respuesta. Todos son sin producción escrita
- * (seleccionar, ordenar, clasificar, desplegables).
+ * FORMATO: la mecánica de respuesta. Se resuelven seleccionando, ordenando,
+ * clasificando o eligiendo en un desplegable, sin producción escrita.
+ *
+ * La única excepción es `dictation`, y está acotada a propósito: anotar un
+ * teléfono que te dictan es TRANSCRIPCIÓN, no producción —no se le pide al
+ * alumno que componga nada, sino que reponga lo que acaba de oír—, y es
+ * literalmente la tarea del mundo real que A0 y A1-A2 declaran entrenar.
+ * Elegir el dato entre tres cadenas parecidas es reconocerlo, que es otra cosa
+ * y bastante más fácil.
  */
 export type ExerciseType =
   // Formatos originales
@@ -111,7 +119,7 @@ export type ExerciseType =
   | 'matching'             // emparejamiento biyectivo de dos columnas
   | 'scale'                // eje ordinal (termómetro de postura/certeza)
   | 'data_capture'         // ficha de datos con desplegables casi idénticos
-  | 'dictation'            // reconstrucción exacta del dato dictado, elemento a elemento
+  | 'dictation'            // se oye el dato y se ESCRIBE entero, en una casilla abierta
   | 'minimal_pairs'        // ¿qué oíste? contrastes fónicos
   | 'spot_the_difference'  // caza el cambio: dictado sin escribir
   | 'chunk_order';         // reconstruir UNA frase por grupos fónicos
@@ -156,22 +164,36 @@ export interface Exercise {
   textWithGaps?: string;
   gapOptions?: Record<string, ExerciseOption[]>;
 
-  // Ficha de datos / pares mínimos / dictado
+  // Ficha de datos / pares mínimos
   fields?: ExerciseField[];
 
+  // --- Dictado (`dictation`) ---------------------------------------------
   /**
-   * `dictation`: piezas fijas que van ENTRE dos campos y que el alumno no elige
-   * ("catorce **con** noventa", "ana **arroba** correo **punto** com"). Se
-   * muestran como texto entre los controles y cuentan para comprobar que la
-   * secuencia reconstruida es la que suena. Longitud: `fields.length - 1`.
+   * El dato ENTERO tal como suena, con su ortografía real ("654 32 18",
+   * "catorce con noventa", "marta.ruiz@correo.com"). Es la clave y es lo que se
+   * le muestra al alumno al corregir. Tiene que oírse literalmente y de corrido
+   * en un turno del audio: eso es lo que verifica `verifyDictation()`.
    */
-  separators?: string[];
+  expected?: string;
+  /**
+   * Otras escrituras del mismo dato que también valen (la forma en cifras
+   * frente a la forma en palabras). La equivalencia obvia ya la resuelve
+   * `canonicalDatum()`; esto es para las lecturas que no se derivan por regla.
+   */
+  accepts?: string[];
+  /**
+   * Qué clase de dato es. Decide cómo se compara lo que escribió el alumno
+   * (un precio admite coma o punto, una hora admite las 5 y las 17) y qué
+   * teclado se le ofrece en el móvil.
+   */
+  dataKind?: DataPointKind;
 
   // Caza el cambio
   tokens?: ExerciseToken[];
 
   // Respuesta polimórfica:
-  //  - string                → multiple_choice de respuesta única, true_false simple
+  //  - string                → multiple_choice de respuesta única, true_false simple,
+  //                            dictation (el texto del dato, igual que `expected`)
   //  - string[]              → multiple_choice múltiple, ordering, chunk_order,
   //                            spot_the_difference (ids de los tokens alterados)
   //  - Record<string,string> → classification, matching, scale, cloze,

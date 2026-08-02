@@ -140,8 +140,20 @@ export function normalizeExerciseAnswers(exercise: Exercise): Exercise {
       break;
     }
 
+    case 'dictation': {
+      // No hay ids que reparar: la clave ES el texto del dato. Lo único que
+      // suele faltar es la propia `correctAnswer`, porque el modelo da el dato
+      // en `expected` y da por hecho que con eso basta.
+      if (typeof ex.correctAnswer !== 'string' || !ex.correctAnswer.trim()) {
+        ex.correctAnswer = ex.expected || '';
+      }
+      if (!ex.expected && typeof ex.correctAnswer === 'string') {
+        ex.expected = ex.correctAnswer;
+      }
+      break;
+    }
+
     case 'data_capture':
-    case 'dictation':
     case 'minimal_pairs': {
       if (!ex.fields || !answer || typeof answer !== 'object' || Array.isArray(answer)) break;
       const normalized: Record<string, string> = {};

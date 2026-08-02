@@ -785,13 +785,13 @@ const buildExercisePrompt = (slots: ExerciseSlot[]): string => {
     })
     .join('\n');
 
-  return `SIN PRODUCCIÓN: el alumno NUNCA escribe ni habla. Todo se resuelve seleccionando, ordenando, clasificando o eligiendo en un desplegable. Prohibidas las preguntas abiertas, los resúmenes y las opiniones libres.
+  return `SIN PRODUCCIÓN: el alumno no compone nada. Todo se resuelve seleccionando, ordenando, clasificando o eligiendo en un desplegable. Prohibidas las preguntas abiertas, los resúmenes y las opiniones libres. ÚNICA excepción, y sólo si aparece abajo entre los formatos: "dictation", donde el alumno ESCRIBE el dato que acaba de oír — anotar un teléfono dictado es transcribir, no redactar.
 
 PRINCIPIOS INNEGOCIABLES:
 - Todo ejercicio se responde ESCUCHANDO. Si se puede acertar leyendo las opciones, razonando por plausibilidad temática o descartando lo absurdo, el ejercicio está mal hecho.
 - Todo lo que presentes como dicho en el audio debe estar dicho en el audio, con su ortografía real (tildes y mayúsculas incluidas).
 - Cada ejercicio incluye "sourceTurns": el array de índices (base 0) de los turnos del diálogo en los que se apoya.
-- Todas las opciones, filas, columnas y campos llevan "id" único, y "correctAnswer" SIEMPRE referencia esos ids, nunca textos.
+- Todas las opciones, filas, columnas y campos llevan "id" único, y "correctAnswer" SIEMPRE referencia esos ids, nunca textos. Excepción: en "dictation" no hay ids y "correctAnswer" es el texto del dato.
 - Redacta enunciados y opciones en español, adaptados a la variante regional indicada.
 
 FORMATOS QUE DEBES USAR:
