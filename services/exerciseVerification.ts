@@ -1,5 +1,6 @@
 import { DialogueLine, Exercise, ExerciseOption, ExerciseType } from '@/types';
 import { normalizeExerciseAnswers } from './exerciseNormalization';
+import { canonicalDatum, inferKindFromLiteral } from './answerMatching';
 import {
   buildTranscriptIndex,
   contentWords,
@@ -358,48 +359,38 @@ function verifyFieldBased(ex: Exercise, index: TranscriptIndex): VerificationRes
 }
 
 /**
- * `dictation` promete algo más fuerte que la ficha de datos: que el alumno
- * reconstruye EL dato, entero y en orden. La ficha se conformaba con que la
- * mayoría de sus campos sonaran, porque sus campos son datos independientes;
- * aquí los campos son las piezas de un único dato, así que la comprobación es
- * la secuencia completa, no cada pieza por su lado.
+ * `dictation` promete algo más fuerte que la ficha de datos: que el alumno anota
+ * EL dato, entero. La ficha se conforma con que la mayoría de sus campos suenen,
+ * porque sus campos son datos independientes; aquí hay un solo dato y o está
+ * entero o no está.
+ *
+ * De las cinco comprobaciones que tenía, tres miraban las opciones de cada
+ * desplegable y se fueron con ellos. La que valía —y ahora es más fuerte, porque
+ * ya no juzga una secuencia recompuesta pieza a pieza sino el dato tal cual— es
+ * que lo que se pide anotar se oiga de corrido en un turno del audio.
  */
 function verifyDictation(ex: Exercise, index: TranscriptIndex): VerificationResult {
-  if (!Array.isArray(ex.fields) || ex.fields.length < 2) return fail('dictation con menos de 2 posiciones');
-  const correct = asRecord(ex.correctAnswer);
-  if (!correct) return fail('respuesta no es un mapa posición → opción');
+  const expected = typeof ex.expected === 'string' ? ex.expected.trim() : '';
+  if (!expected) return fail('dictation sin el dato que hay que anotar');
 
-  const separators = Array.isArray(ex.separators) ? ex.separators : [];
-  const solution: string[] = [];
-
-  for (let i = 0; i < ex.fields.length; i++) {
-    const field = ex.fields[i];
-    if (!field || typeof field.id !== 'string' || !field.id.trim()) return fail('posición sin id');
-    if (!optionsAreSound(field.options, 2)) return fail(`la posición "${field.id}" tiene menos de 2 opciones`);
-
-    const chosen = field.options.find(o => o.id === correct[field.id]);
-    if (!chosen) return fail(`la posición "${field.id}" apunta a una opción inexistente`);
-
-    // Un distractor idéntico a la solución (o a la solución de la posición
-    // contigua) deja la casilla sin clave única.
-    const twin = field.options.find(
-      o => o.id !== chosen.id && normalizeText(o.text) === normalizeText(chosen.text)
-    );
-    if (twin) return fail(`la posición "${field.id}" repite la solución entre sus opciones`);
-
-    if (i > 0) solution.push(normalizeText(separators[i - 1] || ''));
-    solution.push(normalizeText(chosen.text));
+  // LA comprobación: el dato tiene que oírse tal cual, de corrido. Sin esto el
+  // formato podría pedir que se anote algo que nadie dictó.
+  if (!isHeard(index, expected)) {
+    return fail(`el dato ("${expected}") no suena de corrido en ningún turno`);
   }
 
-  // LA comprobación: el dato reconstruido tiene que oírse tal cual, de corrido.
-  // Sin esto el formato podría pedir que se reponga una secuencia que nadie
-  // dictó, que es exactamente lo que se está corrigiendo.
-  const heard = solution.filter(Boolean).join(' ');
-  if (!isHeard(index, heard)) {
-    return fail(`la secuencia reconstruida ("${heard}") no suena de corrido en ningún turno`);
+  // Una variante que no significa lo mismo que el dato daría por buena una
+  // respuesta falsa, que es peor que no aceptarla.
+  const kind = ex.dataKind || inferKindFromLiteral(expected);
+  const target = canonicalDatum(expected, kind);
+  const accepts = Array.isArray(ex.accepts) ? ex.accepts : [];
+  for (const variant of accepts) {
+    if (canonicalDatum(variant, kind) !== target) {
+      return fail(`la variante aceptada "${variant}" no es el mismo dato que "${expected}"`);
+    }
   }
 
-  return { ok: true, exercise: ex };
+  return { ok: true, exercise: { ...ex, expected, correctAnswer: expected, dataKind: kind } };
 }
 
 function verifySpotTheDifference(ex: Exercise, index: TranscriptIndex): VerificationResult {

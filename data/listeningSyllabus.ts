@@ -109,7 +109,7 @@ export const FORMAT_LABELS: Record<ExerciseType, string> = {
   matching: 'emparejar',
   scale: 'termómetro',
   data_capture: 'ficha de datos',
-  dictation: 'reconstruí el dato',
+  dictation: 'escribí el dato',
   minimal_pairs: '¿qué oíste?',
   spot_the_difference: 'caza el cambio',
   chunk_order: 'reconstruir la frase'
@@ -246,14 +246,14 @@ export const FORMAT_RULES: Record<ExerciseType, FormatRule> = {
       'Simula un formulario real de la situación (comanda, reserva, ficha de paciente, guía de envío). Cada "label" es UNA sola palabra. Las opciones de cada campo deben diferir en un único elemento y sonar casi igual ("14,95" / "40,95" / "14,55"; "8:15" / "8:50"), y el valor correcto debe decirse literalmente en el audio.'
   },
   dictation: {
-    // Mecánica de nivel bajo: reproducir, no reconocer. En B1+ el dato literal
-    // ya no es el objeto de aprendizaje, así que no se ofrece ahí.
+    // Mecánica de nivel bajo: anotar, no reconocer. En B1+ el dato literal ya no
+    // es el objeto de aprendizaje, así que no se ofrece ahí.
     levels: [Level.Intro, Level.Beginner],
     textTypes: ALL_TEXT_TYPES,
     jsonShape:
-      '{"id":"...","type":"dictation","question":"...","fields":[{"id":"d1","label":"1","options":[{"id":"d1a","text":"seis"},{"id":"d1b","text":"siete"},{"id":"d1c","text":"dieciséis"}]},{"id":"d2","label":"2","options":[{"id":"d2a","text":"treinta y dos"}]}],"separators":["","con"],"correctAnswer":{"d1":"d1a","d2":"d2a"},"explanation":"...","sourceTurns":[4]}',
+      '{"id":"...","type":"dictation","question":"...","expected":"654 32 18","accepts":["seis cinco cuatro treinta y dos dieciocho"],"dataKind":"phone","correctAnswer":"654 32 18","explanation":"...","sourceTurns":[4]}',
     guidance:
-      'RECONSTRUCCIÓN EXACTA, no reconocimiento. Cada campo es UN elemento del dato en el ORDEN en que suena (una cifra, un grupo de cifras, una letra deletreada), y "label" es sólo su número de posición. Los distractores de cada posición son numerales o letras que se confunden AL OÍDO con el de esa posición ("seis"/"siete"/"dieciséis", "be"/"de"), nunca el valor de otra posición ni una cifra al azar. "separators" son las piezas fijas que van entre dos campos y que el alumno NO elige ("y", "con", "arroba", "punto"): tantas como campos menos uno, cadena vacía donde no haya ninguna. El dato completo, leído de izquierda a derecha con sus separadores, tiene que decirse LITERALMENTE y de corrido en un solo turno del audio.'
+      'ÚNICO formato en que el alumno ESCRIBE: oye el dato y lo anota en una casilla abierta. No hay campos, ni opciones, ni distractores — si le das a elegir, deja de ser anotar y pasa a ser reconocer. "expected" es EL dato ENTERO tal como suena, con su ortografía real y sus piezas fijas ("654 32 18", "catorce con noventa", "marta.ruiz@correo.com"): completo, nunca un fragmento, y tiene que decirse LITERALMENTE y de corrido en un solo turno del audio. "accepts" son otras escrituras del MISMO dato (la forma en cifras si se dictó con palabras, y al revés); la equivalencia obvia ya se resuelve sola, así que con una basta. "dataKind" es de qué clase es el dato: phone, price, time, spelling, email, code, address, date, quantity o generic. "correctAnswer" repite "expected".'
   },
   minimal_pairs: {
     // Abierto a todos los niveles: en A0/A1 aísla contrastes fónicos básicos y
@@ -373,15 +373,18 @@ function columnCount(slot: Pick<ExerciseSlot, 'format' | 'items' | 'columns'>): 
  * Respuestas discretas que el slot le pide al alumno.
  *
  * No es lo mismo que `items`: una opción múltiple de seis opciones es UNA
- * respuesta, y un dictado de seis campos son seis. El presupuesto por nivel se
- * contaba en tarjetas, que es la unidad equivocada — tres tarjetas pueden ser
- * cuatro respuestas o veinte.
+ * respuesta, y una clasificación de seis filas son seis. El presupuesto por
+ * nivel se contaba en tarjetas, que es la unidad equivocada — tres tarjetas
+ * pueden ser cuatro respuestas o veinte.
  */
 export function answerCost(slot: Pick<ExerciseSlot, 'format' | 'items'>): number {
   switch (slot.format) {
     // Una sola decisión, tenga las opciones que tenga (aunque sea multirrespuesta:
     // se corrige todo o nada, así que el alumno entrega una única respuesta).
     case 'multiple_choice':
+    // El dictado es una casilla abierta con el dato entero: se entrega una vez
+    // y se corrige entera. Cuando eran desplegables por posición costaba seis.
+    case 'dictation':
       return 1;
     default:
       return slot.items;
@@ -433,9 +436,12 @@ export function readingLoad(slot: Pick<ExerciseSlot, 'format' | 'items' | 'colum
       return slot.items * WORD;
     case 'minimal_pairs':
       return slot.items * 2 * WORD;
-    case 'dictation':
     case 'data_capture':
       return slot.items * 3 * WORD;
+    // Nada que leer: se oye y se escribe. Es la razón de fondo por la que el
+    // formato cabe en A0, donde leer español todavía cuesta más que oírlo.
+    case 'dictation':
+      return 0;
     default:
       return slot.items;
   }
@@ -459,8 +465,7 @@ function interpolate(brief: string, dataPoint?: DataPointKind): string {
   const profile = dataPointProfile(dataPoint);
   return brief
     .replace(/\{\{dato\}\}/g, profile.label)
-    .replace(/\{\{campo\}\}/g, profile.fieldLabel)
-    .replace(/\{\{contrastes\}\}/g, profile.contrasts);
+    .replace(/\{\{campo\}\}/g, profile.fieldLabel);
 }
 
 function resolve(template: SlotTemplate, textType: TextType, dataPoint?: DataPointKind): ExerciseSlot {
@@ -490,12 +495,21 @@ function resolve(template: SlotTemplate, textType: TextType, dataPoint?: DataPoi
 // que es lo único que el nivel declara entrenar. La caza de palabras y la
 // reflexión, además, exigían leer español a quien todavía no lo lee.
 //
-// El ejercicio central ya no es una ficha, es un DICTADO: la ficha pedía elegir
-// el dato entero entre tres cadenas parecidas, y de sus tres campos sólo uno era
-// el dato anunciado —los otros dos eran lo que hubieran pescado las regex—. Eso
-// es reconocer, no anotar. `dictation` pide reproducir el dato elemento a
-// elemento en el orden en que sonó, que es lo que de verdad hay que saber hacer
-// con un teléfono dictado al vuelo.
+// El ejercicio central ya no es una ficha, es un DICTADO, y se resuelve
+// ESCRIBIENDO. La ficha pedía elegir el dato entero entre tres cadenas
+// parecidas; el dictado lo sustituyó pero conservó lo peor de ella —un
+// desplegable por posición—, así que seguía siendo reconocer y no anotar, y
+// además se rompía por donde no se veía: si una sola posición no encontraba
+// alternativas audibles se descartaba el tramo entero y el motor caía en un
+// FRAGMENTO del número, de modo que el alumno acababa reconstruyendo media
+// cifra. Ahora se oye el dato y se escribe completo en una casilla abierta.
+// No hay distractores que fallar, y lo que se corrige es lo que se oyó: da igual
+// escribir "654 32 18" o "seis cinco cuatro treinta y dos dieciocho".
+//
+// El tercero tampoco iba sobre lo que decía ir: llevaba `focusOnDataPoint`, que
+// empujaba los pares mínimos sobre las cifras del mismo teléfono, así que dos de
+// las tres tarjetas del nivel preguntaban por el mismo número. La discriminación
+// fónica se hace ahora sobre palabras corrientes del diálogo.
 
 const A0_SLOTS: SlotTemplate[] = [
   {
@@ -520,15 +534,15 @@ const A0_SLOTS: SlotTemplate[] = [
     stage: 'selectiva',
     skill: 'dato_literal',
     format: 'dictation',
-    items: 6,
+    items: 1,
     engineFallback: 'dictation',
     preferEngine: true,
     focusOnDataPoint: true,
     brief:
-      'Es EL ejercicio del nivel: reconstruir {{dato}} tal como se dictó, elemento a elemento y en orden. La ficha se titula "{{campo}}". Pon tantos campos como elementos tenga el dato realmente dicho (no te ciñas al número orientativo), cada uno con la pieza que suena en esa posición y 2 alternativas que se confunden con ella al oído.',
+      'Es EL ejercicio del nivel: se oye {{dato}} y se ESCRIBE, entero, en una casilla abierta titulada "{{campo}}". Nada de elegir entre alternativas. "expected" es el dato completo tal como suena, con todas sus cifras o letras — un dato a medias no vale.',
     briefByTextType: {
       [TextType.RadioNews]:
-        'Reconstruir {{dato}} tal como se dice en el boletín, elemento a elemento y en orden. La ficha se titula "{{campo}}". Un campo por elemento realmente dicho, con 2 alternativas confundibles al oído en cada posición.'
+        'Se oye {{dato}} en el boletín y se ESCRIBE, entero, en una casilla abierta titulada "{{campo}}". "expected" es el dato completo tal como suena, sin recortarlo.'
     }
   },
   {
@@ -538,9 +552,8 @@ const A0_SLOTS: SlotTemplate[] = [
     format: 'minimal_pairs',
     items: 4,
     engineFallback: 'minimal_pairs',
-    focusOnDataPoint: true,
     brief:
-      '4 ítems de discriminación sobre {{dato}} y las palabras que lo rodean. Prioriza estos contrastes: {{contrastes}}. Cada ítem enfrenta la forma que SÍ suena con otra que suena casi igual.'
+      '4 ítems de discriminación fónica sobre PALABRAS CORRIENTES del diálogo, nunca sobre las cifras ni las letras del dato: ese dato ya se trabaja entero en el ejercicio anterior y repetirlo aquí gasta una de las tres tarjetas del nivel en lo mismo. Usa contrastes que de verdad se oyen: /r/ frente a /rr/ (pero/perro), sorda frente a sonora (pata/bata), sílaba acentuada (hablo/habló, esta/está), vocal próxima (mesa/misa). Cada ítem enfrenta la forma que SÍ suena con otra que suena casi igual y que NO se dice.'
   }
 ];
 
@@ -588,17 +601,17 @@ const A2_SLOTS: SlotTemplate[] = [
     stage: 'selectiva',
     skill: 'dato_literal',
     format: 'dictation',
-    items: 6,
+    items: 1,
     engineFallback: 'dictation',
     preferEngine: true,
     focusOnDataPoint: true,
     brief:
-      'Reconstruir {{dato}} tal como se dice en el audio, elemento a elemento y en orden. La ficha se titula "{{campo}}". Pon tantos campos como elementos tenga el dato realmente dicho (no te ciñas al número orientativo), cada uno con la pieza que suena en esa posición y 2 alternativas que se confunden con ella al oído ("catorce" / "cuarenta" / "cuatro").',
+      'Se oye {{dato}} y se ESCRIBE, entero, en una casilla abierta titulada "{{campo}}". Nada de elegir entre alternativas. "expected" es el dato completo tal como suena, con todas sus cifras o letras y sus piezas fijas ("catorce con noventa") — un dato a medias no vale.',
     briefByTextType: {
       [TextType.RadioNews]:
-        'Reconstruir {{dato}} tal como se dice en el boletín, elemento a elemento y en orden. La ficha se titula "{{campo}}". Un campo por elemento realmente dicho, con 2 alternativas confundibles al oído en cada posición.',
+        'Se oye {{dato}} en el boletín y se ESCRIBE, entero, en una casilla abierta titulada "{{campo}}". "expected" es el dato completo tal como suena, sin recortarlo.',
       [TextType.Monologue]:
-        'Reconstruir {{dato}} tal como se dice en el relato, elemento a elemento y en orden. La ficha se titula "{{campo}}". Un campo por elemento realmente dicho, con 2 alternativas confundibles al oído en cada posición.'
+        'Se oye {{dato}} en el relato y se ESCRIBE, entero, en una casilla abierta titulada "{{campo}}". "expected" es el dato completo tal como suena, sin recortarlo.'
     }
   },
   {

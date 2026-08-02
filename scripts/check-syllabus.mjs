@@ -113,8 +113,13 @@ const MAX_SLOTS = {
  * opciones múltiples o tablas. B1-B2 y C1 pedían ≈20 y ≈21 con seis tarjetas.
  */
 const MAX_ANSWERS = {
-  [LEVELS.Intro]: 11,
-  [LEVELS.Beginner]: 13,
+  // A0 y A1-A2 bajaron cuando el dictado dejó de ser seis desplegables y pasó a
+  // ser una casilla abierta: seis respuestas discretas se convirtieron en una.
+  // Los topes bajan con ellos —A0 estaba clavado en 11/11— porque un techo que
+  // nadie roza no es un techo, es un número. En los dos, quien marca ahora el
+  // máximo es el modo Vocabulario y no el Estándar.
+  [LEVELS.Intro]: 8,
+  [LEVELS.Beginner]: 11,
   [LEVELS.Intermediate]: 16,
   [LEVELS.Advanced]: 15
 };
@@ -129,6 +134,10 @@ const MAX_ANSWERS = {
  * entre sí. Pasado ese punto la tarea deja de medir comprensión auditiva y mide
  * comprensión lectora, que es justo lo que la app NO quiere evaluar.
  */
+// Un dictado abierto no se lee: se oye y se escribe, así que su carga de lectura
+// es 0 y el modo Estándar de A0 cayó de 9.5 a 5.0. Estos techos no se mueven
+// porque en A0 y A1-A2 quien los marca es el modo Vocabulario, que no usa el
+// dictado y sigue exactamente donde estaba.
 const MAX_READING = {
   [LEVELS.Intro]: 10,
   [LEVELS.Beginner]: 15,

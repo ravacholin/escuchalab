@@ -3,6 +3,23 @@ import { DATA_POINTS, DataPointKind } from '@/data/dataPoints';
 import { DialogueLine, Exercise, ExerciseField, ExerciseOption } from '@/types';
 import { verifyExercise } from './exerciseVerification';
 import {
+  ADDRESS_GLUE,
+  AMBIGUOUS_LETTER_NAMES,
+  CLEAR_LETTER_NAMES,
+  COMPOUND_TENS,
+  countNumerals,
+  datumVariants,
+  inferKindFromLiteral,
+  isFocusLiteral,
+  isLetterName,
+  MINUTE_WORDS,
+  NUMBER_GLUE,
+  NUMBER_LEXICON,
+  SPELLED_RUN,
+  SPELLED_TEST,
+  UNIT_WORDS
+} from './answerMatching';
+import {
   buildTranscriptIndex,
   isHeard,
   normalizeText,
@@ -208,34 +225,11 @@ function collectContentWords(dialogue: DialogueLine[]): WordRef[] {
 // central del nivel— no encontraba nada y desaparecía en silencio: la lección
 // acababa preguntando de todo menos el número.
 
-/** Numerales que pueden aparecer en un dato dictado, en forma normalizada. */
-const NUMBER_WORDS = [
-  'cero', 'uno', 'una', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve',
-  'diez', 'once', 'doce', 'trece', 'catorce', 'quince', 'dieciseis', 'diecisiete', 'dieciocho',
-  'diecinueve', 'veinte', 'veintiuno', 'veintidos', 'veintitres', 'veinticuatro', 'veinticinco',
-  'veintiseis', 'veintisiete', 'veintiocho', 'veintinueve', 'treinta', 'cuarenta', 'cincuenta',
-  'sesenta', 'setenta', 'ochenta', 'noventa', 'cien', 'ciento', 'doscientos', 'trescientos',
-  'cuatrocientos', 'quinientos', 'seiscientos', 'setecientos', 'ochocientos', 'novecientos', 'mil'
-];
-const NUMBER_LEXICON = new Set(NUMBER_WORDS);
-
-/** Piezas que unen numerales dentro de un mismo dato ("catorce con noventa"). */
-const NUMBER_GLUE = new Set(['y', 'con', 'menos']);
-
-/**
- * Fracciones de hora. No son numerales, pero son el segundo elemento de la
- * mayoría de las horas que el prompt pide dictar ("a las cinco y media"), y sin
- * ellas ese dato no existía para ningún motor: "cinco" sola es un numeral
- * suelto, se queda por debajo del umbral de tramo y la lección de "reservar una
- * cita" acababa sin un solo ejercicio sobre la hora.
- */
-const MINUTE_WORDS = new Set(['media', 'cuarto']);
-
-/** Alternativas audibles de las fracciones de hora. */
-const MINUTE_CONFUSIONS: Record<string, string[]> = {
-  media: ['cuarto'],
-  cuarto: ['media']
-};
+// El léxico numérico (`NUMBER_WORDS`, `NUMBER_GLUE`, `MINUTE_WORDS`, las
+// unidades y las decenas compuestas) vive en `answerMatching.ts`: lo comparten
+// este motor, que cosecha el dato de la transcripción, y el corrector que juzga
+// lo que escribe el alumno. Si las dos listas se separan, el motor puede
+// reconocer un numeral que el corrector no sabe convertir a cifras.
 
 /** Numeral confundible al oído, con su ortografía real para mostrarlo. */
 const NUMBER_CONFUSIONS: Record<string, string[]> = {
@@ -252,52 +246,15 @@ const NUMBER_CONFUSIONS: Record<string, string[]> = {
   mil: ['cien', 'dos mil']
 };
 
-/** Un apellido deletreado suele llegar como "G-A-R-C-Í-A". */
-const SPELLED_SOURCE = '\\b[A-ZÁÉÍÓÚÑ](?:[-.·][A-ZÁÉÍÓÚÑ]){2,}\\b';
-/** Global para escanear (consume `lastIndex`); la otra, sin estado, para juzgar. */
-const SPELLED_RUN = new RegExp(SPELLED_SOURCE, 'g');
-const SPELLED_TEST = new RegExp(SPELLED_SOURCE);
-
 /** Letras que se confunden al oír deletrear. */
 const LETTER_CONFUSIONS: Record<string, string> = {
   B: 'D', D: 'B', S: 'F', F: 'S', M: 'N', N: 'M', G: 'J', J: 'G', P: 'T', T: 'P', C: 'D', X: 'S'
 };
 
-/**
- * Confusiones DENTRO de una palabra dictada (el "ruiz" de un correo, el "com"
- * de un dominio). Se excluyen las neutralizadas en la mayoría de variantes
- * (b/v, ll/y, c/z~s bajo seseo): un contraste que suena igual no discrimina.
- */
-const IN_WORD_CONFUSIONS: Record<string, string> = {
-  b: 'd', d: 'b', p: 't', t: 'p', m: 'n', n: 'm', g: 'j', j: 'g',
-  f: 's', r: 'l', l: 'r', i: 'e', e: 'i', o: 'u', u: 'o'
-};
-
-/**
- * Vecino de una palabra que no es del léxico común y para la que, por tanto, no
- * hay par mínimo en el banco: un nombre propio, un dominio, un usuario. Se
- * cambia UNA letra, empezando por el interior, que es donde de verdad hay que
- * afinar el oído.
- */
-function inWordNearMisses(word: string): string[] {
-  const chars = [...word];
-  const out: string[] = [];
-  const order = chars
-    .map((_, i) => i)
-    .sort((a, b) => Math.abs(a - chars.length / 2) - Math.abs(b - chars.length / 2));
-
-  for (const i of order) {
-    const swap = IN_WORD_CONFUSIONS[chars[i].toLowerCase()];
-    if (!swap) continue;
-    const variant = [...chars];
-    variant[i] = chars[i] === chars[i].toUpperCase() ? swap.toUpperCase() : swap;
-    const candidate = variant.join('');
-    if (candidate !== word && !out.includes(candidate)) out.push(candidate);
-    if (out.length >= 2) break;
-  }
-
-  return out;
-}
+// `IN_WORD_CONFUSIONS` / `inWordNearMisses` se fueron con `pieceDistractors`:
+// cambiaban una letra dentro de una pieza del dato para ofrecerla como
+// alternativa. El dictado ya no ofrece alternativas — el dato se escribe — y
+// nadie más las usaba.
 
 /**
  * Secuencias de numerales dichas de corrido: un teléfono dictado cifra a cifra,
@@ -472,7 +429,15 @@ const minimalPairs: Engine = (dialogue, slot, index) => {
   // recorría la transcripción en orden y gastaba los cuatro ítems en el saludo,
   // que es exactamente lo contrario de lo que el nivel entrena.
   const focused = slot.focus && slot.focus !== 'generic' ? collectFocusWords(dialogue) : [];
-  const words = [...focused, ...collectContentWords(dialogue)];
+  // Sin foco, el numeral queda FUERA. En A0 el dato dictado ya se trabaja entero
+  // en el ejercicio anterior, y volver a preguntar "¿oíste seis o siete?" sobre
+  // las cifras de ese mismo teléfono gasta la tercera tarjeta del nivel en
+  // repetir lo que el alumno acaba de anotar. El contraste fónico se hace sobre
+  // las palabras corrientes del diálogo, que es lo que este formato entrena.
+  const lexical = collectContentWords(dialogue).filter(
+    word => focused.length > 0 || (!NUMBER_LEXICON.has(word.normalized) && !MINUTE_WORDS.has(word.normalized))
+  );
+  const words = [...focused, ...lexical];
 
   const compose = (bankOnly: boolean) => {
     const fields: ExerciseField[] = [];
@@ -510,12 +475,13 @@ const minimalPairs: Engine = (dialogue, slot, index) => {
   };
 
   // Los vecinos generados salen de transformar la palabra oída, así que a veces
-  // no son palabras del español ("número" → "númera"). En los niveles bajos el
-  // ejercicio es uno de tres y no puede permitirse eso: primero se intenta sólo
-  // con el banco de pares reales y sólo si no alcanza se acepta el respaldo.
-  const preferBank = !!slot.focus;
-  let { fields, answer } = compose(preferBank);
-  if (preferBank && fields.length < 3) ({ fields, answer } = compose(false));
+  // no son palabras del español ("número" → "númera"). Se intenta SIEMPRE con el
+  // banco de pares reales primero y sólo se acepta el respaldo si no alcanza:
+  // esto dependía de que el slot tuviera foco, y al quitárselo a `a0-pares` el
+  // ejercicio habría pasado a admitir no-palabras justo en el nivel que menos
+  // se lo puede permitir.
+  let { fields, answer } = compose(true);
+  if (fields.length < 3) ({ fields, answer } = compose(false));
 
   if (fields.length < 3) return null;
 
@@ -550,43 +516,6 @@ function labelFor(literal: string, focus?: DataPointKind): string {
   if (literal.replace(/\D/g, '').length >= 6) return 'Teléfono';
   return 'Número';
 }
-
-function countNumerals(literal: string): number {
-  return splitTokens(literal).filter(t => NUMBER_LEXICON.has(normalizeText(stripEdges(t)))).length;
-}
-
-/** ¿Este literal es plausiblemente EL dato que la lección anunció? */
-function isFocusLiteral(literal: string, focus: DataPointKind): boolean {
-  const digits = literal.replace(/\D/g, '').length;
-  const numerals = countNumerals(literal);
-  const spelled = SPELLED_TEST.test(literal);
-
-  switch (focus) {
-    case 'phone':
-    case 'code':
-      return digits >= 6 || numerals >= 5 || spelled;
-    case 'price':
-      return /[.,]\d{2}$/.test(literal) || /\bcon\b/i.test(literal);
-    case 'time':
-      // "8:15", pero también "a las cinco y media", que es como el prompt pide
-      // decir la hora y que antes no contaba como el dato de la lección.
-      return literal.includes(':') || splitTokens(literal).some(t => MINUTE_WORDS.has(normalizeText(t)));
-    case 'spelling':
-    case 'email':
-      // Deletreado con guiones ("G-A-R-C-Í-A") o dicho por nombres de letra.
-      return (
-        spelled ||
-        /\barroba\b/i.test(literal) ||
-        splitTokens(literal).filter(t => CLEAR_LETTER_NAMES.has(normalizeText(t))).length >= 2
-      );
-    default:
-      return digits > 0 || numerals >= 3;
-  }
-}
-
-/** Unidades y decenas que forman compuestos con "y" ("treinta y dos"). */
-const UNIT_WORDS = ['uno', 'dos', 'tres', 'cuatro', 'cinco', 'seis', 'siete', 'ocho', 'nueve'];
-const COMPOUND_TENS = ['treinta', 'cuarenta', 'cincuenta', 'sesenta', 'setenta', 'ochenta', 'noventa'];
 
 /**
  * Recambios admisibles según el hueco. Dentro de un compuesto sólo cabe la clase
@@ -815,12 +744,15 @@ const dataCapture: Engine = (dialogue, slot) => {
 // --- Dictado del dato ----------------------------------------------------
 //
 // La ficha (`data_capture`) pide RECONOCER el dato entero entre tres cadenas
-// parecidas. Esto pide REPRODUCIRLO: un control por elemento, en el orden en
-// que sonó, con las confusiones audibles de esa posición y sólo de ésa. Es la
-// diferencia entre "¿cuál de estos tres teléfonos era?" y "anotá el teléfono",
-// que es lo que de verdad hay que saber hacer.
+// parecidas. Esto pide ANOTARLO: se oye y se escribe, que es la diferencia
+// entre "¿cuál de estos tres teléfonos era?" y "anotá el teléfono".
+//
+// Lo que este motor tiene que encontrar es, por tanto, el dato ENTERO. Las
+// piezas siguen importando aunque ya no sean controles: son lo que permite
+// saber dónde empieza y dónde acaba el tramo, y qué nexos van dentro de él
+// ("catorce **con** noventa" es un dato, no dos).
 
-/** Un dato dictado, ya partido en las piezas que el alumno tiene que reponer. */
+/** Un dato dictado, con sus piezas y los nexos que van entre ellas. */
 interface DictationRun {
   pieces: string[];
   /** Pieza fija que va ANTES de `pieces[i]`; `separators[0]` siempre es ''. */
@@ -828,23 +760,10 @@ interface DictationRun {
   lineIndex: number;
 }
 
-/** Nombres de letra que no son también palabras corrientes del español. */
-const CLEAR_LETTER_NAMES = new Set([
-  'efe', 'ge', 'hache', 'jota', 'ka', 'ele', 'eme', 'ene', 'pe', 'erre',
-  'uve', 'equis', 'zeta', 'ceta', 'griega', 'doble'
-]);
-
-/** Nombres de letra que además son palabras corrientes ("de", "te", "ese"). */
-const AMBIGUOUS_LETTER_NAMES = new Set([
-  'a', 'be', 'ce', 'de', 'e', 'i', 'o', 'u', 'ese', 'te', 've', 'cu'
-]);
-
-/** Piezas fijas de un correo dictado: no se eligen, se muestran. */
-const ADDRESS_GLUE = new Set(['arroba', 'punto', 'guion', 'bajo', 'raya']);
-
-function isLetterName(word: string): boolean {
-  return CLEAR_LETTER_NAMES.has(word) || AMBIGUOUS_LETTER_NAMES.has(word);
-}
+// `CLEAR_LETTER_NAMES`, `AMBIGUOUS_LETTER_NAMES`, `ADDRESS_GLUE` e
+// `isLetterName` también viven en `answerMatching.ts`, por la misma razón: el
+// corrector tiene que resolver "ge a erre ce i a" a "garcia" con exactamente el
+// mismo criterio con el que este motor decidió que eso era un deletreo.
 
 /**
  * Datos dichos con numerales. `spokenNumberRuns` ya localiza el tramo; aquí se
@@ -979,63 +898,12 @@ function spokenSpellingRuns(dialogue: DialogueLine[]): DictationRun[] {
   return out;
 }
 
-/** Alternativas audibles de UNA pieza del dato, nunca de otra posición. */
-function pieceDistractors(piece: string, index: TranscriptIndex): string[] {
-  const key = normalizeText(piece);
-  const out: string[] = [];
-  const push = (candidate: string) => {
-    if (!candidate) return;
-    if (normalizeText(candidate) === key) return;
-    if (!out.some(c => normalizeText(c) === normalizeText(candidate))) out.push(candidate);
-  };
-
-  // Numeral dicho con palabras: el compuesto se recambia entero.
-  const tokens = splitTokens(piece);
-  const head = normalizeText(tokens[0] || '');
-  if (NUMBER_CONFUSIONS[key]) NUMBER_CONFUSIONS[key].forEach(push);
-  else if (MINUTE_CONFUSIONS[key]) MINUTE_CONFUSIONS[key].forEach(push);
-  else if (tokens.length === 3 && COMPOUND_TENS.includes(head)) {
-    // "treinta y dos": se cambia la decena o la unidad, nunca las dos, y
-    // siempre por otra de su clase — "treinta y doce" no existe y se
-    // descartaría leyendo. `replacementsFor` es la misma regla que usa la ficha.
-    const tail = tokens[2];
-    for (const swap of replacementsFor(head, '', 'y')) push(`${swap} ${tokens[1]} ${tail}`);
-    for (const swap of replacementsFor(normalizeText(tail), 'y', '')) push(`${tokens[0]} ${tokens[1]} ${swap}`);
-  }
-
-  // Letra suelta de un deletreo escrito con guiones.
-  if (out.length === 0 && piece.length === 1) {
-    const swap = LETTER_CONFUSIONS[piece.toUpperCase()];
-    if (swap) push(piece === piece.toUpperCase() ? swap : swap.toLowerCase());
-  }
-
-  // Cifra en dígitos: se cambia un solo dígito, y sólo dentro del grupo.
-  if (out.length === 0 && /^\d+$/.test(piece)) {
-    const digits = piece.split('');
-    const last = digits.length - 1;
-    push([...digits.slice(0, last), String((Number(digits[last]) + 1) % 10)].join(''));
-    if (digits.length >= 2) {
-      const swapped = [...digits];
-      [swapped[0], swapped[1]] = [swapped[1], swapped[0]];
-      push(swapped.join(''));
-    }
-    push(String((Number(piece) + 10) % (10 ** digits.length)).padStart(digits.length, '0'));
-  }
-
-  // Palabra: primero el banco de pares reales, después el vecino generado y,
-  // para lo que no es léxico común (un apellido, un dominio), el cambio de una
-  // sola letra dentro de la palabra.
-  if (out.length === 0) {
-    for (const candidate of PAIR_INDEX.get(key) || []) push(candidate);
-    for (const candidate of generatedNeighbours(piece, true)) push(candidate);
-    for (const candidate of inWordNearMisses(piece)) push(candidate);
-  }
-
-  // Un distractor que SÍ suena en el audio deja el ítem sin clave única.
-  return out.filter(candidate => !isHeard(index, candidate)).slice(0, 2);
+/** El dato entero, con sus piezas fijas y su ortografía real. */
+function joinRun(run: DictationRun): string {
+  return run.pieces.map((p, i) => [run.separators[i], p].filter(Boolean).join(' ')).join(' ');
 }
 
-const dictation: Engine = (dialogue, slot, index) => {
+const dictation: Engine = (dialogue, slot) => {
   const focus = slot.focus && slot.focus !== 'generic' ? slot.focus : undefined;
   const candidates: DictationRun[] = [];
 
@@ -1057,62 +925,55 @@ const dictation: Engine = (dialogue, slot, index) => {
 
   if (candidates.length === 0) return null;
 
+  // Los cosechadores se solapan a propósito: `DIGIT_LITERAL` pesca "654" dentro
+  // del "654 32 18" que ya pescó su primera alternativa. Un fragmento del dato
+  // NO es el dato —pedirle al alumno media cifra es peor que no preguntarle
+  // nada—, así que todo candidato contenido en otro del mismo turno se descarta
+  // antes de rankear.
+  const seen = new Set<string>();
+  const whole = candidates.filter(run => {
+    const text = normalizeText(joinRun(run));
+    if (!text || seen.has(text)) return false;
+    const contained = candidates.some(other => {
+      if (other === run || other.lineIndex !== run.lineIndex) return false;
+      const outer = normalizeText(joinRun(other));
+      return outer.length > text.length && outer.includes(text);
+    });
+    if (contained) return false;
+    seen.add(text);
+    return true;
+  });
+
   // Con foco declarado manda el dato que la consigna anunció; si no lo hay, el
-  // tramo más largo, que es el que más tiene que reconstruir el alumno.
-  const joined = (run: DictationRun) =>
-    run.pieces.map((p, i) => [run.separators[i], p].filter(Boolean).join(' ')).join(' ');
-  const ranked = [...candidates].sort((a, b) => {
+  // tramo más largo, que es el que más tiene que anotar el alumno.
+  const ranked = [...whole].sort((a, b) => {
     if (focus) {
-      const fa = isFocusLiteral(joined(a), focus) ? 0 : 1;
-      const fb = isFocusLiteral(joined(b), focus) ? 0 : 1;
+      const fa = isFocusLiteral(joinRun(a), focus) ? 0 : 1;
+      const fb = isFocusLiteral(joinRun(b), focus) ? 0 : 1;
       if (fa !== fb) return fa - fb;
     }
     return b.pieces.length - a.pieces.length;
   });
 
-  for (const run of ranked) {
-    const fields: ExerciseField[] = [];
-    const answer: Record<string, string> = {};
-    let complete = true;
+  const run = ranked[0];
+  if (!run) return null;
 
-    run.pieces.forEach((piece, i) => {
-      const distractors = pieceDistractors(piece, index);
-      if (distractors.length === 0) {
-        complete = false;
-        return;
-      }
-      const fieldId = `eng_di_${i}`;
-      const correctId = `${fieldId}_ok`;
-      fields.push({
-        id: fieldId,
-        label: String(i + 1),
-        options: shuffle([
-          { id: correctId, text: piece },
-          ...distractors.map((text, k) => ({ id: `${fieldId}_x${k}`, text }))
-        ])
-      });
-      answer[fieldId] = correctId;
-    });
+  const expected = joinRun(run);
+  const dataKind = focus ?? inferKindFromLiteral(expected);
+  const label = focus ? DATA_POINTS[focus].fieldLabel : labelFor(expected);
 
-    // Todo o nada: una posición sin alternativas audibles se regalaría, y el
-    // ejercicio dejaría de ser una reconstrucción del dato completo.
-    if (!complete || fields.length < 2) continue;
-
-    const label = focus ? DATA_POINTS[focus].fieldLabel : labelFor(joined(run));
-    return {
-      id: 'eng_dictation',
-      type: 'dictation',
-      question: `Reconstruí ${label.toLowerCase()} tal como se dicta: elegí en cada casilla lo que oíste, en orden.`,
-      fields,
-      separators: run.separators.slice(1),
-      correctAnswer: answer,
-      sourceTurns: [run.lineIndex],
-      explanation:
-        'Cada casilla ofrece la pieza que suena y otras que se le parecen al oído. No hay nada que deducir: hay que volver al audio y anotar elemento por elemento, que es lo que se hace al tomar un dato al vuelo.'
-    };
-  }
-
-  return null;
+  return {
+    id: 'eng_dictation',
+    type: 'dictation',
+    question: `Escuchá y escribí ${label.toLowerCase()} completo, tal como se dice.`,
+    expected,
+    accepts: datumVariants(expected, dataKind),
+    dataKind,
+    correctAnswer: expected,
+    sourceTurns: [run.lineIndex],
+    explanation:
+      'No hay nada que deducir ni entre qué elegir: hay que volver al audio y anotar el dato entero, que es lo que se hace cuando te dictan un teléfono o un precio al vuelo. Da igual si lo escribís con cifras o con palabras; lo que se corrige es lo que oíste.'
+  };
 };
 
 // --- Cloze ---------------------------------------------------------------
@@ -1483,7 +1344,10 @@ export function fillMissingSlots(
         id: ex.id || `${slot.slotId}_${position}`,
         slotId: slot.slotId,
         stage: slot.stage,
-        skill: slot.skill
+        skill: slot.skill,
+        // El modelo no sabe de `DataPointKind`, pero el slot sí: es lo que
+        // decide si "14,90" y "catorce con noventa" son el mismo precio.
+        ...(slot.format === 'dictation' ? { dataKind: ex.dataKind ?? slot.focus } : {})
       });
       onSlot?.({ slotId: slot.slotId, source: 'model' });
       return;

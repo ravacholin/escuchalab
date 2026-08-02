@@ -18,7 +18,7 @@
  * necesitan:
  *
  *   1. el prompt del diálogo  (`instruction`),
- *   2. las consignas de los ejercicios (`label`, `fieldLabel`, `contrasts`),
+ *   2. las consignas de los ejercicios (`label`, `fieldLabel`),
  *   3. los motores deterministas, vía `ExerciseSlot.focus`.
  */
 
@@ -39,78 +39,70 @@ export interface DataPointProfile {
   instruction: string;
   /** Cómo se nombra el dato dentro de las consignas de los ejercicios. */
   label: string;
-  /** Etiqueta del campo obligatorio de la ficha. Una sola palabra. */
+  /** Etiqueta de la casilla en que se anota el dato. Una sola palabra. */
   fieldLabel: string;
-  /** Contrastes que de verdad confunden al oído con este tipo de dato. */
-  contrasts: string;
 }
+
+// Aquí había un cuarto campo, `contrasts`: la lista de cifras y nombres de letra
+// que se confunden al oído con este tipo de dato. Lo consumía `{{contrastes}}`
+// en la consigna de `a0-pares`, y `a0-pares` dejó de ir sobre el dato — hacía
+// que el tercer ejercicio de A0 preguntara "¿oíste seis o siete?" sobre las
+// cifras del mismo teléfono que el alumno acababa de anotar entero.
 
 export const DATA_POINTS: Record<DataPointKind, DataPointProfile> = {
   email: {
     instruction: "MANDATORY: Dictate an email address using 'arroba', 'punto', 'guion bajo'.",
     label: 'la dirección de correo que se dicta',
-    fieldLabel: 'Correo',
-    contrasts:
-      'nombres de letra que se confunden (be/de, ese/efe, eme/ene, ge/jota) y las piezas "arroba", "punto" y "guion bajo"'
+    fieldLabel: 'Correo'
   },
   spelling: {
     instruction:
       "MANDATORY: One speaker MUST SPELL a name/surname/username letter by letter (e.g., 'G-A-R-C-I-A'). It must be clear.",
     label: 'el nombre o apellido que se deletrea',
-    fieldLabel: 'Apellido',
-    contrasts: 'nombres de letra que se confunden al oído: be/de, ese/efe, eme/ene, ge/jota, pe/te, i/y'
+    fieldLabel: 'Apellido'
   },
   phone: {
     instruction: "MANDATORY: One speaker MUST dictate a phone number digit by digit (e.g., '6-5-4...').",
     label: 'el número de teléfono que se dicta',
-    fieldLabel: 'Teléfono',
-    contrasts:
-      'cifras que se confunden al oído: dos/doce, tres/trece, seis/siete, sesenta/setenta, catorce/cuarenta'
+    fieldLabel: 'Teléfono'
   },
   price: {
     instruction:
       "MANDATORY: Mention a specific price with decimals in the local currency of the chosen accent (e.g., '14 con 95'). Do NOT force euros.",
     label: 'el precio exacto que se dice, con sus decimales',
-    fieldLabel: 'Precio',
-    contrasts: 'cifras próximas: quince/cincuenta, catorce/cuarenta, trece/treinta, sesenta/setenta'
+    fieldLabel: 'Precio'
   },
   address: {
     instruction: 'MANDATORY: Mention a specific street name and building number.',
     label: 'la calle y el número que se dicen',
-    fieldLabel: 'Dirección',
-    contrasts: 'el número del portal (dos/doce, tres/trece, sesenta/setenta) y el nombre de la calle'
+    fieldLabel: 'Dirección'
   },
   code: {
     instruction: 'MANDATORY: Dictate a specific alphanumeric code/postal code digit by digit.',
     label: 'el código que se dicta carácter a carácter',
-    fieldLabel: 'Código',
-    contrasts: 'cifras y nombres de letra próximos: dos/doce, seis/siete, be/de, ese/efe, eme/ene'
+    fieldLabel: 'Código'
   },
   date: {
     instruction: 'MANDATORY: State a specific date (day, month, year) clearly.',
     label: 'la fecha exacta que se dice',
-    fieldLabel: 'Fecha',
-    contrasts: 'días y meses próximos: dos/doce, tres/trece, catorce/cuarenta, marzo/mayo, junio/julio'
+    fieldLabel: 'Fecha'
   },
   time: {
     instruction: "MANDATORY: Mention specific times (e.g., 'A las 5 y media').",
     label: 'la hora exacta que se acuerda',
-    fieldLabel: 'Hora',
-    contrasts: 'horas y minutos próximos: dos/doce, tres/trece, "y media"/"y cuarto", "menos cuarto"/"y cuarto"'
+    fieldLabel: 'Hora'
   },
   quantity: {
     instruction:
       'MANDATORY: One speaker MUST state a specific number/quantity clearly (e.g., a bus line, a size, a room number).',
     label: 'el número o la cantidad exacta que se dice',
-    fieldLabel: 'Número',
-    contrasts: 'cifras próximas: dos/doce, tres/trece, seis/siete, catorce/cuarenta, sesenta/setenta'
+    fieldLabel: 'Número'
   },
   generic: {
     instruction:
       'MANDATORY: One speaker MUST state a concrete literal datum (a number, time, price, code or spelled name) clearly, so the learner can extract it.',
     label: 'el dato concreto que se dice en el audio (cifra, hora, precio o nombre deletreado)',
-    fieldLabel: 'Dato',
-    contrasts: 'cifras próximas (dos/doce, seis/siete, sesenta/setenta) y nombres de letra (be/de, ese/efe)'
+    fieldLabel: 'Dato'
   }
 };
 
