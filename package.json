@@ -11,6 +11,7 @@
     "check:syllabus": "node scripts/check-syllabus.mjs",
     "check:exercises": "node scripts/check-exercises.mjs",
     "check:audio": "node scripts/check-audio.mjs",
+    "check:fallback": "node scripts/check-fallback.mjs",
     "check:tts:live": "node scripts/check-tts-live.mjs",
     "tts:voices": "node scripts/measure-tts-voices.mjs",
     "check:ambience": "node scripts/check-ambience.mjs",
@@ -18,7 +19,7 @@
     "check:ambience:scenes": "node scripts/check-ambience-scenes.mjs",
     "ambience:build": "node scripts/generate-ambience-beds.mjs",
     "ambience:preview": "node scripts/ambience/preview.mjs",
-    "test": "npm run typecheck && npm run check:syllabus && npm run check:exercises && npm run check:audio && npm run check:ambience && npm run check:ambience:runtime && npm run check:ambience:scenes"
+    "test": "npm run typecheck && npm run check:syllabus && npm run check:exercises && npm run check:audio && npm run check:fallback && npm run check:ambience && npm run check:ambience:runtime && npm run check:ambience:scenes"
   },
   "dependencies": {
     "@google/genai": "^2.13.0",

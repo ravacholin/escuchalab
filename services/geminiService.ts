@@ -9,6 +9,14 @@ import { verifyExercises } from "./exerciseVerification";
 import { checkTwoVoices } from "./ttsVoiceCheck";
 import { splitIntoTurns } from "./ttsTurnSplit";
 import {
+  GENERATION_MODELS,
+  describeModelChainFailure,
+  isQuotaError,
+  modelsFrom,
+  runWithModelFallback,
+  shouldSwitchModel
+} from "./modelFallback";
+import {
   ProgressListener,
   ProgressReporter,
   formatBytes,
@@ -23,8 +31,15 @@ const getApiKey = (): string => {
   return key;
 };
 
-const GENERATION_MODEL = "gemini-3.6-flash";
+// El modelo de texto ya no es uno solo: `GENERATION_MODELS` (services/modelFallback.ts)
+// es una cadena y `GENERATION_MODEL` es solo su primer escalón, el que se
+// intenta siempre primero y el que se nombra en la pantalla de carga.
+const GENERATION_MODEL = GENERATION_MODELS[0];
 const AUDIO_MODEL = "gemini-3.1-flash-tts-preview";
+
+// `isQuotaError` vivía aquí y ahora vive con el resto de la clasificación de
+// errores; se re-exporta porque `scripts/check-audio.mjs` lo importa de aquí.
+export { isQuotaError };
 
 let lastKey = "";
 let aiInstance: GoogleGenAI | null = null;
@@ -73,24 +88,14 @@ const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
- * ¿Es el error de haberse quedado sin cuota?
+ * Recorta un mensaje de error para el registro de la pantalla de carga.
  *
- * Importa distinguirlo porque es el único que **empeora** al reintentarlo: cada
- * intento vuelve a contar contra el mismo límite. El nivel gratuito da 10
- * peticiones de voz al día, así que un 429 tratado como un fallo de red se
- * llevaba tres de golpe.
+ * Los errores de la API llegan como un JSON dentro de otro JSON: el 503 de
+ * saturación ocupa unos 250 caracteres escapados de los que solo importa la
+ * primera línea.
  */
-export function isQuotaError(error: unknown): boolean {
-  const status = (error as { status?: unknown } | null)?.status;
-  if (status === 429 || status === 'RESOURCE_EXHAUSTED') return true;
-  const text = errorMessage(error).toLowerCase();
-  return (
-    text.includes('resource_exhausted') ||
-    text.includes('429') ||
-    text.includes('quota') ||
-    text.includes('rate limit')
-  );
-}
+const briefly = (text: string, max = 140): string =>
+  text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
 
 /**
  * Pide la respuesta en streaming para poder medir lo que va llegando.
@@ -100,11 +105,16 @@ export function isQuotaError(error: unknown): boolean {
  * tenía más remedio que inventarse el avance. Con el stream, cada chunk es un
  * hecho observable (caracteres, turnos, ejercicios) que se reporta tal cual.
  *
- * Se conservan los tres intentos con espera creciente del código anterior; el
- * último cae a la llamada no-streaming para que un modelo o una red que no
+ * Se conservan los dos intentos con espera creciente del código anterior; tras
+ * ellos cae a la llamada no-streaming para que un modelo o una red que no
  * admitan streaming no rompan la generación.
+ *
+ * Esa escalera es para los fallos del *momento* (red, stream cortado, respuesta
+ * vacía). Los fallos del *modelo* salen de aquí inmediatamente y los resuelve
+ * `runWithModelFallback` bajando un escalón de la cadena: repetir tres veces
+ * contra un modelo saturado es exactamente lo que dejaba la app sin generar.
  */
-async function generateJsonWithProgress(
+export async function generateJsonWithProgress(
   ai: GoogleGenAI,
   params: GenerateContentParameters,
   hooks: {
@@ -129,8 +139,10 @@ async function generateJsonWithProgress(
       if (!accumulated.trim()) throw new Error('la API devolvió una respuesta vacía');
       return accumulated;
     } catch (error) {
-      // Igual que en la síntesis: sin cuota, reintentar solo gasta más cuota.
-      if (isQuotaError(error)) throw error;
+      // Sin cuota, reintentar solo gasta más cuota; saturado, reintentar en
+      // 500 ms no cambia nada. Los dos casos los arregla otro modelo, no otra
+      // vuelta de esta escalera.
+      if (shouldSwitchModel(error)) throw error;
       lastError = error;
       hooks.onRetry(attempt, accumulated.length, errorMessage(error));
       await sleep(500 * attempt);
@@ -992,6 +1004,12 @@ export const generateLessonPlan = async (
   // Denominador real de turnos: solo existe donde el prompt lo exige.
   const requestedTurns = level === Level.Intro ? null : REQUESTED_TURNS[length];
 
+  // El escalón de la cadena por el que se empieza. Un reintento por número de
+  // personajes ocurre *después* de una generación que sí llegó, así que tiene
+  // que arrancar por el modelo que acaba de contestar en vez de volver a pagar
+  // la cadena desde arriba con los que ya se sabe que están caídos.
+  let preferredModel: string = GENERATION_MODEL;
+
   // Auto-retry loop for multi-speaker validation
   const MAX_SPEAKER_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_SPEAKER_RETRIES; attempt++) {
@@ -1017,9 +1035,11 @@ export const generateLessonPlan = async (
   Structure: ${jsonStructure}
   `;
 
+    const chain = modelsFrom(preferredModel);
+
     reporter.finish(
       'prompt',
-      `${formatCount(prompt.length)} caracteres enviados · modelo ${GENERATION_MODEL}` +
+      `${formatCount(prompt.length)} caracteres enviados · modelo ${chain[0]}` +
         (attempt > 1 ? ` · intento ${attempt}/${MAX_SPEAKER_RETRIES}` : '')
     );
 
@@ -1031,78 +1051,101 @@ export const generateLessonPlan = async (
       let turnsSeen = 0;
       let exercisesSeen = 0;
 
+      // Un modelo nuevo empieza el JSON desde cero, igual que un reintento del
+      // stream: los dos casos tienen que devolver la pantalla al mismo sitio, y
+      // por eso comparten esta función en vez de repetir las cuatro líneas.
+      const restartStream = () => {
+        exercisesStarted = false;
+        titleLogged = false;
+        reporter.reset(['dialogue', 'exercises']);
+        reporter.start('dialogue');
+      };
+
       reporter.start('dialogue');
 
-      const rawResponse = await generateJsonWithProgress(
-        ai,
-        {
-          model: GENERATION_MODEL,
-          contents: prompt,
-          config: {
-            systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
-            responseMimeType: "application/json",
-            temperature: 0.0,
+      const { value: rawResponse, model: usedModel } = await runWithModelFallback(
+        chain,
+        (model) => generateJsonWithProgress(
+          ai,
+          {
+            model,
+            contents: prompt,
+            config: {
+              systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
+              responseMimeType: "application/json",
+              temperature: 0.0,
+            },
           },
-        },
-        {
-          onText: (full) => {
-            turnsSeen = countMatches(full, SPEAKER_KEY);
-            exercisesSeen = Math.max(countMatches(full, SLOT_KEY), countMatches(full, QUESTION_KEY));
+          {
+            onText: (full) => {
+              turnsSeen = countMatches(full, SPEAKER_KEY);
+              exercisesSeen = Math.max(countMatches(full, SLOT_KEY), countMatches(full, QUESTION_KEY));
 
-            if (!titleLogged) {
-              const match = TITLE_VALUE.exec(full);
-              if (match) {
-                titleLogged = true;
-                reporter.log(`Título recibido: «${match[1]}»`, 'ok');
+              if (!titleLogged) {
+                const match = TITLE_VALUE.exec(full);
+                if (match) {
+                  titleLogged = true;
+                  reporter.log(`Título recibido: «${match[1]}»`, 'ok');
+                }
               }
-            }
 
-            if (!exercisesStarted && EXERCISES_KEY.test(full)) {
-              exercisesStarted = true;
-              reporter.finish('dialogue', plural(turnsSeen, 'turno recibido', 'turnos recibidos'));
-              reporter.start('exercises');
-            }
+              if (!exercisesStarted && EXERCISES_KEY.test(full)) {
+                exercisesStarted = true;
+                reporter.finish('dialogue', plural(turnsSeen, 'turno recibido', 'turnos recibidos'));
+                reporter.start('exercises');
+              }
 
-            if (!exercisesStarted) {
-              reporter.update('dialogue', {
-                // Sin denominador en A0: el paso queda declarado no medible.
-                ratio: requestedTurns ? Math.min(turnsSeen / requestedTurns, 1) : undefined,
-                detail: requestedTurns
-                  ? `${formatCount(turnsSeen)} de ${requestedTurns} turnos solicitados`
-                  : plural(turnsSeen, 'turno recibido', 'turnos recibidos'),
-                counters: [
-                  { label: 'Turnos', value: formatCount(turnsSeen) },
-                  { label: 'Caracteres', value: formatCount(full.length) }
-                ],
-                metrics: { turns: turnsSeen, chars: full.length }
-              });
-            } else {
-              reporter.update('exercises', {
-                ratio: Math.min(exercisesSeen / blueprint.length, 1),
-                detail: `${formatCount(Math.min(exercisesSeen, blueprint.length))} de ${blueprint.length} ejercicios recibidos`,
-                counters: [
-                  { label: 'Ejercicios', value: `${Math.min(exercisesSeen, blueprint.length)}/${blueprint.length}` },
-                  { label: 'Caracteres', value: formatCount(full.length) }
-                ],
-                metrics: { exercises: exercisesSeen, chars: full.length }
-              });
+              if (!exercisesStarted) {
+                reporter.update('dialogue', {
+                  // Sin denominador en A0: el paso queda declarado no medible.
+                  ratio: requestedTurns ? Math.min(turnsSeen / requestedTurns, 1) : undefined,
+                  detail: requestedTurns
+                    ? `${formatCount(turnsSeen)} de ${requestedTurns} turnos solicitados`
+                    : plural(turnsSeen, 'turno recibido', 'turnos recibidos'),
+                  counters: [
+                    { label: 'Turnos', value: formatCount(turnsSeen) },
+                    { label: 'Caracteres', value: formatCount(full.length) }
+                  ],
+                  metrics: { turns: turnsSeen, chars: full.length }
+                });
+              } else {
+                reporter.update('exercises', {
+                  ratio: Math.min(exercisesSeen / blueprint.length, 1),
+                  detail: `${formatCount(Math.min(exercisesSeen, blueprint.length))} de ${blueprint.length} ejercicios recibidos`,
+                  counters: [
+                    { label: 'Ejercicios', value: `${Math.min(exercisesSeen, blueprint.length)}/${blueprint.length}` },
+                    { label: 'Caracteres', value: formatCount(full.length) }
+                  ],
+                  metrics: { exercises: exercisesSeen, chars: full.length }
+                });
+              }
+            },
+            onRetry: (streamAttempt, received, reason) => {
+              reporter.log(
+                `Stream interrumpido tras ${formatCount(received)} caracteres (intento ${streamAttempt}): ${briefly(reason)}`,
+                'warn'
+              );
+              restartStream();
+            },
+            onFallback: (reason) => {
+              reporter.log(`Streaming no disponible (${briefly(reason)}); se pide la respuesta completa`, 'warn');
             }
-          },
-          onRetry: (streamAttempt, received, reason) => {
-            reporter.log(
-              `Stream interrumpido tras ${formatCount(received)} caracteres (intento ${streamAttempt}): ${reason}`,
-              'warn'
-            );
-            exercisesStarted = false;
-            titleLogged = false;
-            reporter.reset(['dialogue', 'exercises']);
-            reporter.start('dialogue');
-          },
-          onFallback: (reason) => {
-            reporter.log(`Streaming no disponible (${reason}); se pide la respuesta completa`, 'warn');
+          }
+        ),
+        {
+          onSwitch: (from, to, reason) => {
+            reporter.log(`«${from}» no está disponible (${briefly(reason)}); se cambia a «${to}»`, 'warn');
+            restartStream();
           }
         }
       );
+
+      // La próxima generación (un reintento por número de personajes) empieza
+      // por el modelo que sí ha contestado.
+      preferredModel = usedModel;
+      if (usedModel !== GENERATION_MODEL) {
+        reporter.log(`Guion generado con «${usedModel}» en lugar de «${GENERATION_MODEL}»`, 'ok');
+      }
 
       if (!exercisesStarted) {
         reporter.finish('dialogue', plural(turnsSeen, 'turno recibido', 'turnos recibidos'), 'warning');
@@ -1206,8 +1249,11 @@ export const generateLessonPlan = async (
         console.error("Error generando plan:", error);
         const active = reporter.snapshot().activeStepId;
         if (active) reporter.fail(active, errorMessage(error));
-        reporter.log(`Fallo en la generación del guion: ${errorMessage(error)}`, 'error');
-        throw new Error(`Error GenAI: ${error.message}`);
+        reporter.log(`Fallo en la generación del guion: ${briefly(errorMessage(error))}`, 'error');
+        // Agotada la cadena de modelos, lo que llegaba a pantalla era el JSON
+        // crudo del 503 anidado dentro de otro JSON. Se dice qué ha pasado.
+        const chainFailure = describeModelChainFailure(error, chain.length);
+        throw new Error(`Error GenAI: ${chainFailure ?? error.message}`);
       }
       // Otherwise, this catch is just for unexpected errors during generation, continue retry loop
     }

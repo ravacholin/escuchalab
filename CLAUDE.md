@@ -563,9 +563,54 @@ Edit `data/scenarios.ts`:
 - Icons imported from `lucide-react`
 
 ### Adjusting Gemini Models
-Models defined as constants in `geminiService.ts`:
-- `GENERATION_MODEL`: Currently `"gemini-3.6-flash"` (stable, faster/cheaper than 2.5-flash; fallback: `"gemini-2.5-flash"`)
-- `AUDIO_MODEL`: Currently `"gemini-3.1-flash-tts-preview"` (low-latency TTS preview; fallback if unstable: `"gemini-2.5-flash-preview-tts"`)
+
+**The text model is a chain, not a constant.** `GENERATION_MODELS`
+(`services/modelFallback.ts`) is `gemini-3.6-flash` → `gemini-3.5-flash-lite` →
+`gemini-3.1-flash-lite` → `gemini-2.5-flash`; all four are GA and on the free tier.
+`GENERATION_MODEL` in `geminiService.ts` is just its first rung — the one always tried
+first and the one named on the loading screen.
+
+It exists because a `503 UNAVAILABLE — "This model is currently experiencing high demand"`
+from `gemini-3.6-flash` used to leave the app unable to generate anything at all. The
+retry ladder in `generateJsonWithProgress()` treated it as a network failure and spent all
+three of its calls (two streaming attempts plus the non-streaming fallback) **against the
+same overloaded model**, waiting 500 ms and 1000 ms in between. A demand spike lasts
+minutes; 1.5 s does not outlast it. What a retry cannot fix, a different model can.
+
+Hence the distinction the whole module is built on — errors of the *model* versus errors
+of the *moment*:
+- **Model errors go down a rung immediately** (`shouldSwitchModel`): unavailable (503/500),
+  quota (429), and model-not-found (404). Note `isModelUnavailableError` reads `code`,
+  `status` *and* the message text, because in the real 503 `status` arrived empty and the
+  code was buried in a JSON nested inside another JSON. `isModelNotFoundError` exists so
+  that the day Google retires one of the four ids — `gemini-2.0-flash` went in June 2026 —
+  the app drops to the next one instead of breaking.
+- **Everything else keeps the existing ladder**: network failures, a stream cut halfway, an
+  empty response. If those switched models, one dropped connection would burn the whole
+  chain at once and degrade the lesson for no reason.
+
+**A 429 switches models but is still never retried.** The two are not in tension: free-tier
+limits are *per model*, so the next rung arrives with its own quota intact, while the rule
+that actually matters — never repeat the same request against the same limit — is untouched.
+
+The order of the chain is by **expected availability**, not by capability: a demand spike
+hits the newest models, which are the ones everyone is trying out. `gemini-2.5-flash` closes
+the chain as the veteran, least likely to be saturated and most rehearsed at the structured
+JSON the lesson needs. The verifier and the deterministic engines already guard the output,
+so a lesson from a lower rung is still a checked lesson.
+
+The chain never costs anything on the normal path — one model, one call, as before — and
+even in the worst case it is *cheaper* than what it replaced: 4 calls with all four models
+down, against the 3 the old ladder spent on a single saturated one. The loading log names
+the switch (`«…» no está disponible (…); se cambia a «…»`) and, if the plan did not come
+from the primary, says which model produced it. A speaker-count retry restarts from the
+model that just answered (`modelsFrom`), not from the top.
+
+**`AUDIO_MODEL` deliberately has no chain**: `"gemini-3.1-flash-tts-preview"`, one model, the
+fixed 2-request cost intact (fallback if unstable: `"gemini-2.5-flash-preview-tts"`, which is
+also what `scripts/measure-tts-voices.mjs` defaults to). Adding a chain there would mean two
+speakers of one lesson possibly synthesised by different models, and the `TTS_VOICES` pitch
+table is measured against one model.
 
 ## Important Notes
 
@@ -591,6 +636,20 @@ Automated checks (no API key or network needed) — run all with `npm test`:
 - `npm run check:ambience:runtime` — instantiates the **real** `AmbienceEngine` against a fake `AudioContext` (`scripts/ambience/fakeWebAudio.mjs`, with virtual timers so minutes of scene time run deterministically) and asserts what the tables alone cannot: that a source actually starts for every layer of all 50 scenes, that loading does not depend on `start()` having been called, that `stop()` cancels an in-flight load, that every bed source reaches the destination, that the scheduler keeps firing over minutes, and the mix contract — every bed in −40..−22 dBFS, no event over 20 dB above its bed, **and the inverse: the headrooms not all equal** (≥6 distinct values spanning ≥8 dB), event density spanning ≥5× across the catalogue with no more than 6 scenes on the same rate, and **intensity actually moving the event rate in every scene**. Those last three exist because bounds every scene satisfies identically are constants, not contracts — which is exactly how 26 scenes came to fire at 26.00 onsets/min with a slider that could not change it.
 - `npm run check:ambience:scenes` — the one that measures what a learner actually complains about. Renders all 50 scenes offline through `scripts/ambience/render.mjs` (shared with `ambience:preview`, so what it measures is what you audition) and compares all 1225 pairs on spectrum, loudness range, event density and room signature. Fails on any pair below the floor, on a clustered catalogue, and on regression against `scene-distance.baseline.json`. When it was first written, 18 pairs were below the floor. It prints the closest pairs with the failing axis named whether or not it passes.
 - `npm run check:exercises` — feeds deliberately broken exercises (key not among the options, non-bijective matching, ordering copied verbatim from turns, V/F/NG with no NOT GIVEN item, cloze whose solution is never said, spot-the-difference flagging a word that *is* said…) to the verifier and asserts each is rejected; then asserts every deterministic engine produces exercises that pass the same verifier and never display accent-stripped text. It also pins the dictated-datum path: a phone said in words and a phone said as `654 32 18` must both yield one `Teléfono` field, and focused minimal pairs must contrast the digits rather than the greeting. And the precision contract of `dictation`: a reconstruction whose sequence is not heard contiguously is rejected, a position may not offer the solution twice, the engine rebuilds `seis cinco cuatro treinta y dos dieciocho` / `654 32 18` / `catorce con noventa` / `cinco y media` exactly (with `con` as a fixed piece, not a control), no position offers another position's value, a `multiple_choice` tagged with the datum's `slotId` does not take that slot, and exercises outside the blueprint never reach the lesson.
+- `npm run check:fallback` — pins the distinction the model chain rests on: which errors are
+  fixed by switching models and which are not. It classifies **the real 503 payload**, copied
+  verbatim (a JSON inside another JSON, `status` empty, the code only in `code` and in the
+  text) as unavailable and *not* as quota; a 429 and a retired model id as switchable; and
+  `socket hang up` / `fetch failed` / an empty response as **not** switchable — that last
+  group is the one that matters, because if a dropped connection switched models it would
+  burn the whole chain in one go. Then it drives `runWithModelFallback` against a fake
+  runner: a 503 on the first model lands on the second with exactly one announced switch and
+  one call per model, a network error does not advance at all, an exhausted chain rethrows
+  the *last* error after `n-1` switches, no model is ever called twice — and the cheap case,
+  **success on the first model costs exactly one call and zero switches**, which is what pins
+  that having a chain does not make the normal path any more expensive. Finally, that the
+  message shown to the learner when the chain is exhausted says what happened instead of
+  printing the raw nested JSON.
 
 Checks that need an API key, network and quota (**not** part of `npm test`):
 - `GEMINI_API_KEY=… npm run check:tts:live [repeticiones]` — the only check that hears what
@@ -615,6 +674,7 @@ Manual checklist (needs an API key):
 4b. Same configuration in **Short and in Long** at each level: Short must bring 3-4 cards and Long 4-6, and Short's cards must be literally the first ones of Long.
 4c. A B1-B2 lesson: `spot_the_difference` must render and be answerable — this is the first release in which that format reaches a learner at all (engine, renderer and verifier existed, no slot used them).
 4d. Stage sections: only the first open, the `n/m resueltos` counter tracking submits, and the whole thing reset when a new lesson is generated.
+4e. The model chain, which cannot be triggered on demand by waiting for Google to be busy: put a bogus id (`gemini-no-existe`) temporarily at the head of `GENERATION_MODELS`. The API answers 404, and the loading log must show «"gemini-no-existe" no está disponible (…); se cambia a "gemini-3.6-flash"» followed by «Guion generado con …», with the lesson generating normally. Revert the id afterwards, and confirm a normal lesson's log mentions **no** switch at all and that the `prompt` step still names `gemini-3.6-flash`.
 5. Rendering and submit/feedback for the newer formats (`dictation`, `data_capture`, `minimal_pairs`, `spot_the_difference`, `matching`, `scale`, `true_false_notgiven`, `chunk_order`), including the `sourceTurns` reveal. For `dictation`, check on a narrow screen that a long datum wraps instead of overflowing.
 6. Audio generation across accent/gender combinations; localStorage persistence; error handling for invalid keys. **Listen to a dialogue whose two characters share a gender** — the case with the least margin — and confirm the two speakers are told apart without reading the transcript. Then listen for the seams, which is where the current design can fail: no turn should start or end mid-word, and the gaps between réplicas should read as a conversation rather than as two monologues spliced together. The loading log names the count: «Turnos intercalados: N fronteras — X por silencio medido, Y por reparto proporcional». A lesson mostly cut by *reparto proporcional* means the model stopped pausing between paragraphs — check the directive in `singleVoiceDirective()` before touching the splitter. The log should also say «2 peticiones, sin reintentos»; anything else is a regression in the cost.
 7. Ambience: confirm the player's `N/M capas` counter reaches the total (it is the tell for a silent bed). Play a `Café / Restaurante`, a `Taxi / Transporte`, a `Taller Mecánico`, an `Aeropuerto / Aerolínea`, an `El Tiempo` (RadioNews) and a `Mi Rutina Diaria` (Podcast) — they should be recognisable blind and clearly different from one another. Check that the bed ducks under speech without pumping between syllables, that the volume/intensity/ducking/mute settings survive generating a new lesson, and that deleting `public/ambience/` degrades to a working player rather than an error.
