@@ -51,9 +51,16 @@ async function loadModule(entry) {
   }
 }
 
-const { chunkDialogueLines, concatPcmChunks, ttsDialogueBudget, assignSpeakerVoices } =
-  await loadModule('services/geminiService.ts');
+const {
+  chunkDialogueLines,
+  concatPcmChunks,
+  ttsDialogueBudget,
+  assignSpeakerVoices,
+  planAudioRequests,
+  isQuotaError
+} = await loadModule('services/geminiService.ts');
 const { checkTwoVoices, segmentPitches } = await loadModule('services/ttsVoiceCheck.ts');
+const { splitIntoTurns } = await loadModule('services/ttsTurnSplit.ts');
 const { Accent } = await loadModule('types.ts');
 
 const failures = [];
@@ -248,8 +255,10 @@ for (const accent of Object.values(Accent)) {
 // Por qué existe: el `multiSpeakerVoiceConfig` de Gemini no enruta nada, el
 // modelo *decide* de quién es cada turno leyendo el texto, y a veces decide
 // leerlo todo con una voz. Medido contra la API con el formato anterior, la voz
-// grave faltaba en 2 de cada 3 generaciones. Como el fallo solo se ve en el
-// audio, se mide el audio.
+// grave faltaba en 2 de cada 3 generaciones.
+// Ya no dispara ninguna reparación —cada voz se pide por separado, ver la
+// sección 9—, pero sigue midiendo la pista final para el registro, y para eso
+// tiene que seguir siendo capaz de distinguir un audio a dos voces de uno a una.
 {
   // Una «voz» sintética: tren de pulsos a F0 con envolvente silábica, que es
   // lo que la autocorrelación necesita para dar un tono.
@@ -318,6 +327,211 @@ for (const accent of Object.values(Accent)) {
   check('dos referencias sin separación no dan veredicto', !pegadas.conclusive, pegadas.reason);
 }
 
+// --- 9. El coste en peticiones: dos, y sabidas de antemano ---------------
+// Es el contrato entero de este diseño. Antes, garantizar las dos voces costaba
+// 1 petición en el mejor caso y 8 en el peor (dos intentos con el modelo más una
+// petición por turno), sobre las 10 diarias que da el nivel gratuito. Ahora cada
+// voz se pide por separado: dos peticiones, sin reintentos y sin medir nada.
+{
+  const speech = (n) =>
+    `Turno número ${n}, con una frase de longitud realista para un diálogo de nivel intermedio.`;
+  const conversation = (count) =>
+    Array.from({ length: count }, (_, i) => ({
+      speaker: i % 2 === 0 ? 'Lucía' : 'Andrés',
+      text: speech(i + 1)
+    }));
+  const cast = [
+    { name: 'Lucía', gender: 'Female' },
+    { name: 'Andrés', gender: 'Male' }
+  ];
+
+  for (const accent of Object.values(Accent)) {
+    const plan = planAudioRequests(conversation(6), cast, accent);
+    check(
+      `un diálogo de 6 turnos cuesta exactamente 2 peticiones (${accent})`,
+      plan.requests.length === 2,
+      `${plan.requests.length} peticiones`
+    );
+    check(
+      `cada petición lleva una sola voz (${accent})`,
+      new Set(plan.requests.map(r => r.owner.voice)).size === 2,
+      plan.requests.map(r => r.owner.voice).join(' / ')
+    );
+  }
+
+  // Ningún turno se pierde por el camino, en el acento con menos presupuesto.
+  const largo = conversation(14);
+  const plan = planAudioRequests(largo, cast, Accent.BuenosAires);
+  const covered = plan.requests.flatMap(r => r.turnAt);
+  check(
+    'ningún turno se pierde al agrupar por hablante',
+    new Set(covered).size === largo.length,
+    `${new Set(covered).size} de ${largo.length}`
+  );
+  check(
+    'cada petición respeta el presupuesto del acento',
+    plan.requests.every(r => r.lines.join('\n\n').length <= plan.budget),
+    plan.requests.map(r => r.lines.join('\n\n').length).join(' / ')
+  );
+  // Las piezas de cada petición y sus turnos van emparejadas una a una.
+  check(
+    'cada pieza sabe de qué turno viene',
+    plan.requests.every(r => r.lines.length === r.turnAt.length)
+  );
+  // Sin etiqueta: con una sola voz configurada, «Lucía:» se leería en alto.
+  check(
+    'el texto que se envía no lleva la etiqueta del hablante',
+    plan.requests.every(r => r.lines.every(l => !/^(Lucía|Andrés):/.test(l))),
+    plan.requests[0].lines[0].slice(0, 20)
+  );
+
+  // Un monólogo sigue siendo una sola petición.
+  const monologo = planAudioRequests(
+    Array.from({ length: 8 }, (_, i) => ({ speaker: 'Narrador', text: speech(i + 1) })),
+    [{ name: 'Narrador', gender: 'Male' }],
+    Accent.Madrid
+  );
+  check(
+    'un monólogo cuesta una sola petición',
+    monologo.requests.length === 1 && !monologo.isMultiSpeaker,
+    `${monologo.requests.length} peticiones`
+  );
+}
+
+// --- 10. Errores de cuota: no se reintentan ------------------------------
+// Un 429 gastaba tres llamadas (dos de streaming más el fallback sin streaming)
+// de las diez del día, porque el reintento no miraba de qué error se trataba.
+{
+  check('un 429 se reconoce como falta de cuota', isQuotaError(new Error('got 429 Too Many Requests')));
+  check('RESOURCE_EXHAUSTED se reconoce', isQuotaError(new Error('RESOURCE_EXHAUSTED: quota')));
+  check('el status numérico se reconoce', isQuotaError({ status: 429, message: 'nope' }));
+  check('«quota exceeded» se reconoce', isQuotaError(new Error('Quota exceeded for model')));
+  check('un fallo de red no se confunde con cuota', !isQuotaError(new Error('socket hang up')));
+  check('una respuesta vacía no se confunde con cuota', !isQuotaError(new Error('la API devolvió una respuesta vacía')));
+}
+
+// --- 11. Recuperar los turnos del bloque de cada voz ---------------------
+// Lo que se paga por no medir-y-repetir: cada voz vuelve en un bloque continuo
+// y hay que partirlo. Nunca puede costar otra petición, así que la salida de
+// emergencia (reparto proporcional) tiene que producir siempre los k trozos.
+{
+  const RATE = 24000;
+  const samples = (msValue) => Math.round((RATE * msValue) / 1000);
+
+  const pcmOf = (x) => {
+    const out = new Uint8Array(x.length * 2);
+    for (let i = 0; i < x.length; i++) {
+      const s = Math.round(Math.max(-1, Math.min(1, x[i])) * 32767);
+      out[i * 2] = s & 0xff;
+      out[i * 2 + 1] = (s >> 8) & 0xff;
+    }
+    return out;
+  };
+  const speech = (msValue, f0 = 150) => {
+    const n = samples(msValue);
+    const out = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const t = i / RATE;
+      out[i] = 0.4 * (0.5 + 0.5 * Math.sin(2 * Math.PI * 4 * t)) * Math.sin(2 * Math.PI * f0 * t);
+    }
+    return out;
+  };
+  const quiet = (msValue) => new Float32Array(samples(msValue));
+  const cat = (...parts) => {
+    const out = new Float32Array(parts.reduce((n, p) => n + p.length, 0));
+    let at = 0;
+    for (const p of parts) { out.set(p, at); at += p.length; }
+    return out;
+  };
+  const seconds = (bytes) => bytes.byteLength / 2 / RATE;
+
+  // a) Fronteras marcadas: se encuentran y cada trozo lleva su turno.
+  {
+    const r = splitIntoTurns(
+      pcmOf(cat(quiet(200), speech(1500), quiet(400), speech(900), quiet(400), speech(2000), quiet(200))),
+      [60, 36, 80],
+      RATE
+    );
+    check('tres turnos con pausas claras dan tres trozos', r.pieces.length === 3);
+    check('…y las tres fronteras salen de un silencio medido', r.measured === 2 && r.interpolated === 0,
+      `medidas ${r.measured}, interpoladas ${r.interpolated}`);
+    // Cada trozo se queda con su habla más la mitad del silencio de cada lado.
+    const want = [1.5 + 0.06 + 0.2, 0.9 + 0.4, 2.0 + 0.2 + 0.06];
+    r.pieces.forEach((p, i) => {
+      check(`el trozo ${i + 1} dura lo que su turno`, Math.abs(seconds(p) - want[i]) < 0.12,
+        `${seconds(p).toFixed(2)} s, esperado ${want[i].toFixed(2)}`);
+    });
+  }
+
+  // b) Sin un solo silencio: el reparto proporcional no puede fallar ni pedir
+  // otra petición. Es el caso que sustituye a la escalera de reparación.
+  {
+    const r = splitIntoTurns(pcmOf(speech(4000)), [50, 50, 100], RATE);
+    check('sin silencios se devuelven igualmente los tres trozos', r.pieces.length === 3);
+    check('…y se dice que fueron por reparto', r.interpolated === 2 && r.measured === 0,
+      `medidas ${r.measured}, interpoladas ${r.interpolated}`);
+    const want = [1, 1, 2];
+    r.pieces.forEach((p, i) => {
+      check(`el trozo ${i + 1} sigue el reparto de caracteres`, Math.abs(seconds(p) - want[i]) < 0.2,
+        `${seconds(p).toFixed(2)} s, esperado ${want[i]}`);
+    });
+  }
+
+  // c) El reparto de caracteres manda: turnos muy desiguales no salen iguales.
+  {
+    const r = splitIntoTurns(
+      pcmOf(cat(speech(2500), quiet(350), speech(300), quiet(350), speech(2500))),
+      [200, 20, 200],
+      RATE
+    );
+    check('un turno corto entre dos largos se reconoce como corto',
+      seconds(r.pieces[1]) < 1 && seconds(r.pieces[0]) > 2 && seconds(r.pieces[2]) > 2,
+      r.pieces.map(p => seconds(p).toFixed(2)).join(' / '));
+  }
+
+  // d) Una pausa entre frases dentro de un turno no es una frontera de turno.
+  // Sin el reparto esperado como guía, el hueco más largo se llevaría el corte
+  // al sitio equivocado y el turno 2 empezaría a mitad del turno 1.
+  {
+    const r = splitIntoTurns(
+      pcmOf(cat(speech(1200), quiet(300), speech(1200), quiet(500), speech(1200))),
+      [120, 60],
+      RATE
+    );
+    check('una pausa interna no se confunde con la frontera del turno',
+      Math.abs(seconds(r.pieces[0]) - 2.95) < 0.2,
+      `${seconds(r.pieces[0]).toFixed(2)} s, esperado ~2.95`);
+  }
+
+  // e) Contrato duro: siempre k trozos, ninguno vacío, todos alineados a 16 bits.
+  {
+    const track = pcmOf(cat(speech(600), quiet(300), speech(600)));
+    for (const k of [1, 2, 3, 5, 8]) {
+      const r = splitIntoTurns(track, Array.from({ length: k }, () => 40), RATE);
+      check(`k=${k}: se devuelven exactamente ${k} trozos`, r.pieces.length === k, `${r.pieces.length}`);
+      check(`k=${k}: ningún trozo vacío`, r.pieces.every(p => p.byteLength > 0));
+      check(`k=${k}: todos los trozos alineados a 16 bits`, r.pieces.every(p => p.byteLength % 2 === 0));
+    }
+    // Un PCM inservible tampoco puede quedarse sin trozos.
+    const vacio = splitIntoTurns(new Uint8Array(0), [10, 10], RATE);
+    check('un PCM vacío devuelve igualmente dos trozos', vacio.pieces.length === 2);
+  }
+
+  // f) Los turnos se montan en el orden del diálogo, no en el de las peticiones.
+  {
+    const durations = [1400, 900, 1800, 700, 1200, 1000];
+    const parts = [];
+    for (const d of durations) parts.push(speech(d), quiet(350));
+    const r = splitIntoTurns(pcmOf(cat(...parts)), durations.map(d => Math.round(d / 12)), RATE);
+    check('seis turnos seguidos se separan por sus seis silencios',
+      r.pieces.length === 6 && r.measured === 5,
+      `${r.pieces.length} trozos, ${r.measured} medidas`);
+    check('…y cada uno conserva la duración de su turno',
+      r.pieces.every((p, i) => Math.abs(seconds(p) - durations[i] / 1000) < 0.4),
+      r.pieces.map(p => seconds(p).toFixed(2)).join(' / '));
+  }
+}
+
 if (failures.length) {
   console.error(`✗ ${failures.length} fallo(s) en el troceo de audio:`);
   for (const f of failures) console.error(`  · ${f}`);
@@ -326,6 +540,9 @@ if (failures.length) {
 
 console.log(
   '✓ troceo de audio correcto en los 8 acentos (ningún turno perdido, ningún tramo fuera de presupuesto), ' +
-    'unión de PCM verificada, dos voces separadas por al menos 4,5 semitonos para dos hablantes ' +
-    'y verificador de voces que distingue un audio a dos voces de uno a una sola'
+    'unión de PCM verificada, dos voces separadas por al menos 4,5 semitonos para dos hablantes, ' +
+    'verificador de voces que distingue un audio a dos voces de uno a una sola, ' +
+    'coste fijo de 2 peticiones por diálogo en los 8 acentos sin reintentos, ' +
+    'errores de cuota distinguidos de los de red, ' +
+    'y recuperación de los turnos del bloque de cada voz (por silencio medido y, sin silencios, por reparto)'
 );

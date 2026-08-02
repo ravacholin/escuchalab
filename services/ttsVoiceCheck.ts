@@ -10,7 +10,17 @@
  *
  * Para un laboratorio de comprensión auditiva eso no es un defecto cosmético —
  * la mitad de los ejercicios pide separar turnos, y con una sola voz no hay nada
- * que separar. Así que no se confía en el modelo: se **mide** lo que devolvió.
+ * que separar.
+ *
+ * **Esto ya no decide nada.** Durante un tiempo la garantía consistió en medir
+ * el audio y volver a pedirlo cuando faltaba una voz, y funcionaba, pero el
+ * nivel gratuito son 10 peticiones al día y la escalera de reparación se comía
+ * hasta ocho en una lección. Ahora cada voz se pide en su propia petición de un
+ * solo hablante (`planAudioRequests`), donde no hay atribución que el modelo
+ * pueda equivocar, así que el módulo se queda como **diagnóstico**: mide la
+ * pista final y lo dice en el registro, sin gastar ni una petición. Si algún
+ * día vuelve a avisar, lo que está desfasado es la tabla de tonos de
+ * `TTS_VOICES`, no el audio.
  *
  * El módulo es aritmética pura sobre el PCM (24 kHz, 16 bits, mono), sin Web
  * Audio ni dependencias, para poder correrlo igual en el navegador y en los
@@ -53,7 +63,7 @@ export interface VoiceCheckResult {
 }
 
 /** PCM 16 bits little-endian → muestras en punto flotante. */
-function toFloat(pcm: Uint8Array): Float32Array {
+export function toFloat(pcm: Uint8Array): Float32Array {
   const n = Math.floor(pcm.byteLength / 2);
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) {
@@ -66,7 +76,7 @@ function toFloat(pcm: Uint8Array): Float32Array {
 }
 
 /** Diezmado con promediado: quita el agudo que estorbaría a la autocorrelación. */
-function downsample(x: Float32Array, from: number, to: number): Float32Array {
+export function downsample(x: Float32Array, from: number, to: number): Float32Array {
   const factor = Math.max(1, Math.round(from / to));
   if (factor === 1) return x;
   const out = new Float32Array(Math.floor(x.length / factor));

@@ -7,6 +7,7 @@ import { fillMissingSlots } from "./exerciseEngines";
 import { MODEL_SELECTABLE_SCENES, isSceneId } from "./ambiencePresets";
 import { verifyExercises } from "./exerciseVerification";
 import { checkTwoVoices } from "./ttsVoiceCheck";
+import { splitIntoTurns } from "./ttsTurnSplit";
 import {
   ProgressListener,
   ProgressReporter,
@@ -51,23 +52,45 @@ const TTS_PROMPT_LIMIT = 5000;
  */
 const TTS_CONCURRENCY = 2;
 
-/**
- * A partir de aquí se trocea también por velocidad, no solo porque el texto no
- * quepa. Cada tramo es una petición más contra la cuota del modelo de voz, así
- * que solo compensa en diálogos largos, donde una sola llamada tarda ~30 s.
- * Los troceos que impone el presupuesto de caracteres ocurren igualmente: sin
- * ellos el diálogo se cortaba a media frase.
- */
-const TURNS_BEFORE_SPLITTING = 12;
-
 /** Fundido en cada unión entre tramos, para que no se oiga un clic. */
 const JOIN_FADE_MS = 5;
+
+/**
+ * Cada turno viaja en su propio párrafo dentro de la petición de su hablante.
+ * No es cosmético: el modelo hace una pausa más marcada entre párrafos que
+ * entre frases, y esa pausa es justo la frontera que después hay que encontrar
+ * en el audio para volver a intercalar los turnos.
+ */
+const TURN_JOINER = '\n\n';
+
+/** Silencio que se deja entre dos turnos al montar la conversación. */
+const TURN_GAP_MS = 220;
 
 // --- HELPERS ---
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/**
+ * ¿Es el error de haberse quedado sin cuota?
+ *
+ * Importa distinguirlo porque es el único que **empeora** al reintentarlo: cada
+ * intento vuelve a contar contra el mismo límite. El nivel gratuito da 10
+ * peticiones de voz al día, así que un 429 tratado como un fallo de red se
+ * llevaba tres de golpe.
+ */
+export function isQuotaError(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 429 || status === 'RESOURCE_EXHAUSTED') return true;
+  const text = errorMessage(error).toLowerCase();
+  return (
+    text.includes('resource_exhausted') ||
+    text.includes('429') ||
+    text.includes('quota') ||
+    text.includes('rate limit')
+  );
+}
 
 /**
  * Pide la respuesta en streaming para poder medir lo que va llegando.
@@ -106,6 +129,8 @@ async function generateJsonWithProgress(
       if (!accumulated.trim()) throw new Error('la API devolvió una respuesta vacía');
       return accumulated;
     } catch (error) {
+      // Igual que en la síntesis: sin cuota, reintentar solo gasta más cuota.
+      if (isQuotaError(error)) throw error;
       lastError = error;
       hooks.onRetry(attempt, accumulated.length, errorMessage(error));
       await sleep(500 * attempt);
@@ -1307,10 +1332,9 @@ export function ttsDialogueBudget(accent: Accent): number {
 
 /**
  * Lo que `ttsDialogueBudget` reserva para la consigna y el margen de seguridad.
- * La consigna de la conversación —quién habla, con qué timbre, y la versión
- * insistente del segundo intento— ronda los 400 caracteres y viaja en la misma
- * petición: sin descontarla, el tramo se pasa del techo justo cuando el
- * verificador pide repetirlo.
+ * La consigna —el timbre configurado, la petición de pausar entre párrafos y,
+ * en un tramo de continuación, el recordatorio de mantener la voz— viaja en la
+ * misma petición que el texto: sin descontarla, el tramo se pasa del techo.
  */
 const TTS_DIRECTIVE_ALLOWANCE = 600;
 
@@ -1326,9 +1350,7 @@ const TTS_DIRECTIVE_ALLOWANCE = 600;
 export function chunkDialogueLines(lines: string[], joiner: string, hardLimit: number): string[][] {
   const safeLines = lines.flatMap(line => splitOversizedLine(line, hardLimit));
 
-  const byBudget = packLines(safeLines, joiner, hardLimit);
-  const desired = safeLines.length >= TURNS_BEFORE_SPLITTING ? 2 : 1;
-  const chunkCount = Math.max(byBudget.length, desired);
+  const chunkCount = packLines(safeLines, joiner, hardLimit).length;
   if (chunkCount <= 1) return [safeLines];
 
   // Tramos de tamaño parecido: con dos peticiones en paralelo, el tiempo total
@@ -1401,6 +1423,11 @@ async function synthesizeWithProgress(
       if (total === 0) throw new Error('el modelo no devolvió datos de audio');
       return concatBytes(chunks, total);
     } catch (error) {
+      // Quedarse sin cuota no se arregla repitiendo: cada reintento es otra
+      // petición contra el mismo límite. Con los dos intentos de streaming más
+      // el fallback sin streaming, un solo 429 gastaba tres llamadas de las
+      // diez que da el nivel gratuito al día. Los errores de red sí se reintentan.
+      if (isQuotaError(error)) throw error;
       lastError = error;
       hooks.onRetry(attempt, total, errorMessage(error));
       await sleep(500 * attempt);
@@ -1587,8 +1614,8 @@ export function assignSpeakerVoices(speakers: string[], characters: Character[])
   const chosen = [first, second];
 
   return speakers.map((speaker, i) => {
-    // Un tercer hablante no llega nunca al `multiSpeakerVoiceConfig` (el modelo
-    // admite dos), pero si llegara aquí no puede repetir voz.
+    // Solo se sintetizan los dos hablantes con más turnos, pero si llegara un
+    // tercero aquí no puede repetir voz.
     const voice = chosen[i] || TTS_VOICES.find(v => !chosen.some(c => c.name === v.name)) || TTS_VOICES[i % TTS_VOICES.length];
     return { speaker, label: labels[i], voice: voice.name, pitchHz: voice.pitchHz, timbre: voice.timbre };
   });
@@ -1631,53 +1658,134 @@ function assignmentFor(
 }
 
 /**
- * La consigna que precede al diálogo en un tramo a dos voces.
+ * La consigna que precede al texto de un hablante.
  *
- * Es una copia deliberada del formato que documenta Google para el modo
- * multi-hablante («TTS the following conversation between Joe and Jane:»), y no
- * un adorno: lo que había antes era el perfil fonético seguido de un separador
- * `---BEGIN DIALOGUE---`, sin nombrar a nadie ni decir que aquello fuera una
- * conversación a dos voces. Medido contra la API, con ese formato el hablante
- * grave desaparecía en dos de cada tres generaciones.
- *
- * Se describe además el timbre de cada uno. La limitación conocida del modelo
- * es la inconsistencia entre el prompt y la configuración de voces: cuando el
- * texto no dice nada de quién habla, la asignación queda solo en el
- * `speechConfig` y el modelo se siente libre de leerlo todo igual. Aquí el
- * texto y la configuración dicen lo mismo.
+ * Todas las peticiones son de una sola voz —también las de un diálogo, que va
+ * una petición por personaje—, así que la consigna nunca tiene que explicar una
+ * atribución: describe el timbre que se ha configurado y pide mantenerlo. Lo
+ * que sí pide es **pausar entre párrafos**, porque cada turno viaja en su propio
+ * párrafo y esa pausa es la frontera que `splitIntoTurns` busca luego en el
+ * audio para volver a intercalar los turnos.
  */
-function conversationDirective(assignments: SpeakerVoiceAssignment[], insist: boolean): string {
-  const [a, b] = assignments;
-  const base =
-    `TTS the following conversation between ${a.label} and ${b.label}. ` +
-    `${a.label} and ${b.label} are two different people with two different voices: ` +
-    `${a.label} speaks with ${a.timbre}, ${b.label} speaks with ${b.timbre}. ` +
-    `Switch voice on every turn according to the name that opens it.`;
-
-  if (!insist) return base;
-  return (
-    `${base} The two voices MUST sound clearly different from each other: ` +
-    `never read ${b.label}'s turns with ${a.label}'s voice or the other way round. ` +
-    `${a.label} is noticeably higher pitched than ${b.label}.`
-  );
-}
-
-/** La consigna de un tramo con un solo hablante (monólogo, o un tramo suelto). */
 function singleVoiceDirective(assignment: SpeakerVoiceAssignment): string {
-  return `Read the following aloud with ${assignment.timbre}, and keep that same voice throughout.`;
-}
-
-/** De quién es la línea, por la etiqueta con la que se construyó. */
-function ownerOfLine(
-  line: string,
-  assignments: SpeakerVoiceAssignment[]
-): SpeakerVoiceAssignment | undefined {
-  return assignments.find(a => line.startsWith(`${a.label}: `));
+  return (
+    `Read the following aloud with ${assignment.timbre}, and keep that same voice throughout. ` +
+    `Each paragraph is a separate utterance: pause clearly between paragraphs.`
+  );
 }
 
 /** Silencio en PCM, para separar turnos sintetizados por separado. */
 function silencePcm(ms: number): Uint8Array {
   return new Uint8Array(Math.round((TTS_SAMPLE_RATE * ms) / 1000) * 2);
+}
+
+/** Una petición al TTS: un hablante, una voz, sus turnos. */
+export interface TtsRequest {
+  owner: SpeakerVoiceAssignment;
+  /** Texto de cada pieza del tramo, en orden. */
+  lines: string[];
+  /** Posición en el diálogo del turno del que sale cada pieza. */
+  turnAt: number[];
+  /** Orden de este tramo entre los de su hablante, y cuántos son. */
+  part: number;
+  parts: number;
+}
+
+export interface AudioPlan {
+  assignments: SpeakerVoiceAssignment[];
+  requests: TtsRequest[];
+  /** Turnos que llegan a sintetizarse, con su posición en el diálogo. */
+  turns: Array<{ at: number; owner: SpeakerVoiceAssignment; text: string }>;
+  isMultiSpeaker: boolean;
+  spokenChars: number;
+  budget: number;
+}
+
+/**
+ * El plan de peticiones: **una por hablante**, con solo sus turnos y una sola
+ * voz configurada.
+ *
+ * Es el punto entero de este diseño. `multiSpeakerVoiceConfig` no enruta nada:
+ * el modelo lee el transcript, decide por su cuenta de quién es cada turno y
+ * después busca una voz —Google documenta la «inconsistencia de voz respecto al
+ * prompt» como limitación conocida— y medido contra la API volvía con una sola
+ * voz en 3 de cada 4 generaciones. Comprobarlo y repetir la petición
+ * funcionaba, pero el nivel gratuito son 10 peticiones al día y la escalera de
+ * reparación se comía hasta ocho en una sola lección: el alumno se quedaba sin
+ * generaciones antes de terminar de estudiar.
+ *
+ * Una petición de un solo hablante no tiene ninguna atribución que resolver:
+ * hay una voz configurada y un texto. Así que la garantía deja de venir de
+ * medir el audio y pasa a venir de la forma de la petición, con un coste fijo
+ * de dos, sabido antes de empezar. Lo que hay que hacer a cambio es partir el
+ * bloque de cada voz en sus turnos (`splitIntoTurns`) para intercalarlos, y eso
+ * es aritmética local: no cuesta cuota y no puede quedarse sin ella.
+ *
+ * Un hablante al que no le quepa su texto en el presupuesto del acento se
+ * reparte en varios tramos, siempre por frontera de turno: ningún turno se
+ * pierde ni se corta a media frase.
+ */
+export function planAudioRequests(
+  dialogue: LessonPlan['dialogue'],
+  characters: Character[],
+  accent: Accent
+): AudioPlan | null {
+  if (!dialogue || dialogue.length === 0) return null;
+
+  const speakerCounts: Record<string, number> = {};
+  dialogue.forEach(d => {
+    if (d.speaker) speakerCounts[d.speaker.trim()] = (speakerCounts[d.speaker.trim()] || 0) + 1;
+  });
+
+  const sortedSpeakers = Object.keys(speakerCounts).sort((a, b) => speakerCounts[b] - speakerCounts[a]);
+  if (sortedSpeakers.length === 0) return null;
+
+  const isMultiSpeaker = sortedSpeakers.length >= 2;
+  const assignments = assignSpeakerVoices(sortedSpeakers.slice(0, 2), characters);
+
+  // Cada turno guarda su posición en el diálogo: se piden agrupados por hablante
+  // y hay que devolverlos a su sitio al montar la pista.
+  const turns: AudioPlan['turns'] = [];
+  dialogue.forEach((d, at) => {
+    const owner = isMultiSpeaker ? assignmentFor(d.speaker, assignments) : assignments[0];
+    if (!owner) return;
+    const cleanText = sanitizeForTTS(d.text);
+    if (!cleanText) return;
+    turns.push({ at, owner, text: cleanText });
+  });
+
+  if (turns.length === 0) return null;
+
+  const budget = ttsDialogueBudget(accent);
+  const requests: TtsRequest[] = [];
+
+  for (const owner of assignments) {
+    const mine = turns.filter(t => t.owner === owner);
+    if (!mine.length) continue;
+
+    // Un turno más largo que el presupuesto se parte por frases; cada pieza
+    // recuerda de qué turno viene para volver a unirse al montar.
+    const pieces = mine.flatMap(t =>
+      splitOversizedLine(t.text, budget).map(text => ({ at: t.at, text }))
+    );
+    const chunks = chunkDialogueLines(pieces.map(p => p.text), TURN_JOINER, budget);
+
+    let cursor = 0;
+    chunks.forEach((lines, part) => {
+      const turnAt = pieces.slice(cursor, cursor + lines.length).map(p => p.at);
+      cursor += lines.length;
+      requests.push({ owner, lines, turnAt, part, parts: chunks.length });
+    });
+  }
+
+  return {
+    assignments,
+    requests,
+    turns,
+    isMultiSpeaker,
+    spokenChars: turns.reduce((n, t) => n + t.text.length, 0),
+    budget
+  };
 }
 
 export const generateAudio = async (
@@ -1694,117 +1802,59 @@ export const generateAudio = async (
 
   if (!dialogue || dialogue.length === 0) return "";
 
-  const speakerCounts: Record<string, number> = {};
-  dialogue.forEach(d => {
-    if (d.speaker) speakerCounts[d.speaker.trim()] = (speakerCounts[d.speaker.trim()] || 0) + 1;
-  });
-
-  const sortedSpeakers = Object.keys(speakerCounts).sort((a, b) => speakerCounts[b] - speakerCounts[a]);
-  if (sortedSpeakers.length === 0) return "";
-
-  const isMultiSpeaker = sortedSpeakers.length >= 2;
-  // El diálogo viaja como lista de turnos: el troceado corta en fronteras de
-  // turno, nunca a mitad de frase.
-  let lines: string[] = [];
-  let joiner = '\n';
-
-  const assignments = assignSpeakerVoices(sortedSpeakers.slice(0, 2), characters);
-  const assignedVoices = assignments.map(
-    a => `${a.label}→${a.voice} ${Math.round(a.pitchHz)} Hz`
-  );
-
-  /** Configuración de voces de un tramo, según quién hable realmente en él. */
-  const configFor = (owners: SpeakerVoiceAssignment[]) =>
-    owners.length >= 2
-      ? {
-          multiSpeakerVoiceConfig: {
-            speakerVoiceConfigs: owners.map(a => ({
-              speaker: a.label,
-              voiceConfig: { prebuiltVoiceConfig: { voiceName: a.voice } }
-            }))
-          }
-        }
-      : { voiceConfig: { prebuiltVoiceConfig: { voiceName: owners[0].voice } } };
-
-  if (isMultiSpeaker) {
-    joiner = '\n';
-    // La etiqueta que encabeza cada turno tiene que ser *exactamente* la del
-    // `speechConfig`. Si el guion escribe "Ana (cajera):" y la configuración
-    // dice "Ana", el modelo no reconoce al hablante y lee todo con una voz.
-    lines = dialogue
-      .map(d => {
-        const assignment = assignmentFor(d.speaker, assignments);
-        if (!assignment) return null;
-        const cleanText = sanitizeForTTS(d.text);
-        if (!cleanText) return null;
-        return `${assignment.label}: ${cleanText}`;
-      })
-      .filter((l): l is string => Boolean(l)); // Remove nulls
-
-  } else {
-    joiner = '\n\n';
-    lines = dialogue
-      .map(d => sanitizeForTTS(d.text))
-      .filter(t => t.length > 0);
-  }
-
+  const plan = planAudioRequests(dialogue, characters, accent);
   // Final validation before sending
-  if (lines.length === 0) {
+  if (!plan) {
     throw new Error("No hay texto válido para generar audio.");
   }
 
-  // Caracteres de habla real (sin la directiva fonética que se antepone luego).
-  const spokenChars = lines.join(joiner).length;
+  const { assignments, requests, isMultiSpeaker, spokenChars, budget: dialogueBudget } = plan;
+  const assignedVoices = assignments.map(
+    a => `${a.label}→${a.voice} ${Math.round(a.pitchHz)} Hz`
+  );
 
   // --- CRITICAL: INJECT PHONETIC PRONUNCIATION INSTRUCTIONS ---
   // This is the "bulletproof" accent system - we prepend pronunciation rules
   // so the TTS model knows exactly how to pronounce each dialect
   const phoneticProfile = TTS_PHONETIC_PROFILES[accent] || "";
-  // La consigna de la conversación va **después** del perfil, pegada al texto:
-  // es lo último que lee el modelo antes de los turnos. Donde estaba el
-  // separador `---BEGIN DIALOGUE---` ahora se dice quién habla y con qué voz.
   const header = phoneticProfile ? `${phoneticProfile}\n\n` : "";
 
-  // El perfil fonético se come entre 2196 y 3407 de los 5000 caracteres que
-  // acepta la API. Antes el texto se recortaba con `substring(0, 5000)` y un
-  // diálogo Largo perdía sus últimos turnos: el audio dejaba de decir lo que
-  // los ejercicios seguían preguntando. Aquí se reparte en peticiones.
-  const dialogueBudget = ttsDialogueBudget(accent);
-  const chunks = chunkDialogueLines(lines, joiner, dialogueBudget);
-  const totalChunks = chunks.length;
+  const totalChunks = requests.length;
 
   reporter.finish(
     'prepare',
     `${plural(dialogue.length, 'turno', 'turnos')} · ${formatCount(spokenChars)} caracteres de habla · ` +
-      `${isMultiSpeaker ? 'dos voces' : 'una voz'} (${assignedVoices.join(', ')})` +
-      (totalChunks > 1 ? ` · ${plural(totalChunks, 'petición', 'peticiones')}` : '')
+      `${isMultiSpeaker ? 'dos voces' : 'una voz'} (${assignedVoices.join(', ')}) · ` +
+      `${plural(totalChunks, 'petición', 'peticiones')}`
   );
   reporter.log(`Modelo TTS: ${AUDIO_MODEL} · PCM ${TTS_SAMPLE_RATE / 1000} kHz 16 bits mono`, 'info');
-  if (totalChunks > 1) {
-    const motive = spokenChars > dialogueBudget
-      ? `no cabe en una petición (${formatCount(spokenChars)} caracteres de habla, presupuesto ` +
-        `${formatCount(dialogueBudget)} tras el perfil fonético)`
-      : `supera los ${TURNS_BEFORE_SPLITTING} turnos, así que se trocea también por velocidad`;
+  if (isMultiSpeaker) {
     reporter.log(
-      `El diálogo ${motive}: ${totalChunks} tramos por frontera de turno, ${TTS_CONCURRENCY} en paralelo`,
+      'Una petición por hablante, con una sola voz configurada en cada una: no hay atribución ' +
+        'que el modelo pueda equivocar, así que las dos voces están garantizadas sin gastar ' +
+        'ninguna petición en comprobarlo. Los turnos se intercalan aquí, al recibirlos.',
+      'info'
+    );
+  }
+  const overflowing = requests.filter(r => r.parts > 1).length;
+  if (overflowing > 0) {
+    reporter.log(
+      `A algún hablante no le cabe su texto en una petición (presupuesto ${formatCount(dialogueBudget)} ` +
+        `caracteres tras el perfil fonético): se reparte en tramos por frontera de turno`,
       'info'
     );
   }
 
   try {
-    console.log(`[TTS] Generating audio with ${isMultiSpeaker ? 'multi-speaker' : 'single-speaker'} config in ${totalChunks} chunk(s)...`);
+    console.log(`[TTS] Generating audio: ${totalChunks} single-voice request(s), one per speaker...`);
     reporter.start('synthesis');
 
     // Los tramos llegan en paralelo: se acumula lo recibido por tramo y se
-    // reporta la suma. Con más de un tramo sí hay denominador real (peticiones
-    // completadas), así que ahí el paso deja de ser indeterminado.
+    // reporta la suma. Las peticiones se saben de antemano y no hay reintentos,
+    // así que el denominador es real desde el primer momento.
     const bytesPerChunk = new Array<number>(totalChunks).fill(0);
     const streamPartsPerChunk = new Array<number>(totalChunks).fill(0);
     let doneChunks = 0;
-    // Peticiones por encima de una por tramo: reintentos e insistencias del
-    // verificador de voces. Se cuentan para que la pantalla de carga diga la
-    // verdad sobre lo que se ha gastado de cuota.
-    let extraRequests = 0;
 
     const publish = () => {
       const totalBytes = bytesPerChunk.reduce((n, b) => n + b, 0);
@@ -1815,17 +1865,14 @@ export const generateAudio = async (
         { label: 'Datos', value: formatBytes(totalBytes) },
         { label: 'Fragmentos', value: formatCount(streamParts) }
       ];
-      if (totalChunks > 1) {
-        counters.push({ label: 'Tramos', value: `${formatCount(doneChunks)}/${formatCount(totalChunks)}` });
-      }
+      counters.push({ label: 'Peticiones', value: `${formatCount(doneChunks)}/${formatCount(totalChunks)}` });
       reporter.update('synthesis', {
-        // Con un solo tramo no hay ratio a propósito: el servicio no informa de
-        // la duración total, así que se muestra lo recibido y no un porcentaje
-        // falso. Con varios, las peticiones terminadas sí son un denominador.
-        ratio: totalChunks > 1 ? doneChunks / totalChunks : undefined,
-        detail: totalChunks > 1
-          ? `${formatSeconds(seconds)} de audio recibidos · tramo ${Math.min(doneChunks + 1, totalChunks)} de ${totalChunks}`
-          : `${formatSeconds(seconds)} de audio recibidos`,
+        // El plan de peticiones es determinista, así que aquí sí hay un
+        // denominador de verdad: no es una barra inventada sobre un reloj.
+        ratio: doneChunks / totalChunks,
+        detail:
+          `${formatSeconds(seconds)} de audio recibidos · ` +
+          `petición ${Math.min(doneChunks + 1, totalChunks)} de ${totalChunks}`,
         counters,
         metrics: {
           audioBytes: totalBytes,
@@ -1837,22 +1884,9 @@ export const generateAudio = async (
       });
     };
 
-    /** Quién habla de verdad en este tramo. */
-    const ownersOf = (chunkLines: string[]): SpeakerVoiceAssignment[] => {
-      if (!isMultiSpeaker) return assignments.slice(0, 1);
-      const present = assignments.filter(a => chunkLines.some(l => ownerOfLine(l, assignments) === a));
-      // Un tramo con un solo hablante no es una conversación: pedirlo con
-      // `multiSpeakerVoiceConfig` es darle al modelo una atribución que no
-      // tiene que resolver, y una voz de más entre la que elegir.
-      return present.length ? present : assignments.slice(0, 1);
-    };
-
-    /** Con una sola voz configurada, la etiqueta sobra: se leería en alto. */
-    const stripLabel = (line: string) => line.replace(/^[^:\n]{1,60}: /, '');
-
     const ask = async (
       text: string,
-      owners: SpeakerVoiceAssignment[],
+      owner: SpeakerVoiceAssignment,
       index: number,
       onBytes?: (bytes: number, parts: number) => void
     ) =>
@@ -1863,21 +1897,23 @@ export const generateAudio = async (
           contents: [{ parts: [{ text }] }],
           config: {
             responseModalities: [Modality.AUDIO],
-            speechConfig: configFor(owners)
+            // Una sola voz configurada, siempre. Sin `multiSpeakerVoiceConfig`
+            // no hay nada que el modelo pueda atribuir mal.
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: owner.voice } } }
           }
         },
         {
           onAudio: (totalBytes, chunkCount) => onBytes?.(totalBytes, chunkCount),
           onRetry: (attempt, received, reason) => {
             reporter.log(
-              `Síntesis del tramo ${index + 1}/${totalChunks} interrumpida tras ${formatBytes(received)} ` +
+              `Síntesis de la petición ${index + 1}/${totalChunks} interrumpida tras ${formatBytes(received)} ` +
                 `(intento ${attempt}): ${reason}`,
               'warn'
             );
           },
           onFallback: (reason) => {
             reporter.log(
-              `Streaming de audio no disponible en el tramo ${index + 1}/${totalChunks} (${reason}); ` +
+              `Streaming de audio no disponible en la petición ${index + 1}/${totalChunks} (${reason}); ` +
                 `se pide la pista completa`,
               'warn'
             );
@@ -1885,108 +1921,60 @@ export const generateAudio = async (
         }
       );
 
-    /**
-     * Última línea de defensa: cada turno en su propia petición, con una única
-     * voz configurada.
-     *
-     * Aquí ya no hay atribución que el modelo pueda equivocar —una petición,
-     * una voz, un turno—, así que el resultado es correcto por construcción.
-     * Cuesta una petición por turno y pierde el encadenado natural entre
-     * réplicas, por eso solo se llega hasta aquí cuando la conversación entera
-     * ha vuelto en una sola voz dos veces seguidas: un audio con menos
-     * naturalidad sigue sirviendo para segmentar turnos; uno con una sola voz,
-     * no.
-     */
-    const turnByTurn = async (chunkLines: string[], index: number): Promise<Uint8Array> => {
-      reporter.log(
-        `Tramo ${index + 1}/${totalChunks}: se sintetiza turno a turno ` +
-          `(${plural(chunkLines.length, 'petición', 'peticiones')}) para garantizar las dos voces`,
-        'warn'
-      );
-
-      const rendered = await mapWithConcurrency(chunkLines, TTS_CONCURRENCY, async (line) => {
-        const owner = ownerOfLine(line, assignments) || assignments[0];
-        const text = `${header}${singleVoiceDirective(owner)}\n\n${stripLabel(line)}`;
-        const bytes = await ask(text, [owner], index);
-        extraRequests++;
-        return [bytes, silencePcm(240)];
-      });
-
-      const joined = concatPcmChunks(rendered.flat());
-      // No hay reintento después de esto —cada turno ya vino de su propia
-      // petición con una sola voz configurada—, pero sí se mide y se dice, para
-      // que el registro no afirme algo que no se ha comprobado.
-      const verdict = checkTwoVoices(joined, assignments[0].pitchHz, assignments[1].pitchHz);
-      reporter.log(
-        `Tramo ${index + 1}/${totalChunks} rehecho turno a turno: ${verdict.reason}`,
-        verdict.ok ? 'info' : 'warn'
-      );
-      return joined;
-    };
-
-    const parts = await mapWithConcurrency(chunks, TTS_CONCURRENCY, async (chunkLines, index) => {
-      const owners = ownersOf(chunkLines);
-      const body = owners.length >= 2
-        ? chunkLines.join(joiner)
-        : chunkLines.map(stripLabel).join(joiner);
-      const continuation = index > 0
-        ? ' This is the continuation of the same conversation: keep exactly the same voices, pace and accent.'
+    const rendered = await mapWithConcurrency(requests, TTS_CONCURRENCY, async (request, index) => {
+      const body = request.lines.join(TURN_JOINER);
+      const continuation = request.part > 0
+        ? ' This is the continuation of the same speaker: keep exactly the same voice, pace and accent.'
         : '';
 
-      let bytes = new Uint8Array(0);
-
-      // Dos intentos con el modelo y, si insiste en leerlo todo igual, el
-      // troceado por turnos. Cada intento se comprueba contra el audio.
-      for (let attempt = 0; attempt < 2; attempt++) {
-        const directive = owners.length >= 2
-          ? conversationDirective(owners, attempt > 0)
-          : singleVoiceDirective(owners[0]);
-
-        bytes = await ask(
-          `${header}${directive}${continuation}\n\n${body}`,
-          owners,
-          index,
-          (totalBytes, chunkCount) => {
-            bytesPerChunk[index] = totalBytes;
-            streamPartsPerChunk[index] = chunkCount;
-            publish();
-          }
-        );
-        if (attempt > 0) extraRequests++;
-
-        if (owners.length < 2) break;
-
-        const verdict = checkTwoVoices(bytes, owners[0].pitchHz, owners[1].pitchHz);
-        if (verdict.ok) {
-          if (attempt > 0) {
-            reporter.log(`Tramo ${index + 1}/${totalChunks} corregido: ${verdict.reason}`, 'info');
-          }
-          break;
-        }
-
-        reporter.log(
-          `Tramo ${index + 1}/${totalChunks} devuelto con una sola voz — ${verdict.reason}. ` +
-            (attempt === 0
-              ? 'Se repite insistiendo en el timbre de cada hablante.'
-              : 'El modelo insiste: se abandona la petición conjunta.'),
-          'warn'
-        );
-
-        if (attempt === 1) {
-          bytes = await turnByTurn(chunkLines, index);
-          bytesPerChunk[index] = bytes.length;
+      const bytes = await ask(
+        `${header}${singleVoiceDirective(request.owner)}${continuation}\n\n${body}`,
+        request.owner,
+        index,
+        (totalBytes, chunkCount) => {
+          bytesPerChunk[index] = totalBytes;
+          streamPartsPerChunk[index] = chunkCount;
           publish();
         }
-      }
+      );
+
+      // El bloque vuelve con todos los turnos de esta voz seguidos: se parte por
+      // los silencios, con los caracteres de cada turno como reparto esperado.
+      const split = splitIntoTurns(bytes, request.lines.map(l => l.length));
 
       doneChunks++;
       publish();
-      return bytes;
+      return { request, split };
     });
 
     console.log('[TTS] Response received, checking for audio data...');
 
-    const audioBytes = concatPcmChunks(parts);
+    // Cada turno vuelve a su sitio en el diálogo; las piezas de un turno que no
+    // cupo en una petición se reúnen antes.
+    const perTurn = new Map<number, Uint8Array[]>();
+    let measuredCuts = 0;
+    let interpolatedCuts = 0;
+
+    for (const { request, split } of rendered) {
+      measuredCuts += split.measured;
+      interpolatedCuts += split.interpolated;
+      request.turnAt.forEach((at, i) => {
+        const piece = split.pieces[i];
+        if (!piece || piece.byteLength === 0) return;
+        const existing = perTurn.get(at);
+        if (existing) existing.push(piece);
+        else perTurn.set(at, [piece]);
+      });
+    }
+
+    const ordered: Uint8Array[] = [];
+    const gap = silencePcm(TURN_GAP_MS);
+    for (const at of [...perTurn.keys()].sort((a, b) => a - b)) {
+      if (ordered.length) ordered.push(gap);
+      ordered.push(...(perTurn.get(at) as Uint8Array[]));
+    }
+
+    const audioBytes = concatPcmChunks(ordered);
     if (audioBytes.length === 0) {
       throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
     }
@@ -1994,12 +1982,27 @@ export const generateAudio = async (
     const totalSeconds = audioBytes.length / TTS_BYTES_PER_SECOND;
     reporter.finish(
       'synthesis',
-      `${formatSeconds(totalSeconds)} de audio · ${formatBytes(audioBytes.length)}` +
-        (totalChunks > 1 ? ` · ${plural(totalChunks, 'tramo unido', 'tramos unidos')}` : '') +
-        (extraRequests > 0
-          ? ` · ${plural(extraRequests, 'petición adicional', 'peticiones adicionales')} para separar las voces`
-          : '')
+      `${formatSeconds(totalSeconds)} de audio · ${formatBytes(audioBytes.length)} · ` +
+        `${plural(totalChunks, 'petición', 'peticiones')}, sin reintentos`
     );
+
+    if (isMultiSpeaker) {
+      const totalCuts = measuredCuts + interpolatedCuts;
+      reporter.log(
+        `Turnos intercalados: ${totalCuts} ${totalCuts === 1 ? 'frontera' : 'fronteras'} — ` +
+          `${measuredCuts} por silencio medido, ${interpolatedCuts} por reparto proporcional`,
+        interpolatedCuts > measuredCuts ? 'warn' : 'info'
+      );
+
+      if (assignments.length >= 2) {
+        // Diagnóstico, no control de flujo. Cada voz se pidió por separado con
+        // una única voz configurada, así que aquí no hay nada que reparar y no
+        // se gasta ni una petición en mirarlo. Si esto avisa, lo que está
+        // desfasado es la tabla de tonos de `TTS_VOICES`, no el audio.
+        const verdict = checkTwoVoices(audioBytes, assignments[0].pitchHz, assignments[1].pitchHz);
+        reporter.log(`Voces medidas en la pista: ${verdict.reason}`, verdict.ok ? 'info' : 'warn');
+      }
+    }
 
     reporter.start('encode');
     const audioData = bytesToBase64(audioBytes);
@@ -2024,7 +2027,11 @@ export const generateAudio = async (
 
     // Extract meaningful message from API error if possible
     let msg = error.message || "Error desconocido";
-    if (msg.includes("non-audio response") || msg.includes("INVALID_ARGUMENT")) {
+    if (isQuotaError(error)) {
+      msg =
+        "se agotó la cuota del modelo de voz (el nivel gratuito da 10 peticiones al día). " +
+        "El plan de la lección sí se generó; vuelve a intentar el audio más tarde.";
+    } else if (msg.includes("non-audio response") || msg.includes("INVALID_ARGUMENT")) {
       msg = "El modelo de audio rechazó el contenido del diálogo.";
     } else if (msg.includes("timeout") || msg.includes("DEADLINE_EXCEEDED")) {
       msg = "Tiempo de espera agotado. El audio puede ser muy largo, intenta reducir la longitud.";

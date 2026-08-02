@@ -8,15 +8,20 @@
  * formato de prompt anterior, seis turnos y dos nombres distintos volvían
  * leídos con una sola voz en dos de cada tres generaciones.
  *
- * Llama a `generateAudio()` tal cual la usa la app —con su verificación y su
- * reparación dentro— y mide el PCM resultante. Falla si alguna generación
- * termina con una sola voz.
+ * Llama a `generateAudio()` tal cual la usa la app y mide el PCM resultante.
+ * Falla si alguna generación termina con una sola voz **o si gasta más
+ * peticiones de las planificadas**: la garantía ahora viene de pedir cada voz
+ * por separado, así que una repetición inesperada significaría que el coste ha
+ * vuelto a depender de medir y reintentar.
+ *
+ * Es además el único sitio donde el troceador de turnos se ejercita contra
+ * audio de verdad: `check:audio` lo prueba con PCM sintético, pero si el modelo
+ * no deja pausas entre párrafos, se ve aquí (y se oye en los WAV que deja).
  *
  *   GEMINI_API_KEY=... node scripts/check-tts-live.mjs [repeticiones]
  *
  * No forma parte de `npm test`: necesita clave, red y cuota (el nivel gratuito
- * del modelo de voz da unas pocas peticiones al día, y cada repetición gasta
- * al menos una).
+ * del modelo de voz da 10 peticiones al día, y cada repetición gasta dos).
  */
 
 import { build } from 'esbuild';
@@ -57,7 +62,8 @@ async function loadModule(entry) {
   }
 }
 
-const { generateAudio, assignSpeakerVoices } = await loadModule('services/geminiService.ts');
+const { generateAudio, assignSpeakerVoices, planAudioRequests } =
+  await loadModule('services/geminiService.ts');
 const { checkTwoVoices } = await loadModule('services/ttsVoiceCheck.ts');
 const { Accent } = await loadModule('types.ts');
 
@@ -119,6 +125,14 @@ const brief = message => {
   return message.replace(/\s+/g, ' ').slice(0, 160);
 };
 
+// El coste se sabe antes de gastar nada: es el punto del diseño.
+const planned = planAudioRequests(dialogue, CASES[0].characters, Accent.Madrid).requests.length;
+console.log(
+  `Coste previsto: ${planned} peticiones por generación × ${repetitions} repeticiones × ` +
+    `${CASES.length} casos = ${planned * repetitions * CASES.length} peticiones ` +
+    `(el nivel gratuito da 10 al día).`
+);
+
 for (const { label, characters } of CASES) {
   const [a, b] = assignSpeakerVoices(['Lucía', 'Andrés'], characters);
   const gap = Math.abs(12 * Math.log2(a.pitchHz / b.pitchHz));
@@ -130,9 +144,17 @@ for (const { label, characters } of CASES) {
   for (let i = 1; i <= repetitions; i++) {
     runs++;
     const started = Date.now();
+    // Las peticiones que la síntesis dice haber hecho, para poder afirmar que
+    // no hubo ninguna de reparación por detrás.
+    let spent = 0;
+    const watch = snapshot => {
+      const made = snapshot?.steps?.find(s => s.id === 'synthesis')?.metrics?.ttsRequestsDone;
+      if (typeof made === 'number') spent = Math.max(spent, made);
+    };
+
     let base64;
     try {
-      base64 = await generateAudio(dialogue, characters, Accent.Madrid);
+      base64 = await generateAudio(dialogue, characters, Accent.Madrid, watch);
     } catch (error) {
       errors.push(`[${label}] intento ${i}: ${brief(error.message)}`);
       console.log(`  ${i}. ERROR ${brief(error.message)}`);
@@ -145,8 +167,16 @@ for (const { label, characters } of CASES) {
     await writeFile(file, wav(pcm));
 
     const seconds = ((Date.now() - started) / 1000).toFixed(0);
-    console.log(`  ${i}. ${verdict.ok ? 'ok  ' : 'FALLA'} ${verdict.reason} · ${seconds} s · ${file}`);
+    console.log(
+      `  ${i}. ${verdict.ok ? 'ok  ' : 'FALLA'} ${verdict.reason} · ` +
+        `${spent}/${planned} peticiones · ${seconds} s · ${file}`
+    );
     if (!verdict.ok) failures.push(`[${label}] intento ${i}: ${verdict.reason}`);
+    if (spent > planned) {
+      failures.push(
+        `[${label}] intento ${i}: gastó ${spent} peticiones y estaban planificadas ${planned}`
+      );
+    }
   }
 }
 
