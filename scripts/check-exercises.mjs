@@ -684,6 +684,123 @@ if (notEmail) {
 }
 
 // ---------------------------------------------------------------------------
+// 6a bis. EL DATO ENTERO, se dicte como se dicte
+// ---------------------------------------------------------------------------
+// El fallo que motivó esta tanda: una lección de "dar un número de teléfono"
+// donde la respuesta "correcta" eran las primeras cifras del número y el número
+// completo se daba por incorrecto. El dato salía cortado por tres sitios
+// distintos, y ninguno de los tres tenía nada que lo detectara:
+//
+//   - el prompt del nivel pide dictar cifra a cifra ("6-5-4…") y esa forma no
+//     encajaba en el cosechador de cifras, así que el motor no encontraba nada y
+//     el slot caía en el ejercicio del modelo, cuya clave sólo tenía que oírse de
+//     corrido — y un prefijo del número se oye de corrido;
+//   - el cosechador admitía como mucho cinco bloques, de modo que un número más
+//     largo se recortaba solo;
+//   - un número escrito medio en cifras y medio en palabras lo veían a medias dos
+//     cosechadores distintos y ganaba la mitad.
+
+// said → el dato entero que hay que pedir → lo que teclearía quien lo anotó bien.
+const WHOLE_PHONE = [
+  ['dictado cifra a cifra con guiones', 'Apunte: 6-5-4-3-2-1-8-7-9.', '6-5-4-3-2-1-8-7-9', '654321879'],
+  ['dictado cifra a cifra con espacios', 'Apunte: 6 5 4 3 2 1 8 7 9.', '6 5 4 3 2 1 8 7 9', '654321879'],
+  ['dictado cifra a cifra con comas', 'Apunte: 6, 5, 4, 3, 2, 1, 8, 7, 9.', '6, 5, 4, 3, 2, 1, 8, 7, 9', '654 32 18 79'],
+  ['seis bloques de cifras', 'Es el 65-43-21-87-96-12.', '65-43-21-87-96-12', '654321879612'],
+  ['bloques de cifras y palabras', 'Es el 654, treinta y dos, dieciocho.', '654, treinta y dos, dieciocho', '654 32 18'],
+  [
+    'numerales de corrido',
+    'Sí, apunte: seis cinco cuatro tres dos uno ocho siete nueve.',
+    'seis cinco cuatro tres dos uno ocho siete nueve',
+    '654 32 18 79'
+  ]
+];
+
+for (const [name, said, datum, written] of WHOLE_PHONE) {
+  const dialogue = [
+    { speaker: 'Empleada', text: '¿Me deja un teléfono de contacto?' },
+    { speaker: 'Cliente', text: said }
+  ];
+  const made = buildDictation(dialogue, 'phone');
+  check(!!made, `${name}: debería producir un dictado`);
+  if (!made) continue;
+  check(
+    datumOf(made) === datum,
+    `${name}: el dato debería ser el teléfono entero "${datum}" (es: "${datumOf(made)}")`
+  );
+  check(
+    verifyExercise(made, buildTranscriptIndex(dialogue)).ok,
+    `${name}: el dictado no verifica: ${verifyExercise(made, buildTranscriptIndex(dialogue)).reason}`
+  );
+  // Y lo que se le corrige al alumno es el número entero: quien lo anota
+  // completo acierta, y a quien le falta una cifra no.
+  check(
+    matchesDatum(written, [datumOf(made)], 'phone'),
+    `${name}: "${written}" —el número completo— debería darse por bueno`
+  );
+  check(
+    !matchesDatum(written.replace(/\d(?=\D*$)/, ''), [datumOf(made)], 'phone'),
+    `${name}: el número al que le falta una cifra no debería darse por bueno`
+  );
+}
+
+// Un dictado interrumpido a media cifra no tiene dato entero que pedir. Antes se
+// pedía el trozo anterior a la rectificación, que es exactamente la respuesta
+// "correcta" que da por mala la respuesta buena.
+const INTERRUPTED_PHONE = [
+  { speaker: 'Empleada', text: '¿Me deja un teléfono de contacto?' },
+  { speaker: 'Cliente', text: 'Es el seis, cinco, cuatro... perdón, treinta y dos, dieciocho.' }
+];
+const interrupted = buildDictation(INTERRUPTED_PHONE, 'phone');
+check(
+  !interrupted,
+  `un teléfono partido por una rectificación no debería pedirse a medias (salió: "${datumOf(interrupted)}")`
+);
+
+// Y el verificador rechaza el trozo venga de donde venga: es la comprobación que
+// faltaba, porque "se oye de corrido" es justo lo que cumple un prefijo.
+const TRUNCATED_KEYS = [
+  ['prefijo en palabras', 'seis cinco cuatro'],
+  ['prefijo en palabras hasta media cifra', 'seis cinco cuatro treinta y dos'],
+  ['cola en palabras', 'treinta y dos dieciocho']
+];
+const spokenIndex = buildTranscriptIndex(SPOKEN_PHONE);
+for (const [name, expected] of TRUNCATED_KEYS) {
+  const verdict = verifyExercise(
+    { type: 'dictation', question: 'Escribí el teléfono', expected, dataKind: 'phone', correctAnswer: expected, explanation: '' },
+    spokenIndex
+  );
+  check(!verdict.ok, `debería rechazarse el dictado truncado (${name}: "${expected}")`);
+}
+check(
+  verifyExercise(
+    {
+      type: 'dictation',
+      question: 'Escribí el teléfono',
+      expected: 'seis cinco cuatro treinta y dos dieciocho',
+      dataKind: 'phone',
+      correctAnswer: 'seis cinco cuatro treinta y dos dieciocho',
+      explanation: ''
+    },
+    spokenIndex
+  ).ok,
+  'el teléfono entero sí debería aceptarse'
+);
+
+// Un dato completo seguido de otro dato en la misma frase no es un dato cortado:
+// sin esto, la comprobación anterior se llevaría por delante media lección.
+const TWO_DATA = [
+  { speaker: 'Cajera', text: 'Son catorce con noventa, y cerramos a las 20:30.' },
+  { speaker: 'Cliente', text: 'Perfecto, muchas gracias.' }
+];
+check(
+  verifyExercise(
+    { type: 'dictation', question: 'Escribí el precio', expected: 'catorce con noventa', dataKind: 'price', correctAnswer: 'catorce con noventa', explanation: '' },
+    buildTranscriptIndex(TWO_DATA)
+  ).ok,
+  'un precio seguido de una hora no debería leerse como un precio cortado'
+);
+
+// ---------------------------------------------------------------------------
 // 6b. La corrección: se corrige lo que se OYÓ, no cómo se escribe
 // ---------------------------------------------------------------------------
 // Es el contrato del formato. Sin él, pedir que se escriba el dato sería más
@@ -695,6 +812,11 @@ const ACCEPTS = [
   ['phone', 'seis cinco cuatro treinta y dos dieciocho', '6543218'],
   ['phone', 'seis cinco cuatro treinta y dos dieciocho', '654-32-18'],
   ['phone', '654 32 18', 'seis cinco cuatro treinta y dos dieciocho'],
+  // Con comas por medio, en el dato y en lo que teclea el alumno: la coma que no
+  // lleva cifra detrás separa piezas, no forma parte de ninguna.
+  ['phone', '654, treinta y dos, dieciocho', '654 32 18'],
+  ['phone', 'seis cinco cuatro treinta y dos dieciocho', '654, 32, 18'],
+  ['phone', '6, 5, 4, 3, 2, 1, 8, 7, 9', '654321879'],
   ['price', 'catorce con noventa', '14,90'],
   ['price', 'catorce con noventa', '14.90'],
   ['price', 'catorce con noventa', '14 con 90'],
@@ -721,6 +843,7 @@ const REJECTS = [
   ['phone', 'seis cinco cuatro treinta y dos dieciocho', '654 32'],
   ['phone', 'seis cinco cuatro treinta y dos dieciocho', 'seis cinco cuatro treinta y dos'],
   ['phone', 'seis cinco cuatro treinta y dos dieciocho', '654 42 18'],
+  ['phone', '654, treinta y dos, dieciocho', '654 32'],
   ['price', 'catorce con noventa', '14,50'],
   ['price', 'catorce con noventa', '40,90'],
   ['price', 'catorce con noventa', '14'],

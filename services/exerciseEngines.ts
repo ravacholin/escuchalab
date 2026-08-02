@@ -256,17 +256,47 @@ const LETTER_CONFUSIONS: Record<string, string> = {
 // alternativa. El dictado ya no ofrece alternativas — el dato se escribe — y
 // nadie más las usaba.
 
+/** Un token del turno, con el sitio exacto que ocupa en él. */
+interface SpannedToken {
+  text: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Tokens con su posición dentro del turno. Las posiciones importan porque son lo
+ * único que permite saber si dos tramos hallados por cosechadores distintos son
+ * en realidad partes del MISMO dato dictado.
+ */
+function tokensWithSpans(text: string): SpannedToken[] {
+  const out: SpannedToken[] = [];
+  const pattern = /\S+/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text || '')) !== null) {
+    out.push({ text: match[0], start: match.index, end: match.index + match[0].length });
+  }
+  return out;
+}
+
+/** Tramo de numerales localizado dentro de su turno. */
+interface SpokenRun {
+  value: string;
+  lineIndex: number;
+  start: number;
+  end: number;
+}
+
 /**
  * Secuencias de numerales dichas de corrido: un teléfono dictado cifra a cifra,
  * un código, un precio con decimales. Se devuelve el tramo ORIGINAL, que es el
- * que verá el alumno.
+ * que verá el alumno, junto con el sitio que ocupa en el turno.
  */
-function spokenNumberRuns(dialogue: DialogueLine[]): { value: string; lineIndex: number }[] {
-  const out: { value: string; lineIndex: number }[] = [];
+function spokenNumberRuns(dialogue: DialogueLine[]): SpokenRun[] {
+  const out: SpokenRun[] = [];
 
   (dialogue || []).forEach((line, lineIndex) => {
-    const tokens = splitTokens(line.text || '');
-    let run: string[] = [];
+    const tokens = tokensWithSpans(line.text || '');
+    let run: SpannedToken[] = [];
     let numerals = 0;
     let glued = false;
 
@@ -275,11 +305,16 @@ function spokenNumberRuns(dialogue: DialogueLine[]): { value: string; lineIndex:
 
     const flush = () => {
       // Se recorta la cola: un tramo no puede terminar en "y", "con" ni "menos".
-      while (run.length > 0 && !isPiece(normalizeText(stripEdges(run[run.length - 1])))) {
+      while (run.length > 0 && !isPiece(normalizeText(stripEdges(run[run.length - 1].text)))) {
         run.pop();
       }
       if (numerals >= 3 || (numerals >= 2 && glued)) {
-        out.push({ value: run.join(' '), lineIndex });
+        out.push({
+          value: run.map(t => stripEdges(t.text)).join(' '),
+          lineIndex,
+          start: run[0].start,
+          end: run[run.length - 1].end
+        });
       }
       run = [];
       numerals = 0;
@@ -287,13 +322,14 @@ function spokenNumberRuns(dialogue: DialogueLine[]): { value: string; lineIndex:
     };
 
     tokens.forEach((token, i) => {
-      const word = normalizeText(stripEdges(token));
+      const word = normalizeText(stripEdges(token.text));
       // "media" y "cuarto" sólo cuentan detrás del nexo de una hora: fuera de
       // ahí son sustantivos corrientes ("media hora", "el cuarto de baño").
-      const afterGlue = run.length > 0 && NUMBER_GLUE.has(normalizeText(stripEdges(run[run.length - 1])));
+      const afterGlue =
+        run.length > 0 && NUMBER_GLUE.has(normalizeText(stripEdges(run[run.length - 1].text)));
 
       if (NUMBER_LEXICON.has(word) || (MINUTE_WORDS.has(word) && afterGlue)) {
-        run.push(stripEdges(token));
+        run.push(token);
         numerals += 1;
         if (MINUTE_WORDS.has(word)) glued = true;
         return;
@@ -301,12 +337,12 @@ function spokenNumberRuns(dialogue: DialogueLine[]): { value: string; lineIndex:
 
       if (NUMBER_GLUE.has(word) && run.length > 0) {
         // "menos" sólo une si lo que viene detrás es una fracción de hora.
-        const next = normalizeText(stripEdges(tokens[i + 1] || ''));
+        const next = normalizeText(stripEdges(tokens[i + 1]?.text || ''));
         if (word === 'menos' && !MINUTE_WORDS.has(next)) {
           flush();
           return;
         }
-        run.push(stripEdges(token));
+        run.push(token);
         if (word === 'con') glued = true;
         return;
       }
@@ -501,7 +537,31 @@ const minimalPairs: Engine = (dialogue, slot, index) => {
 // La primera alternativa agrupa los bloques de un teléfono escrito con cifras
 // ("654 32 18"): sin ella se leían como tres datos sueltos y la ficha pedía
 // "Número", "Número 2" y "Número 3" en vez de un único campo "Teléfono".
-const DIGIT_LITERAL = /\b\d{2,4}(?:[ -]\d{1,4}){1,4}\b|\b\d{1,4}(?:[.,:]\d{1,2})?\b|\b\d{5,}\b/g;
+//
+// Esa alternativa tenía DOS TOPES que partían el dato justo por donde no hay que
+// partirlo, y los dos daban el mismo resultado: media cifra como respuesta
+// "correcta".
+//
+//  - Exigía 2-4 dígitos en el PRIMER bloque, así que un teléfono dictado como lo
+//    pide el prompt del nivel —cifra a cifra, "6-5-4-3-2-1-8-7-9"— no encajaba en
+//    ninguna posición y el motor se quedaba sin material. El slot caía entonces
+//    en el ejercicio del modelo, cuya clave sólo tenía que oírse de corrido… y un
+//    prefijo del número también se oye de corrido.
+//  - Admitía como mucho cinco bloques (`{1,4}`), de modo que "65-43-21-87-96-12"
+//    se recortaba en "65-43-21-87-96" sin que nada lo notara: al no existir un
+//    candidato más largo, el filtro de fragmentos no tenía con qué compararlo.
+//
+// Ahora la secuencia no tiene tope y admite bloques de un solo dígito separados
+// por espacio, guion o coma+espacio. La coma SIN espacio se queda para el
+// decimal, que es lo que distingue "14,90" (un precio) de "6, 5, 4" (una cifra
+// dictada de una en una).
+const DIGIT_CLOCK = String.raw`\d{1,2}:\d{2}`;
+const DIGIT_DECIMAL = String.raw`\d{1,4}[.,]\d{1,2}`;
+const DIGIT_SEQUENCE = String.raw`\d{1,4}(?:(?:[ \-]|,[ ])\d{1,4})+`;
+const DIGIT_LITERAL = new RegExp(
+  String.raw`\b(?:${DIGIT_CLOCK}|${DIGIT_DECIMAL}|${DIGIT_SEQUENCE}|\d+)\b`,
+  'g'
+);
 
 function labelFor(literal: string, focus?: DataPointKind): string {
   // Si el syllabus dijo de qué dato va la lección, manda el syllabus: es la
@@ -588,9 +648,9 @@ function spelledNearMisses(literal: string): string[] {
   return out;
 }
 
-/** Alternativas de un teléfono en cifras agrupadas ("654 32 18"). */
+/** Alternativas de un teléfono en cifras agrupadas ("654 32 18", "6, 5, 4"). */
 function groupedNearMisses(literal: string): string[] {
-  const parts = literal.split(/([ -])/);
+  const parts = literal.split(/([ ,-]+)/);
   const groups = parts.map((p, i) => ({ p, i })).filter(g => /^\d+$/.test(g.p));
   const out: string[] = [];
 
@@ -758,6 +818,14 @@ interface DictationRun {
   /** Pieza fija que va ANTES de `pieces[i]`; `separators[0]` siempre es ''. */
   separators: string[];
   lineIndex: number;
+  /** Dónde empieza y acaba el tramo dentro del turno, para poder compararlos. */
+  start: number;
+  end: number;
+  /**
+   * El tramo tal cual está escrito en el turno. Se usa cuando reconstruirlo pieza
+   * a pieza lo afearía: "65-43-21" se anota así y no como "65 - 43 - 21".
+   */
+  text?: string;
 }
 
 // `CLEAR_LETTER_NAMES`, `AMBIGUOUS_LETTER_NAMES`, `ADDRESS_GLUE` e
@@ -771,7 +839,8 @@ interface DictationRun {
  * PEGA ("treinta y dos" es una pieza, que es como se anota), y "con", "menos" o
  * el "y" de una hora SEPARAN, porque son dos cifras que se oyen por separado.
  */
-function segmentSpokenRun(value: string, lineIndex: number): DictationRun | null {
+function segmentSpokenRun(run: SpokenRun): DictationRun | null {
+  const { value, lineIndex } = run;
   const tokens = splitTokens(value);
   const keys = tokens.map(t => normalizeText(stripEdges(t)));
 
@@ -799,18 +868,26 @@ function segmentSpokenRun(value: string, lineIndex: number): DictationRun | null
     pendingGlue = '';
   }
 
-  return pieces.length >= 2 ? { pieces, separators, lineIndex } : null;
+  return pieces.length >= 2
+    ? { pieces, separators, lineIndex, start: run.start, end: run.end }
+    : null;
 }
 
-/** Datos escritos con cifras: "654 32 18", "14,95", "8:15". */
-function segmentDigitLiteral(value: string, lineIndex: number): DictationRun | null {
-  const parts = value.split(/([ \-,.:])/).filter(p => p !== '');
+/**
+ * Datos escritos con cifras: "654 32 18", "14,95", "8:15", "6-5-4-3-2".
+ *
+ * El dato se conserva TAL CUAL está escrito (`text`): recomponerlo desde las
+ * piezas convertía "65-43-21" en "65 - 43 - 21", que es el dato correcto escrito
+ * de una forma que nadie anotaría.
+ */
+function segmentDigitLiteral(value: string, lineIndex: number, start: number): DictationRun | null {
+  const parts = value.split(/([ \-,.:]+)/).filter(p => p !== '');
   const pieces: string[] = [];
   const separators: string[] = [];
   let pendingGlue = '';
 
   for (const part of parts) {
-    if (/^[ \-,.:]$/.test(part)) {
+    if (/^[ \-,.:]+$/.test(part)) {
       pendingGlue = part.trim();
       continue;
     }
@@ -819,14 +896,26 @@ function segmentDigitLiteral(value: string, lineIndex: number): DictationRun | n
     pendingGlue = '';
   }
 
-  return pieces.length >= 2 ? { pieces, separators, lineIndex } : null;
+  // Una cifra suelta ("el 654") no es un dictado por sí misma, pero sí puede ser
+  // la primera mitad de uno: se devuelve para que el reensamblado la vea, y es la
+  // elección final la que exige dos piezas.
+  return pieces.length >= 1
+    ? { pieces, separators, lineIndex, start, end: start + value.length, text: value }
+    : null;
 }
 
 /** Nombre deletreado, tal como lo escribe el modelo: "G-A-R-C-Í-A". */
-function segmentSpelledLiteral(value: string, lineIndex: number): DictationRun | null {
+function segmentSpelledLiteral(value: string, lineIndex: number, start: number): DictationRun | null {
   const pieces = value.split(/[-.·]/).filter(Boolean);
   if (pieces.length < 3) return null;
-  return { pieces, separators: pieces.map(() => ''), lineIndex };
+  return {
+    pieces,
+    separators: pieces.map(() => ''),
+    lineIndex,
+    start,
+    end: start + value.length,
+    text: value
+  };
 }
 
 /**
@@ -840,9 +929,10 @@ function spokenSpellingRuns(dialogue: DialogueLine[]): DictationRun[] {
   const out: DictationRun[] = [];
 
   (dialogue || []).forEach((line, lineIndex) => {
-    const tokens = splitTokens(line.text || '');
+    const tokens = tokensWithSpans(line.text || '');
     let pieces: string[] = [];
     let separators: string[] = [];
+    let spans: SpannedToken[] = [];
     let clear = 0;
     let hasAddressGlue = false;
     let pendingGlue: string[] = [];
@@ -853,21 +943,28 @@ function spokenSpellingRuns(dialogue: DialogueLine[]): DictationRun[] {
       // piezas unidas por un nexo, y no es ni una cosa ni la otra.
       const isAddress = hasAddressGlue && separators.some(s => normalizeText(s).includes('arroba'));
       if (pieces.length >= 4 && (clear >= 2 || isAddress)) {
-        out.push({ pieces: [...pieces], separators: [...separators], lineIndex });
+        out.push({
+          pieces: [...pieces],
+          separators: [...separators],
+          lineIndex,
+          start: spans[0].start,
+          end: spans[spans.length - 1].end
+        });
       }
       pieces = [];
       separators = [];
+      spans = [];
       clear = 0;
       hasAddressGlue = false;
       pendingGlue = [];
     };
 
     tokens.forEach((token, i) => {
-      const word = normalizeText(stripEdges(token));
+      const word = normalizeText(stripEdges(token.text));
 
       if (ADDRESS_GLUE.has(word)) {
         if (pieces.length > 0) {
-          pendingGlue.push(stripEdges(token));
+          pendingGlue.push(stripEdges(token.text));
           hasAddressGlue = true;
         }
         return;
@@ -878,7 +975,7 @@ function spokenSpellingRuns(dialogue: DialogueLine[]): DictationRun[] {
       // ABRE la dirección si el nexo viene justo detrás: sin esta mirada
       // adelante, el "ana" de "ana arroba correo punto com" se perdía y la
       // dirección empezaba a contarse a partir del arroba.
-      const nextIsGlue = ADDRESS_GLUE.has(normalizeText(stripEdges(tokens[i + 1] || '')));
+      const nextIsGlue = ADDRESS_GLUE.has(normalizeText(stripEdges(tokens[i + 1]?.text || '')));
       const acceptable =
         isLetterName(word) || ((pendingGlue.length > 0 || nextIsGlue) && word.length >= 2);
       if (!acceptable) {
@@ -886,8 +983,9 @@ function spokenSpellingRuns(dialogue: DialogueLine[]): DictationRun[] {
         return;
       }
 
-      pieces.push(stripEdges(token));
+      pieces.push(stripEdges(token.text));
       separators.push(pieces.length === 1 ? '' : pendingGlue.join(' '));
+      spans.push(token);
       if (CLEAR_LETTER_NAMES.has(word)) clear += 1;
       pendingGlue = [];
     });
@@ -900,63 +998,129 @@ function spokenSpellingRuns(dialogue: DialogueLine[]): DictationRun[] {
 
 /** El dato entero, con sus piezas fijas y su ortografía real. */
 function joinRun(run: DictationRun): string {
+  if (run.text) return run.text;
   return run.pieces.map((p, i) => [run.separators[i], p].filter(Boolean).join(' ')).join(' ');
+}
+
+/**
+ * ¿Estos dos tramos son en realidad un solo dato dictado?
+ *
+ * Lo son cuando entre uno y otro no se dice NADA: sólo separadores, como en "el
+ * 654, treinta y dos, dieciocho", que el cosechador de cifras y el de numerales
+ * se reparten a medias y ninguno ve entero. Si en medio hay una palabra —"perdón",
+ * "y luego"— no se unen: el dato resultante ya no se oiría de corrido y lo que se
+ * pide anotar tiene que ser exactamente lo que suena.
+ */
+function isBridgeable(line: string, left: DictationRun, right: DictationRun): boolean {
+  if (left.lineIndex !== right.lineIndex || right.start < left.end) return false;
+  const gap = line.slice(left.end, right.start);
+  if (gap.length > 4) return false;
+  return !/[\p{L}\p{N}]/u.test(gap);
+}
+
+/** Une los tramos contiguos de un turno en el dato completo que forman. */
+function mergeRuns(line: string, left: DictationRun, right: DictationRun): DictationRun {
+  return {
+    pieces: [...left.pieces, ...right.pieces],
+    separators: [...left.separators, '', ...right.separators.slice(1)],
+    lineIndex: left.lineIndex,
+    start: left.start,
+    end: right.end,
+    // El dato se toma del turno, con el separador que de verdad lleva dentro:
+    // así sigue oyéndose de corrido y sigue siendo verificable contra el audio.
+    // Se le quita la puntuación de los bordes, que es del turno y no del dato.
+    text: line.slice(left.start, right.end).replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '')
+  };
 }
 
 const dictation: Engine = (dialogue, slot) => {
   const focus = slot.focus && slot.focus !== 'generic' ? slot.focus : undefined;
+  const lines = dialogue || [];
   const candidates: DictationRun[] = [];
 
-  for (const run of spokenNumberRuns(dialogue)) {
-    const segmented = segmentSpokenRun(run.value, run.lineIndex);
+  for (const run of spokenNumberRuns(lines)) {
+    const segmented = segmentSpokenRun(run);
     if (segmented) candidates.push(segmented);
   }
-  candidates.push(...spokenSpellingRuns(dialogue));
-  (dialogue || []).forEach((line, lineIndex) => {
-    for (const match of (line.text || '').match(SPELLED_RUN) || []) {
-      const segmented = segmentSpelledLiteral(match, lineIndex);
+  candidates.push(...spokenSpellingRuns(lines));
+  lines.forEach((line, lineIndex) => {
+    const text = line.text || '';
+    for (const match of text.matchAll(SPELLED_RUN)) {
+      const segmented = segmentSpelledLiteral(match[0], lineIndex, match.index ?? 0);
       if (segmented) candidates.push(segmented);
     }
-    for (const match of (line.text || '').match(DIGIT_LITERAL) || []) {
-      const segmented = segmentDigitLiteral(match, lineIndex);
+    for (const match of text.matchAll(DIGIT_LITERAL)) {
+      const segmented = segmentDigitLiteral(match[0], lineIndex, match.index ?? 0);
       if (segmented) candidates.push(segmented);
     }
   });
 
   if (candidates.length === 0) return null;
 
-  // Los cosechadores se solapan a propósito: `DIGIT_LITERAL` pesca "654" dentro
-  // del "654 32 18" que ya pescó su primera alternativa. Un fragmento del dato
-  // NO es el dato —pedirle al alumno media cifra es peor que no preguntarle
-  // nada—, así que todo candidato contenido en otro del mismo turno se descarta
-  // antes de rankear.
-  const seen = new Set<string>();
-  const whole = candidates.filter(run => {
-    const text = normalizeText(joinRun(run));
-    if (!text || seen.has(text)) return false;
-    const contained = candidates.some(other => {
-      if (other === run || other.lineIndex !== run.lineIndex) return false;
-      const outer = normalizeText(joinRun(other));
-      return outer.length > text.length && outer.includes(text);
-    });
-    if (contained) return false;
-    seen.add(text);
-    return true;
-  });
+  // Los cosechadores se solapan y se reparten el dato a propósito, así que antes
+  // de elegir hay que recomponerlo. Un fragmento NO es el dato —pedirle al alumno
+  // media cifra es peor que no preguntarle nada—, y aquí se juntan las dos formas
+  // en que aparecía partido:
+  //
+  //  - `DIGIT_LITERAL` pesca "654" dentro del "654 32 18" que ya pescó su primera
+  //    alternativa: el tramo contenido en otro del mismo turno se descarta.
+  //  - "el 654, treinta y dos, dieciocho" lo ven a medias dos cosechadores
+  //    distintos, y ninguno de los dos trozos es el teléfono: se unen.
+  //
+  // Se compara por POSICIÓN y no por texto, que es lo que permite ver que dos
+  // tramos escritos de formas distintas ocupan el mismo sitio del turno.
+  const byLine = new Map<number, DictationRun[]>();
+  for (const run of candidates) {
+    const list = byLine.get(run.lineIndex) || [];
+    list.push(run);
+    byLine.set(run.lineIndex, list);
+  }
+
+  const whole: DictationRun[] = [];
+  for (const [lineIndex, runs] of byLine) {
+    const text = lines[lineIndex]?.text || '';
+
+    // Los tramos que otro tramo del mismo turno ya contiene no aportan nada.
+    const maximal = runs
+      .filter(run => !runs.some(o => o !== run && o.start <= run.start && o.end >= run.end && o.end - o.start > run.end - run.start))
+      .sort((a, b) => a.start - b.start || b.end - a.end);
+
+    // Y lo que queda se une mientras sea contiguo, de izquierda a derecha. Sólo
+    // se unen trozos INCOMPLETOS: si el de la derecha ya es un dato entero por sí
+    // mismo, son dos datos seguidos ("quedan 3, son 14,95") y no uno partido.
+    const complete = (run: DictationRun) => !!focus && isFocusLiteral(joinRun(run), focus);
+    const joined: DictationRun[] = [];
+    for (const run of maximal) {
+      const previous = joined[joined.length - 1];
+      if (previous && previous.end >= run.end) continue;
+      if (previous && focus && !complete(previous) && !complete(run) && isBridgeable(text, previous, run)) {
+        joined[joined.length - 1] = mergeRuns(text, previous, run);
+        continue;
+      }
+      joined.push(run);
+    }
+    whole.push(...joined);
+  }
 
   // Con foco declarado manda el dato que la consigna anunció; si no lo hay, el
   // tramo más largo, que es el que más tiene que anotar el alumno.
-  const ranked = [...whole].sort((a, b) => {
+  const ranked = whole.filter(run => run.pieces.length >= 2).sort((a, b) => {
     if (focus) {
       const fa = isFocusLiteral(joinRun(a), focus) ? 0 : 1;
       const fb = isFocusLiteral(joinRun(b), focus) ? 0 : 1;
       if (fa !== fb) return fa - fb;
     }
-    return b.pieces.length - a.pieces.length;
+    return b.pieces.length - a.pieces.length || joinRun(b).length - joinRun(a).length;
   });
 
   const run = ranked[0];
   if (!run) return null;
+
+  // Si la lección anunció un teléfono y en el audio no hay un teléfono entero,
+  // no se pide "lo más parecido que haya": el trozo más largo de un número es
+  // justo la respuesta "correcta" que da por mala la respuesta buena de quien
+  // anotó el número completo. Se prefiere quedarse sin ejercicio.
+  if (focus && !isFocusLiteral(joinRun(run), focus)) return null;
 
   const expected = joinRun(run);
   const dataKind = focus ?? inferKindFromLiteral(expected);

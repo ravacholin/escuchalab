@@ -1,12 +1,23 @@
 import { DialogueLine, Exercise, ExerciseOption, ExerciseType } from '@/types';
 import { normalizeExerciseAnswers } from './exerciseNormalization';
-import { canonicalDatum, inferKindFromLiteral } from './answerMatching';
+import {
+  ADDRESS_GLUE,
+  canonicalDatum,
+  CLEAR_LETTER_NAMES,
+  inferKindFromLiteral,
+  isLetterName,
+  MINUTE_WORDS,
+  NUMBER_GLUE,
+  NUMBER_LEXICON,
+  SPELLED_TEST
+} from './answerMatching';
 import {
   buildTranscriptIndex,
   contentWords,
   heardRatio,
   isHeard,
   normalizeText,
+  splitTokens,
   TranscriptIndex
 } from './textUtils';
 
@@ -359,6 +370,105 @@ function verifyFieldBased(ex: Exercise, index: TranscriptIndex): VerificationRes
 }
 
 /**
+ * Piezas de las que se compone un dato dictado. Sirven para saber si lo que se
+ * pide anotar acaba donde acaba el dato o se corta en mitad de él.
+ *
+ * El repertorio depende del dato: en uno numérico, otra cifra pegada detrás
+ * significa que falta trozo; en un deletreo, otro nombre de letra. Y no se mezclan,
+ * porque los nombres de letra ("de", "a", "e") son palabras corrientes y darían
+ * por truncado cualquier número seguido de la preposición "de".
+ */
+function datumPieceTest(expected: string): (word: string) => boolean {
+  const words = splitTokens(expected).map(normalizeText);
+  const spelled =
+    SPELLED_TEST.test(expected) ||
+    words.some(w => ADDRESS_GLUE.has(w)) ||
+    words.filter(w => CLEAR_LETTER_NAMES.has(w)).length >= 2;
+
+  if (spelled) return (word: string) => isLetterName(word) || ADDRESS_GLUE.has(word);
+  return (word: string) => /^\d+$/.test(word) || NUMBER_LEXICON.has(word) || MINUTE_WORDS.has(word);
+}
+
+/**
+ * Marcas de rectificación. Quien dicta un teléfono se equivoca y se corrige
+ * ("seis, cinco, cuatro… perdón, treinta y dos, dieciocho"), y lo que queda a un
+ * lado de la rectificación no es el número: es la mitad del número. La lista es
+ * cerrada a propósito — cualquier palabra que se dejara saltar aquí acabaría
+ * uniendo dos datos distintos de la misma frase ("las cinco y media, y son
+ * catorce con noventa").
+ */
+const REPAIR_WORDS = new Set([
+  'perdon', 'perdona', 'perdone', 'disculpa', 'disculpe', 'digo', 'eh', 'espera',
+  'espere', 'mejor', 'no', 'ay', 'uy'
+]);
+
+/**
+ * ¿El dato se oye ENTERO, o lo que se pide anotar es un trozo de otro más largo?
+ *
+ * Es la comprobación que faltaba y por la que un alumno podía anotar bien un
+ * teléfono de nueve cifras y que se le diera por incorrecto: la clave eran las
+ * cinco primeras. Un prefijo de un dato dictado también "se oye de corrido" —esa
+ * es justamente la propiedad de un prefijo—, así que con la comprobación
+ * anterior no había forma de distinguirlos.
+ *
+ * Se mira turno a turno, sobre el texto original: si pegada al tramo, antes o
+ * después, hay otra pieza del mismo dato (con su nexo por medio si lo lleva:
+ * "…noventa **y** cinco"), entonces esa aparición está cortada. Basta con que
+ * UNA aparición esté completa. El final de una oración corta el dato, de modo que
+ * el número de la frase siguiente no cuenta como continuación.
+ */
+function isDatumHeardWhole(index: TranscriptIndex, expected: string): boolean {
+  const needle = normalizeText(expected).split(' ').filter(Boolean);
+  if (needle.length === 0) return false;
+
+  const isPiece = datumPieceTest(expected);
+  const isGlue = (word: string) => NUMBER_GLUE.has(word) || ADDRESS_GLUE.has(word);
+
+  for (const line of index.lines || []) {
+    // Un token puede valer por varias palabras normalizadas ("6-5-4" → "6 5 4"),
+    // así que se aplana; el corte de oración se hereda del token que lo lleva.
+    const words: string[] = [];
+    const stops: boolean[] = [];
+    for (const token of splitTokens(line.text || '')) {
+      const parts = normalizeText(token).split(' ').filter(Boolean);
+      if (parts.length === 0) continue;
+      const stop = /[.!?;]$/.test(token.replace(/\.{2,}$|…$/, ''));
+      parts.forEach((part, i) => {
+        words.push(part);
+        stops.push(i === parts.length - 1 ? stop : false);
+      });
+    }
+
+    for (let i = 0; i + needle.length <= words.length; i++) {
+      if (needle.some((word, k) => words[i + k] !== word)) continue;
+
+      const end = i + needle.length - 1;
+      /**
+       * ¿Sigue el dato por aquí? Se saltan el nexo y la rectificación que pueda
+       * haber en medio; cualquier otra palabra cierra el dato.
+       */
+      const continues = (from: number, step: number) => {
+        for (let j = from; j >= 0 && j < words.length; j += step) {
+          if (isGlue(words[j]) || REPAIR_WORDS.has(words[j])) {
+            // Un nexo en el que acaba la oración no une nada con lo siguiente.
+            if (step > 0 ? stops[j] : stops[j - 1]) return false;
+            continue;
+          }
+          return isPiece(words[j]);
+        }
+        return false;
+      };
+
+      const cutAfter = !stops[end] && continues(end + 1, 1);
+      const cutBefore = i > 0 && !stops[i - 1] && continues(i - 1, -1);
+      if (!cutAfter && !cutBefore) return true;
+    }
+  }
+
+  return false;
+}
+
+/**
  * `dictation` promete algo más fuerte que la ficha de datos: que el alumno anota
  * EL dato, entero. La ficha se conforma con que la mayoría de sus campos suenen,
  * porque sus campos son datos independientes; aquí hay un solo dato y o está
@@ -377,6 +487,12 @@ function verifyDictation(ex: Exercise, index: TranscriptIndex): VerificationResu
   // formato podría pedir que se anote algo que nadie dictó.
   if (!isHeard(index, expected)) {
     return fail(`el dato ("${expected}") no suena de corrido en ningún turno`);
+  }
+
+  // Y entero: la mitad de un teléfono también se oye de corrido, y darla por
+  // clave es dar por incorrecta la respuesta de quien lo anotó completo.
+  if (!isDatumHeardWhole(index, expected)) {
+    return fail(`el dato ("${expected}") es sólo un trozo de otro más largo que sí se dicta`);
   }
 
   // Una variante que no significa lo mismo que el dato daría por buena una
