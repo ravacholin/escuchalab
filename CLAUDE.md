@@ -531,10 +531,24 @@ The Intro (A0) level uses a unique "realistic immersion" approach:
   - Phone numbers (digit-by-digit dictation)
   - Spelled names/surnames
   - Specific prices with cents
-  - Street addresses with numbers
+  - Postal codes, dictated digit by digit, for an address situation
   - Exact times for appointments
+  - Dates read off a form (day, month, two-digit year)
   - Email addresses (with "arroba", "punto", "guion bajo")
 - The central exercise asks the learner to **write the datum down, whole** (`dictation`), not to pick it out of a shortlist nor to assemble it from dropdowns
+
+**The datum instruction declares the *form*, not only the *what*** — and that is the piece that was missing for a long time. `a0-dato` carries `preferEngine`, so the level's central card is not written by the model: it is **harvested from the transcript by a parser**. The prompt that produces that transcript therefore has to speak the parser's language, and it did not. The two examples `DATA_POINTS` shipped were precisely the two renderings no harvester can read: `"A las 5 y media"` (`NUMBER_LEXICON` is a set of *words*, so `5` never opens a numeral run and `media` never gets its glue; `DIGIT_LITERAL` returns the one-piece `"5"`, which dies in the two-piece filter) and `"14 con 95"` (two one-piece literals whose gap contains letters, so `isBridgeable` refuses to join them). In both cases the engine found nothing and the card vanished — in the lesson that needs it most. Three rules now govern every instruction:
+- **Never mixed.** The whole datum in words or the whole datum in figures. The numeral harvester and the digit harvester split a half-and-half datum between them and neither sees it whole.
+- **Two pieces minimum.** A lone number ("el 45", "a las cinco") is not a dictation and is dropped on purpose — which is why the time asks for its fraction and the price for its cents.
+- **Whole, uninterrupted, in one turn.** `DICTATION_DELIVERY` (`services/geminiService.ts`), shared by A0 and A1-A2. The verifier already demanded it, but the demand lived only in `FORMAT_RULES.dictation.guidance`, which governs whoever writes the *exercises* — while the dialogue block asked for a script "100% NATURAL y FLUIDO", which is exactly what invites the confirmation echo ("—Es seis, cinco, cuatro… —¿Seis cinco cuatro? —Treinta y dos, dieciocho.") and the self-correction.
+
+Two kinds changed *datum*, not just spelling, because their natural datum is not dictable: `address` moved from the building number (one loose figure) to the **postal code**, and `date` to the piece-by-piece form of a form field. `canonicalDatum` gained its `date` branch — without it the datum was harvested correctly and *graded* wrongly, since "15/03/12" and "quince cero tres doce" did not compare equal.
+
+**`DICTATABLE_KINDS` + the table in `check:exercises` are what keep the two halves together.** For every `DataPointKind`, the check writes the turn the way that kind's `instruction` demands and asserts the three things that have to hold at once: the engine harvests it **whole**, the verifier accepts it, and the grader takes both spellings while rejecting the same datum with a piece missing. It also asserts **exhaustiveness**, so a new kind cannot arrive declared, requested in the prompt, and read by nobody — which is how `address`, `date`, `quantity` and `generic` spent several releases announcing their field label ("Dirección") over a card that never appeared. The forbidden renderings are pinned in the negative direction too: if the old examples come back, the check fails instead of the lesson silently losing a card.
+
+**The A0 lexicon line is not decoration** (`A0_LEXICON`, `services/geminiService.ts`). The third card, `a0-pares`, needs at least three dialogue words of four characters or more, not numerals and not stopwords, that have a partner in `MINIMAL_PAIR_BANK` **whose partner is not also spoken** — if both are heard the item has no answer and is discarded. Nothing asked the dialogue for that vocabulary, so when it did not turn up by chance the card fell back to generated neighbours (which can be non-words: "número" → "númera") or disappeared. The exercise is deliberately *not* named in that instruction: dialogue and exercises come out of the same completion, and naming it invites the model to put the partner in the script "as a hint", which is what invalidates it.
+
+**A fragment is worse than nothing, and the bound has to count the right thing.** While pinning the table, a date said the forbidden way ("nació el quince de marzo de dos mil doce") was found to harvest **the year alone** as the key. `digitsOnly()` converts numerals but does not compose them, so "dos mil doce" measured as seven digits and cleared a digit-count threshold meant for a five-figure code. `isFocusLiteral` now counts numerals when the datum comes in words and figures when it comes in figures, for `code`, `address` and `date` alike — never the two counts mixed.
 
 ### JSON Response Handling
 - Uses `responseMimeType: "application/json"` for structured generation

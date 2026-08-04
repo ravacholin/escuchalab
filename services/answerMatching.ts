@@ -118,8 +118,22 @@ export function isFocusLiteral(literal: string, focus: DataPointKind): boolean {
   switch (focus) {
     case 'phone':
       return digits >= 6 || spelled;
+    // Un código, un código postal y una fecha de formulario se dictan igual —una
+    // tira de CIFRAS SUELTAS— y comparten por tanto el mismo listón: cuatro
+    // piezas, que es lo que distingue el dato de cualquier otro número que ande
+    // cerca.
+    //
+    // Los dos recuentos no se pueden sumar ni sustituir entre sí. `digitsOnly()`
+    // convierte numerales pero NO los compone, así que "dos mil doce" le sale
+    // como "2100012" —siete cifras— y con el listón por cifras daba por buena LA
+    // FECHA = "dos mil doce": el año suelto de "nació el quince de marzo de dos
+    // mil doce", con lo que el alumno que anotaba la fecha entera fallaba. Se
+    // cuentan numerales cuando el dato viene dicho con palabras y cifras cuando
+    // viene escrito con cifras.
     case 'code':
-      return digits >= 4 || numerals >= 4 || spelled;
+    case 'address':
+    case 'date':
+      return spelled || (/\d/.test(literal) ? digits >= 4 : numerals >= 4);
     case 'price':
       return /[.,]\d{2}$/.test(literal) || /\bcon\b/i.test(literal);
     case 'time':
@@ -348,6 +362,13 @@ export function canonicalDatum(text: string, kind?: DataPointKind): string {
       return digitsOnly(text);
     case 'code':
     case 'address':
+    // Una fecha se dicta como se lee en un formulario ("quince, cero tres,
+    // doce") y se anota como se escribe ("15/03/12"): las dos son la misma
+    // secuencia de cifras con separadores distintos, que es justo lo que
+    // `alphanumeric` iguala. Sin esta rama caía en `canonicalGeneric` y las dos
+    // escrituras del MISMO dato no coincidían — el dato se cosechaba bien y se
+    // corregía mal.
+    case 'date':
       return alphanumeric(text);
     case 'price':
       return canonicalPrice(text);

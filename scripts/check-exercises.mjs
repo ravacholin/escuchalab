@@ -29,7 +29,8 @@ async function loadModules() {
     `export * from '${join(ROOT, 'services/exerciseVerification.ts')}';
      export * from '${join(ROOT, 'services/exerciseEngines.ts')}';
      export * from '${join(ROOT, 'services/answerMatching.ts')}';
-     export * from '${join(ROOT, 'services/textUtils.ts')}';`
+     export * from '${join(ROOT, 'services/textUtils.ts')}';
+     export * from '${join(ROOT, 'data/dataPoints.ts')}';`
   );
 
   await build({
@@ -47,7 +48,8 @@ async function loadModules() {
   return mod;
 }
 
-const { verifyExercise, buildTranscriptIndex, fillMissingSlots, matchesDatum } = await loadModules();
+const { verifyExercise, buildTranscriptIndex, fillMissingSlots, matchesDatum, DATA_POINTS, DICTATABLE_KINDS } =
+  await loadModules();
 
 // Silencia los console.warn de diagnóstico durante las pruebas.
 const realWarn = console.warn;
@@ -919,6 +921,163 @@ check(
 );
 
 // ---------------------------------------------------------------------------
+// 9. Cada tipo de dato, dictado como el prompt lo pide, cosechado entero
+// ---------------------------------------------------------------------------
+//
+// Éste es el contrato que une las dos mitades del nivel A0: lo que el prompt del
+// audio manda decir y lo que los ejercicios saben trabajar. `a0-dato` lleva
+// `preferEngine`, así que la tarjeta central del nivel no la escribe el modelo,
+// la COSECHA un parser — y durante varias versiones las instrucciones de
+// `DATA_POINTS` describían el dato sin decir cómo escribirlo, con dos ejemplos
+// ("14 con 95", "A las 5 y media") que ningún cosechador sabe leer, y cuatro
+// tipos (`address`, `date`, `quantity`, `generic`) que no cosechaba nadie. El
+// resultado era una lección que anunciaba su dato con etiqueta ("Dirección") y
+// se quedaba sin la tarjeta.
+//
+// Por cada `DataPointKind`: un turno escrito TAL COMO su `instruction` lo pide,
+// y las tres cosas que tienen que cumplirse a la vez — que el motor lo coseche
+// ENTERO, que el verificador lo acepte, y que el corrector dé por bueno lo que
+// escriba el alumno en las dos escrituras y lo rechace si le falta una pieza.
+
+/** Un turno por tipo, redactado según lo que manda `DATA_POINTS[kind].instruction`. */
+const DICTATED = {
+  phone: {
+    turn: 'Te lo apunto: seis, cinco, cuatro, treinta y dos, dieciocho.',
+    datum: 'seis cinco cuatro treinta y dos dieciocho',
+    accepts: ['654 32 18', '6543218'],
+    rejects: ['654 32 1']
+  },
+  price: {
+    turn: 'Son catorce con noventa, por favor.',
+    datum: 'catorce con noventa',
+    accepts: ['14,90', '14.90'],
+    rejects: ['14,80']
+  },
+  time: {
+    turn: 'Perfecto, a las cinco y media entonces.',
+    datum: 'cinco y media',
+    accepts: ['5:30', '17:30'],
+    rejects: ['5:00']
+  },
+  spelling: {
+    turn: 'Mi apellido es Ge, a, erre, ce, i, a. ¿Lo tiene?',
+    datum: 'Ge a erre ce i a',
+    accepts: ['García', 'GARCIA'],
+    rejects: ['Garcí']
+  },
+  email: {
+    turn: 'Es eme, a, erre, te, a, arroba, correo, punto, com.',
+    datum: 'eme a erre te a arroba correo punto com',
+    accepts: ['marta@correo.com'],
+    rejects: ['mart@correo.com']
+  },
+  address: {
+    turn: 'Calle Serrano; código postal: dos, ocho, cero, cero, cuatro.',
+    datum: 'dos ocho cero cero cuatro',
+    accepts: ['28004'],
+    rejects: ['2804']
+  },
+  code: {
+    turn: 'Su número de reserva: cuatro, siete, uno, dos, nueve.',
+    datum: 'cuatro siete uno dos nueve',
+    accepts: ['47129'],
+    rejects: ['4712']
+  },
+  date: {
+    turn: 'Fecha de nacimiento: quince, cero tres, doce.',
+    datum: 'quince cero tres doce',
+    accepts: ['15/03/12', '15 03 12'],
+    rejects: ['15/03/13']
+  },
+  quantity: {
+    turn: 'Le toca la habitación cuatro, dos, siete.',
+    datum: 'cuatro dos siete',
+    accepts: ['427'],
+    rejects: ['42']
+  },
+  // `generic` es el que sale por defecto cuando el tema no trae palabra clave,
+  // así que es el más frecuente de los diez. Su instrucción obliga a elegir una
+  // de las formas concretas; aquí se comprueba con una de ellas.
+  generic: {
+    turn: 'Te lo apunto: seis, cinco, cuatro, treinta y dos, dieciocho.',
+    datum: 'seis cinco cuatro treinta y dos dieciocho',
+    accepts: ['654 32 18'],
+    rejects: ['654 32 1']
+  }
+};
+
+for (const [kind, spec] of Object.entries(DICTATED)) {
+  const dialogue = [
+    { speaker: 'Empleada', text: spec.turn },
+    { speaker: 'Cliente', text: 'Perfecto, muchas gracias.' }
+  ];
+  const made = buildDictation(dialogue, kind, 1);
+  check(!!made, `"${kind}" dictado como pide su instrucción debería producir ejercicio`);
+  if (!made) continue;
+
+  check(
+    datumOf(made) === spec.datum,
+    `"${kind}": el dato debería cosecharse entero ("${spec.datum}"), y sale "${datumOf(made)}"`
+  );
+  const verdict = verifyExercise(made, buildTranscriptIndex(dialogue));
+  check(verdict.ok, `"${kind}": el dictado no verifica: ${verdict.reason}`);
+
+  const variants = [made.expected, ...(made.accepts || [])];
+  for (const written of spec.accepts) {
+    check(
+      matchesDatum(written, variants, made.dataKind),
+      `"${kind}": "${written}" es el mismo dato y debería aceptarse`
+    );
+  }
+  for (const wrong of spec.rejects) {
+    check(
+      !matchesDatum(wrong, variants, made.dataKind),
+      `"${kind}": "${wrong}" no es el dato y no debería aceptarse`
+    );
+  }
+}
+
+// Exhaustividad: es lo que impide que el próximo `DataPointKind` vuelva a
+// entrar declarado, pedido en el prompt y sin cosechador que lo lea.
+for (const kind of DICTATABLE_KINDS) {
+  check(!!DICTATED[kind], `falta el caso de "${kind}": un tipo de dato sin caso es un tipo sin cosechador`);
+}
+check(
+  Object.keys(DATA_POINTS).every(kind => DICTATABLE_KINDS.includes(kind)),
+  'todo DataPointKind de DATA_POINTS tiene que estar declarado en DICTATABLE_KINDS'
+);
+
+// Y las escrituras que motivaron las reglas: si alguien devuelve los ejemplos
+// viejos a `DATA_POINTS`, esto es lo que tiene que saltar. No producen ejercicio
+// —ni bueno ni malo—, que es exactamente el fallo original: la tarjeta central
+// del nivel desaparecía sin que nada lo señalara.
+const UNHARVESTABLE = [
+  ['price', 'Son 14 con 95, por favor.', 'un precio medio en cifras y medio en palabras'],
+  ['time', 'Nos vemos a las 5 y media.', 'una hora medio en cifras y medio en palabras'],
+  ['time', 'Nos vemos a las cinco en punto.', 'una hora sin fracción es una sola pieza'],
+  ['quantity', 'Es la habitación cuarenta y cinco.', 'un número aglutinado no es un dictado'],
+  ['date', 'Nació el quince de marzo de dos mil doce.', 'una fecha con meses y "de" no se oye de corrido'],
+  ['address', 'Vivo en la calle Serrano cuarenta y cinco.', 'un portal suelto no es un código postal']
+];
+for (const [focus, turn, why] of UNHARVESTABLE) {
+  const dialogue = [{ speaker: 'A', text: turn }, { speaker: 'B', text: 'Muy bien.' }];
+  const made = buildDictation(dialogue, focus, 1);
+  check(!made, `${why}: no debería producir dictado (salió "${datumOf(made)}")`);
+}
+
+// El eco de confirmación, que es lo que `DICTATION_DELIVERY` le prohíbe al
+// diálogo: el teléfono existe entero en la conversación, pero no en un turno.
+const ECHOED_PHONE = [
+  { speaker: 'A', text: 'Es seis, cinco, cuatro…' },
+  { speaker: 'B', text: '¿Seis cinco cuatro?' },
+  { speaker: 'A', text: 'Treinta y dos, dieciocho.' }
+];
+check(
+  !buildDictation(ECHOED_PHONE, 'phone', 1),
+  'un teléfono repartido entre tres turnos no debería producir dictado: media cifra es peor que ninguna'
+);
+
+// ---------------------------------------------------------------------------
 
 console.warn = realWarn;
 
@@ -932,5 +1091,7 @@ if (failures.length > 0) {
 
 console.log(
   `✓ verificación de claves correcta (${REJECT_CASES.length} claves falsas rechazadas, ` +
-    `${ACCEPT_CASES.length} válidas aceptadas, ${built.length} ejercicios de motor verificados)`
+    `${ACCEPT_CASES.length} válidas aceptadas, ${built.length} ejercicios de motor verificados, ` +
+    `${DICTATABLE_KINDS.length} tipos de dato cosechados enteros, ` +
+    `${UNHARVESTABLE.length + 1} escrituras inservibles sin ejercicio)`
 );
