@@ -848,6 +848,48 @@ const REQUESTED_TURNS: Record<Length, number> = {
   [Length.Long]: 16
 };
 
+/**
+ * Cómo tiene que ENTREGARSE el dato dictado, y no sólo cuál es.
+ *
+ * Todo lo que hay aguas abajo del audio exige que el dato suene entero, de
+ * corrido y dentro de UN SOLO turno: el verificador lo rechaza si no
+ * (`verifyDictation`) y los cosechadores trabajan turno a turno, así que un dato
+ * repartido entre dos réplicas no existe para ninguno de los dos. Esa exigencia
+ * estaba escrita únicamente en `FORMAT_RULES.dictation.guidance`, que gobierna a
+ * quien redacta los EJERCICIOS y no a quien redacta el DIÁLOGO — y el bloque del
+ * diálogo, mientras tanto, pedía un guion "100% NATURAL y FLUIDO", que es
+ * exactamente lo que invita al eco de confirmación ("—Es seis, cinco, cuatro…
+ * —¿Seis cinco cuatro? —Treinta y dos, dieciocho.") y a la autocorrección. Con el
+ * dato partido el motor no encuentra material, la clave del modelo tampoco se
+ * oye de corrido, y la tarjeta central del nivel desaparece.
+ *
+ * La comparten A0 y A1-A2 porque los dos llevan un slot `dictation` (`a0-dato`,
+ * `a2-dato`) y por tanto el mismo requisito.
+ */
+const DICTATION_DELIVERY =
+  'EL DATO SUENA ENTERO Y DE CORRIDO DENTRO DE UN SOLO TURNO: nadie lo interrumpe a mitad, ' +
+  'nadie lo repite a trozos y nadie lo corrige mientras se dice. Puede confirmarse DESPUÉS, ' +
+  'entero, pero tiene que haber al menos una vez en que suene completo en un mismo turno.';
+
+/**
+ * Siembra del tercer ejercicio de A0 (`a0-pares`, discriminación fónica).
+ *
+ * El motor de pares mínimos necesita al menos tres palabras del diálogo de cuatro
+ * letras o más, que no sean cifras ni palabras vacías, que tengan pareja en
+ * `MINIMAL_PAIR_BANK` y **cuya pareja no se diga también** — si las dos suenan, el
+ * ítem no tiene respuesta y se descarta. Nada en el prompt pedía ese léxico, así
+ * que cuando el diálogo no lo traía por casualidad la tarjeta caía a vecinos
+ * generados (que pueden ser no-palabras: "número" → "númera") o desaparecía.
+ *
+ * No se nombra el ejercicio a propósito: el diálogo y los ejercicios salen de la
+ * misma completion, y mencionarlo invita al modelo a meter la pareja en el guion
+ * para "dar la pista", que es justo lo que lo invalida.
+ */
+const A0_LEXICON =
+  'LÉXICO: usa palabras cotidianas de dos sílabas o más que tengan un vecino fónico en español ' +
+  '(perro, carro, pata, peso, mesa, cara, mano, casa, banco, carta, cuenta, puerta, libro, sala, ' +
+  'gato…), y NO metas en el mismo diálogo la pareja de ninguna de ellas.';
+
 const SPEAKER_KEY = /"speaker"\s*:/;
 const SLOT_KEY = /"slotId"\s*:/;
 const QUESTION_KEY = /"question"\s*:/;
@@ -901,12 +943,15 @@ export const generateLessonPlan = async (
       - Genera un diálogo 100% NATURAL y FLUIDO entre nativos.
       - VELOCIDAD NORMAL. NO hables lento. NO simplifiques las frases. NO limites el vocabulario.
       - ${dataPointInstruction}
+      - ${DICTATION_DELIVERY}
       - El objetivo es que el estudiante capture ese dato específico en un entorno ruidoso/rápido.
+      - ${A0_LEXICON}
       `;
   } else if (level === Level.Beginner) {
     constraint = `
       NIVEL A1-A2: Frases de longitud media, vocabulario frecuente.
       - ${dataPointInstruction}
+      - ${DICTATION_DELIVERY}
       - Ese dato tiene que oírse con claridad dentro de la conversación, sin subrayarlo ni repetirlo de forma artificial.
       `;
   } else {
