@@ -8,6 +8,7 @@ import { MODEL_SELECTABLE_SCENES, isSceneId } from "./ambiencePresets";
 import { verifyExercises } from "./exerciseVerification";
 import { checkTwoVoices } from "./ttsVoiceCheck";
 import { splitIntoTurns } from "./ttsTurnSplit";
+import { parseLenientJson } from "./jsonRepair";
 import {
   GENERATION_MODELS,
   describeModelChainFailure,
@@ -187,13 +188,9 @@ function concatBytes(chunks: Uint8Array[], total: number): Uint8Array {
   return out;
 }
 
-function cleanJsonString(str: string): string {
-  let cleaned = str.trim();
-  if (cleaned.startsWith("```")) {
-    cleaned = cleaned.replace(/^```(json)?/, "").replace(/```$/, "").trim();
-  }
-  return cleaned;
-}
+// El saneado del JSON del modelo vive ahora en `services/jsonRepair.ts`
+// (`parseLenientJson`): además de quitar las vallas markdown, repara los fallos
+// que el modelo comete de verdad en respuestas largas en lugar de reventar.
 
 // Sanitize text for TTS to avoid "non-audio response" errors caused by stage directions or formatting
 function sanitizeForTTS(text: string): string {
@@ -1055,6 +1052,10 @@ export const generateLessonPlan = async (
   // la cadena desde arriba con los que ya se sabe que están caídos.
   let preferredModel: string = GENERATION_MODEL;
 
+  // Cuando una vuelta falla por JSON inválido, la siguiente sube la temperatura:
+  // a 0.0 el modelo es casi determinista y repetiría el mismo carácter roto.
+  let parseRetryBump = false;
+
   // Auto-retry loop for multi-speaker validation
   const MAX_SPEAKER_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_SPEAKER_RETRIES; attempt++) {
@@ -1118,7 +1119,7 @@ export const generateLessonPlan = async (
             config: {
               systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
               responseMimeType: "application/json",
-              temperature: 0.0,
+              temperature: parseRetryBump ? 0.4 : 0.0,
             },
           },
           {
@@ -1203,9 +1204,38 @@ export const generateLessonPlan = async (
       );
 
       reporter.start('parse');
-      const jsonStr = cleanJsonString(rawResponse);
-      const plan = JSON.parse(jsonStr) as LessonPlan;
+      // El modelo se equivoca en JSON largo (una comilla sin escapar en una
+      // réplica, un carácter de control, la respuesta cortada). `parseLenientJson`
+      // intenta el parseo estricto y, si falla, repara lo reparable en vez de
+      // reventar la lección entera por un solo carácter.
+      let plan: LessonPlan;
+      let jsonRepaired = false;
+      try {
+        const parsed = parseLenientJson<LessonPlan>(rawResponse);
+        plan = parsed.value;
+        jsonRepaired = parsed.repaired;
+      } catch (parseError: any) {
+        // Ni la reparación lo salva: se reintenta la generación en vez de mostrar
+        // un JSON roto. A temperatura 0 el mismo prompt puede repetir el fallo, así
+        // que la vuelta siguiente sube la temperatura para forzar otra salida.
+        reporter.fail('parse', errorMessage(parseError));
+        if (attempt === MAX_SPEAKER_RETRIES) {
+          throw new Error(
+            `El modelo devolvió un JSON inválido y no se pudo reparar tras ${MAX_SPEAKER_RETRIES} intentos: ${errorMessage(parseError)}`
+          );
+        }
+        reporter.log(
+          `JSON inválido del modelo (${briefly(errorMessage(parseError))}); se reintenta la generación ${attempt + 1}/${MAX_SPEAKER_RETRIES}`,
+          'warn'
+        );
+        parseRetryBump = true;
+        continue;
+      }
+      if (jsonRepaired) {
+        reporter.log('El JSON del modelo venía con errores; se reparó automáticamente', 'warn');
+      }
 
+      if (!plan || typeof plan !== 'object') plan = {} as LessonPlan;
       if (!plan.dialogue) plan.dialogue = [];
       const rawExercises: unknown[] = Array.isArray(plan.exercises) ? plan.exercises : [];
 
