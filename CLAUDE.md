@@ -658,6 +658,18 @@ the switch (`«…» no está disponible (…); se cambia a «…»`) and, if th
 from the primary, says which model produced it. A speaker-count retry restarts from the
 model that just answered (`modelsFrom`), not from the top.
 
+**The plan call caps the model's thinking** (`thinkingConfigFor`, `services/modelFallback.ts`).
+The primary is a *thinking* model, and the lesson-plan request used to carry **no thinking
+configuration at all**, so the model reasoned with a dynamic budget and took ~37 s to emit
+the first token — the entire "se queda en recepción del guion" slowness was that silence,
+not the generation itself. The cap is computed **per model** because the same `config` is
+reused across the whole chain and the families take different controls: 3.x models get
+`thinkingLevel: 'low'` (they cannot disable thinking outright), `gemini-2.5-flash` gets
+`thinkingBudget: 0`. Lowering it is safe here for the same reason a lower rung is: the
+verifier and the deterministic engines guard the output, not the depth of the reasoning.
+`check:fallback` asserts every model in the chain receives a bounded (never dynamic/`-1`,
+never `high`) config. The TTS path is untouched — `AUDIO_MODEL` does not think.
+
 **`AUDIO_MODEL` deliberately has no chain**: `"gemini-3.1-flash-tts-preview"`, one model, the
 fixed 2-request cost intact (fallback if unstable: `"gemini-2.5-flash-preview-tts"`, which is
 also what `scripts/measure-tts-voices.mjs` defaults to). Adding a chain there would mean two
