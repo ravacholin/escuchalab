@@ -615,9 +615,31 @@ of the *moment*:
   code was buried in a JSON nested inside another JSON. `isModelNotFoundError` exists so
   that the day Google retires one of the four ids — `gemini-2.0-flash` went in June 2026 —
   the app drops to the next one instead of breaking.
-- **Everything else keeps the existing ladder**: network failures, a stream cut halfway, an
-  empty response. If those switched models, one dropped connection would burn the whole
-  chain at once and degrade the lesson for no reason.
+- **Everything else keeps the existing ladder first**: network failures, a stream cut
+  halfway, an empty response, a timeout. A *single* dropped connection must not burn the
+  whole chain, so a raw network/timeout error does **not** switch models on its own — it is
+  retried by the internal ladder (two streaming attempts plus the non-streaming fallback)
+  against the *same* model. Only when that whole ladder is exhausted does
+  `generateJsonWithProgress()` **mark the error switchable** (`markSwitchable`) so the chain
+  advances to the next model. That is the fix for the report where a persistent
+  `Failed to fetch` left the app dead on the first model: `isNetworkError` /`isTimeoutError`
+  classify it, `isModelError` gates the immediate switch, and `shouldSwitchModel` returns
+  true only for model errors *or* an error the ladder has already given up on. So a transient
+  blip is absorbed by the ladder, but a model/endpoint that keeps failing no longer stops the
+  world — and `describeModelChainFailure` now has friendly copy for both network and timeout.
+
+**Every call is bounded by a timeout** (`createTimeoutGuard`, an `AbortController` wired
+through `config.abortSignal`). This is what fixes the *original* symptom — "se queda en
+recepción del guion y ni progresa": a request the server accepts but leaves hanging, or a
+stream that stops emitting mid-way, used to freeze the loading screen forever. The margins
+are thinking-aware, because these models spend real time before the first token (a *trivial*
+prompt already costs ~15 s and hundreds of thought tokens; a full lesson prompt measured
+~37 s to first token): the wait for the **first** chunk is generous (`STREAM_FIRST_CHUNK_MS`
+90 s) so a slow-but-working generation is never killed, while the inter-chunk stall once the
+flow has started is short (`STREAM_STALL_MS` 30 s), under a hard total cap
+(`STREAM_TOTAL_MS`). During that first-token wait an `onWaiting` heartbeat moves the
+`dialogue` step's detail ("esperando la respuesta del modelo… (N s)") so the screen no longer
+looks frozen. The audio path (`synthesizeWithProgress`) carries the same guard.
 
 **A 429 switches models but is still never retried.** The two are not in tension: free-tier
 limits are *per model*, so the next rung arrives with its own quota intact, while the rule
@@ -669,17 +691,23 @@ Automated checks (no API key or network needed) — run all with `npm test`:
 - `npm run check:fallback` — pins the distinction the model chain rests on: which errors are
   fixed by switching models and which are not. It classifies **the real 503 payload**, copied
   verbatim (a JSON inside another JSON, `status` empty, the code only in `code` and in the
-  text) as unavailable and *not* as quota; a 429 and a retired model id as switchable; and
-  `socket hang up` / `fetch failed` / an empty response as **not** switchable — that last
-  group is the one that matters, because if a dropped connection switched models it would
-  burn the whole chain in one go. Then it drives `runWithModelFallback` against a fake
-  runner: a 503 on the first model lands on the second with exactly one announced switch and
-  one call per model, a network error does not advance at all, an exhausted chain rethrows
-  the *last* error after `n-1` switches, no model is ever called twice — and the cheap case,
-  **success on the first model costs exactly one call and zero switches**, which is what pins
-  that having a chain does not make the normal path any more expensive. Finally, that the
-  message shown to the learner when the chain is exhausted says what happened instead of
-  printing the raw nested JSON.
+  text) as unavailable and *not* as quota; a 429 and a retired model id as switchable; and a
+  *raw* `socket hang up` / `Failed to fetch` / empty response as **not** switchable on its own
+  — a single dropped connection must not burn the whole chain. It also pins the new half:
+  `Failed to fetch` and `fetch failed` and `ECONNRESET` classify as network, an `AbortError`
+  and our own "no envió datos" / "superó el tiempo" messages as timeout, and the *same*
+  network error **once `markSwitchable` has tagged it** (i.e. after the internal ladder gave
+  up) *does* switch. Then it drives `runWithModelFallback` against a fake runner: a 503 on the
+  first model lands on the second with exactly one announced switch and one call per model, a
+  raw network error does not advance at all, an exhausted chain rethrows the *last* error after
+  `n-1` switches, no model is ever called twice — and the cheap case, **success on the first
+  model costs exactly one call and zero switches**. It runs the real `generateJsonWithProgress`
+  end to end against a fake AI too: a 503 leaves on the first call, a network error spends its
+  `stream,stream,completa` ladder and comes out switchable, and a *persistent* `Failed to
+  fetch` under `runWithModelFallback` now walks the whole chain (each model's full ladder, one
+  announced switch) instead of dying on the first model — the exact case the user reported.
+  Finally, that the message shown to the learner when the chain is exhausted says what happened
+  (saturation, quota, connection or timeout) instead of printing the raw nested JSON.
 
 Checks that need an API key, network and quota (**not** part of `npm test`):
 - `GEMINI_API_KEY=… npm run check:tts:live [repeticiones]` — the only check that hears what

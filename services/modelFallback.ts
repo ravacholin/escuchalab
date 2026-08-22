@@ -124,16 +124,107 @@ export function isModelNotFoundError(error: unknown): boolean {
 }
 
 /**
+ * Un fallo de red o de conexión: la petición ni siquiera llegó a completarse.
+ *
+ * En el navegador `fetch` lanza un `TypeError` con «Failed to fetch» cuando no
+ * puede completar la petición —red caída, DNS, CORS, la petición bloqueada— y
+ * era justo el error con el que la app se quedaba muerta: no es del modelo, así
+ * que la cadena no cambiaba de escalón, y como tampoco lo arreglaba reintentar,
+ * la generación no salía por ningún lado. En Node/undici el mismo caso llega
+ * como «fetch failed», «socket hang up» o «terminated».
+ *
+ * No cambia de modelo por sí solo (ver `shouldSwitchModel`): lo reintenta antes
+ * la escalera interna contra el mismo modelo. Solo cuando esa escalera se agota
+ * el error se marca como conmutable para que la cadena pueda seguir bajando.
+ */
+export function isNetworkError(error: unknown): boolean {
+  const text = errorText(error).toLowerCase();
+  return (
+    text.includes('failed to fetch') ||
+    text.includes('fetch failed') ||
+    text.includes('load failed') ||
+    text.includes('networkerror') ||
+    text.includes('network error') ||
+    text.includes('network request failed') ||
+    text.includes('socket hang up') ||
+    text.includes('econnreset') ||
+    text.includes('econnrefused') ||
+    text.includes('enotfound') ||
+    text.includes('etimedout') ||
+    text.includes('and network resources') ||
+    text === 'terminated' ||
+    text.includes('the network connection was lost')
+  );
+}
+
+/**
+ * La petición se canceló por tiempo: el modelo aceptó la conexión pero dejó de
+ * enviar datos (el caso «se queda en recepción del guion y no progresa») o tardó
+ * más de la cuenta en total. Lo produce el `AbortController` que ahora rodea a
+ * cada llamada; llega como `AbortError` o como el mensaje que ponemos nosotros.
+ */
+export function isTimeoutError(error: unknown): boolean {
+  const name = (error as { name?: unknown } | null)?.name;
+  if (name === 'AbortError' || name === 'TimeoutError') return true;
+  const text = errorText(error).toLowerCase();
+  return (
+    text.includes('aborted') ||
+    text.includes('abortada') ||
+    text.includes('timeout') ||
+    text.includes('timed out') ||
+    text.includes('tardó demasiado') ||
+    text.includes('no envió datos') ||
+    text.includes('superó el tiempo')
+  );
+}
+
+/**
+ * Errores del *modelo*: existe pero no atiende, no existe, o se acabó su cupo.
+ * Son los que cambian de modelo **de inmediato**, sin gastar la escalera interna
+ * contra un escalón que ya se sabe que no va a contestar.
+ */
+export function isModelError(error: unknown): boolean {
+  return isQuotaError(error) || isModelUnavailableError(error) || isModelNotFoundError(error);
+}
+
+/**
+ * Marca un error como conmutable para que `runWithModelFallback` baje de modelo
+ * aunque no sea un error del modelo.
+ *
+ * Se usa cuando la escalera interna de `generateJsonWithProgress` ya se ha
+ * agotado contra un modelo por un fallo de red o un timeout: en ese punto el
+ * corte ya no es «transitorio de un intento» sino «este modelo/endpoint no está
+ * respondiendo», y probar el siguiente es exactamente lo que salva la
+ * generación. Un error de red **suelto** (sin pasar por la escalera) sigue sin
+ * cambiar de modelo, que es lo que evita comerse la cadena por un corte único.
+ */
+const SWITCHABLE = Symbol.for('escuchalab.switchModel');
+export function markSwitchable<E>(error: E): E {
+  if (error && typeof error === 'object') {
+    try {
+      (error as Record<PropertyKey, unknown>)[SWITCHABLE] = true;
+    } catch {
+      /* algunos errores son inmutables; da igual, se relanza tal cual */
+    }
+  }
+  return error;
+}
+const isMarkedSwitchable = (error: unknown): boolean =>
+  !!(error && typeof error === 'object' && (error as Record<PropertyKey, unknown>)[SWITCHABLE] === true);
+
+/**
  * ¿Puede otro modelo responder a esto?
  *
- * Todo lo que no esté aquí —red caída, stream cortado a la mitad, respuesta
- * vacía— es cosa del momento y no del modelo, así que lo sigue reintentando la
- * escalera interna de `generateJsonWithProgress`. Si esos errores cambiaran de
- * modelo, un corte de red se comería la cadena entera de una vez y encima
- * degradaría la lección sin motivo.
+ * Cambian de modelo los errores del modelo (saturación, cuota, id retirado) y
+ * los que la escalera interna ya ha marcado como conmutables tras agotarse
+ * (`markSwitchable`) —red caída, timeout—. Un error de red **suelto**, que aún
+ * no ha pasado por la escalera, no cambia de modelo: lo reintenta antes esa
+ * escalera contra el mismo modelo, y solo si se agota se marca para seguir
+ * bajando. Así un corte único no se come la cadena entera de golpe, pero un
+ * «Failed to fetch» persistente ya no deja la app sin generar nada.
  */
 export function shouldSwitchModel(error: unknown): boolean {
-  return isQuotaError(error) || isModelUnavailableError(error) || isModelNotFoundError(error);
+  return isModelError(error) || isMarkedSwitchable(error);
 }
 
 /**
@@ -198,6 +289,14 @@ export function describeModelChainFailure(error: unknown, tried: number): string
   if (isModelUnavailableError(error)) {
     return `${tried === 1 ? 'el modelo de Gemini está saturado' : `los ${tried} modelos de Gemini probados están saturados`} ` +
       'ahora mismo. Suele durar unos minutos: vuelve a intentarlo.';
+  }
+  if (isTimeoutError(error)) {
+    return `Gemini dejó de responder a tiempo (se probaron ${modelos}). ` +
+      'Puede ser la conexión o una sobrecarga puntual: vuelve a intentarlo.';
+  }
+  if (isNetworkError(error)) {
+    return 'no se pudo conectar con Gemini. Revisa tu conexión a internet ' +
+      '(o si algún bloqueador/extensión está cortando la petición) y vuelve a intentarlo.';
   }
   return null;
 }

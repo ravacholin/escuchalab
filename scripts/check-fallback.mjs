@@ -46,7 +46,10 @@ const {
   describeModelChainFailure,
   isModelNotFoundError,
   isModelUnavailableError,
+  isNetworkError,
   isQuotaError,
+  isTimeoutError,
+  markSwitchable,
   modelsFrom,
   runWithModelFallback,
   shouldSwitchModel
@@ -120,19 +123,40 @@ const check = (label, condition, detail = '') => {
   check('un modelo retirado se reconoce', isModelNotFoundError(retirado));
   check('…y cambia de modelo', shouldSwitchModel(retirado));
 
-  // Lo que NO puede cambiar de modelo: si lo hiciera, un corte de red se
-  // comería la cadena entera de una vez y degradaría la lección sin motivo.
+  // Un error de red o timeout **suelto** (aún sin pasar por la escalera interna)
+  // no cambia de modelo: si lo hiciera, un corte único se comería la cadena
+  // entera de una vez. Solo cambia cuando la escalera ya lo ha marcado.
   const red = [
     new Error('socket hang up'),
     new TypeError('fetch failed'),
+    new TypeError('Failed to fetch'),
     new Error('terminated'),
     new Error('la API devolvió una respuesta vacía')
   ];
   for (const error of red) {
-    check(`«${error.message}» no cambia de modelo`, !shouldSwitchModel(error));
+    check(`«${error.message}» suelto no cambia de modelo`, !shouldSwitchModel(error));
   }
   check('«5000 caracteres» no se confunde con un 500',
     !isModelUnavailableError(new Error('el texto supera los 5000 caracteres')));
+
+  // El «Failed to fetch» del navegador se reconoce como fallo de red, que es
+  // justo el error con el que la app se quedaba muerta sin probar otro modelo.
+  check('«Failed to fetch» es un fallo de red', isNetworkError(new TypeError('Failed to fetch')));
+  check('«fetch failed» (undici) es un fallo de red', isNetworkError(new TypeError('fetch failed')));
+  check('un ECONNRESET es un fallo de red', isNetworkError(new Error('read ECONNRESET')));
+  check('un 503 no se confunde con un fallo de red', !isNetworkError({ code: 503, message: '503 UNAVAILABLE' }));
+
+  // Un timeout nuestro (el stream se colgó) se reconoce, para poder reintentarlo
+  // y, agotada la escalera, cambiar de modelo.
+  check('un AbortError es timeout', isTimeoutError(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+  check('«no envió datos» es timeout', isTimeoutError(new Error('el modelo no envió datos en 30 s')));
+  check('«superó el tiempo máximo» es timeout', isTimeoutError(new Error('la generación superó el tiempo máximo (120 s)')));
+
+  // Una vez marcado por la escalera, un fallo de red **sí** cambia de modelo:
+  // es lo que evita que un «Failed to fetch» persistente deje la app sin generar.
+  const marcado = markSwitchable(new TypeError('Failed to fetch'));
+  check('un fallo de red marcado por la escalera sí cambia de modelo', shouldSwitchModel(marcado));
+  check('…pero el mismo error sin marcar, no', !shouldSwitchModel(new TypeError('Failed to fetch')));
 }
 
 // --- 3. La escalera -------------------------------------------------------
@@ -251,18 +275,48 @@ const check = (label, condition, detail = '') => {
     check('…y llega intacto para que la cadena lo clasifique', shouldSwitchModel(capturado));
   }
 
-  // b) Red: la escalera de siempre, sin tocar la cadena.
+  // b) Red: la escalera de siempre contra el mismo modelo, y al agotarse el
+  // error sale **marcado** para que la cadena pueda seguir bajando.
   {
     const llamadas = [];
+    let capturado = null;
     try {
       await generateJsonWithProgress(
-        fakeAi((via) => { llamadas.push(via); throw new Error('socket hang up'); }),
+        fakeAi((via) => { llamadas.push(via); throw new TypeError('Failed to fetch'); }),
         { model: 'a', contents: 'x' },
         hooks()
       );
-    } catch { /* esperado */ }
+    } catch (error) { capturado = error; }
     check('un fallo de red agota los dos intentos de streaming más la petición completa',
       llamadas.join(',') === 'stream,stream,completa', llamadas.join(','));
+    check('…y al agotar la escalera el error sale conmutable',
+      shouldSwitchModel(capturado), capturado?.message);
+  }
+
+  // c) De punta a punta: un «Failed to fetch» persistente ya no deja la app
+  // muerta en el primer modelo; agota la escalera de cada uno y baja hasta el
+  // último. Es el caso que reportó el usuario.
+  {
+    const llamadas = [];
+    const switches = [];
+    let capturado = null;
+    try {
+      await runWithModelFallback(
+        ['a', 'b'],
+        (model) => generateJsonWithProgress(
+          fakeAi((via) => { llamadas.push(`${model}:${via}`); throw new TypeError('Failed to fetch'); }),
+          { model, contents: 'x' },
+          hooks()
+        ),
+        { onSwitch: (from, to) => switches.push(`${from}→${to}`) }
+      );
+    } catch (error) { capturado = error; }
+    check('un fallo de red persistente agota la escalera de cada modelo',
+      llamadas.join(',') === 'a:stream,a:stream,a:completa,b:stream,b:stream,b:completa',
+      llamadas.join(','));
+    check('…bajando por la cadena en vez de rendirse en el primero',
+      switches.join(' ') === 'a→b', switches.join(' '));
+    check('…y acaba relanzando el fallo de red', capturado?.message === 'Failed to fetch', capturado?.message);
   }
 }
 
@@ -282,8 +336,17 @@ const check = (label, condition, detail = '') => {
   check('el mensaje de cuota habla de cuota',
     typeof msgCuota === 'string' && msgCuota.includes('cuota'), String(msgCuota));
 
-  check('un error que no es del modelo no se reescribe',
-    describeModelChainFailure(new Error('socket hang up'), 4) === null);
+  // Red y timeout ahora también tienen su mensaje: antes el «Failed to fetch»
+  // llegaba crudo a pantalla y no explicaba nada.
+  const msgRed = describeModelChainFailure(new TypeError('Failed to fetch'), 4);
+  check('el mensaje de red habla de conexión',
+    typeof msgRed === 'string' && msgRed.toLowerCase().includes('conexión'), String(msgRed));
+  const msgTimeout = describeModelChainFailure(new Error('el modelo no envió datos en 30 s'), 4);
+  check('el mensaje de timeout dice que dejó de responder',
+    typeof msgTimeout === 'string' && msgTimeout.toLowerCase().includes('responder'), String(msgTimeout));
+
+  check('un error de veras inclasificable no se reescribe',
+    describeModelChainFailure(new Error('algo rarísimo e inesperado'), 4) === null);
   check('con un solo modelo el mensaje va en singular',
     !describeModelChainFailure(saturado, 1).includes('1 modelos'),
     describeModelChainFailure(saturado, 1));
@@ -297,6 +360,7 @@ if (failures.length) {
 
 console.log(
   `✓ cadena de ${GENERATION_MODELS.length} modelos de texto (${GENERATION_MODELS.join(' → ')}): ` +
-    'saturación, cuota y modelo retirado bajan un escalón; los fallos de red no; ' +
+    'saturación, cuota y modelo retirado bajan un escalón al instante; un fallo de red o ' +
+    'timeout se reintenta primero contra el mismo modelo y solo baja al agotar la escalera; ' +
     'ningún modelo se llama dos veces y la ruta normal sigue costando una sola llamada'
 );

@@ -12,10 +12,11 @@ import { parseLenientJson } from "./jsonRepair";
 import {
   GENERATION_MODELS,
   describeModelChainFailure,
+  isModelError,
   isQuotaError,
+  markSwitchable,
   modelsFrom,
-  runWithModelFallback,
-  shouldSwitchModel
+  runWithModelFallback
 } from "./modelFallback";
 import {
   ProgressListener,
@@ -82,6 +83,117 @@ const TURN_JOINER = '\n\n';
 /** Silencio que se deja entre dos turnos al montar la conversación. */
 const TURN_GAP_MS = 220;
 
+// --- TIMEOUTS ---
+//
+// Sin esto, una petición que el servidor acepta pero deja colgada (o un stream
+// que deja de emitir a mitad) congelaba la pantalla de carga para siempre: es
+// el «se queda en recepción del guion y no progresa». Con un `AbortController`
+// la espera muerta se convierte en un error que la escalera puede reintentar y,
+// si se agota, en un cambio de modelo.
+
+// El primer token tarda más que los siguientes: estos modelos «piensan» antes
+// de emitir nada (un prompt trivial ya gasta ~15 s y cientos de tokens de
+// pensamiento), y con el prompt entero de una lección puede ser bastante más.
+// Ese silencio inicial es legítimo, así que el margen para el PRIMER chunk es
+// generoso; una vez que el flujo arranca, un silencio largo sí es un cuelgue.
+/** Espera máxima hasta el primer chunk (fase de «pensamiento» del modelo). */
+const STREAM_FIRST_CHUNK_MS = 90_000;
+/** Sin un chunk en este tiempo **una vez arrancado** el flujo, se da por colgado. */
+const STREAM_STALL_MS = 30_000;
+/** Tope total de una tentativa de streaming, pase lo que pase. */
+const STREAM_TOTAL_MS = 180_000;
+/** Tope de la petición no-streaming (texto). */
+const REQUEST_TOTAL_MS = 150_000;
+/** Espera máxima hasta el primer byte de audio del TTS. */
+const AUDIO_FIRST_CHUNK_MS = 60_000;
+/** Sin un byte de audio en este tiempo una vez arrancado, se da por colgado. */
+const AUDIO_STALL_MS = 30_000;
+
+interface TimeoutGuard {
+  signal: AbortSignal;
+  /** Marca que llegó un chunk; pasa del margen inicial al de inactividad. */
+  ping: () => void;
+  /** El error de tiempo si fuimos nosotros quienes abortamos, o `null`. */
+  reason: () => Error | null;
+  /** Apaga los temporizadores; hay que llamarlo siempre (finally). */
+  dispose: () => void;
+}
+
+const unref = (timer: unknown): void => {
+  // En Node los timers mantienen vivo el bucle de eventos; en el navegador son
+  // números y no tienen `unref`. Así el proceso de los tests no queda colgado.
+  if (timer && typeof (timer as { unref?: () => void }).unref === 'function') {
+    (timer as { unref: () => void }).unref();
+  }
+};
+
+function createTimeoutGuard(opts: { firstChunkMs?: number; stallMs?: number; totalMs?: number }): TimeoutGuard {
+  const controller = new AbortController();
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let totalTimer: ReturnType<typeof setTimeout> | undefined;
+  let abortReason: Error | null = null;
+  let started = false;
+
+  const abortWith = (message: string) => {
+    if (controller.signal.aborted) return;
+    abortReason = new Error(message);
+    // `abort(reason)` no está en navegadores antiguos; el `reason()` que
+    // guardamos aquí es la fuente de verdad de todos modos.
+    try { controller.abort(abortReason); } catch { controller.abort(); }
+  };
+
+  const armIdle = () => {
+    // Antes del primer chunk se aplica el margen de «pensamiento»; después, el
+    // de inactividad, más corto.
+    const ms = started ? opts.stallMs : (opts.firstChunkMs ?? opts.stallMs);
+    if (!ms) return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(
+      () => abortWith(
+        started
+          ? `el modelo no envió datos en ${Math.round(ms / 1000)} s`
+          : `el modelo no empezó a responder en ${Math.round(ms / 1000)} s`
+      ),
+      ms
+    );
+    unref(idleTimer);
+  };
+
+  if (opts.totalMs) {
+    totalTimer = setTimeout(
+      () => abortWith(`la generación superó el tiempo máximo (${Math.round(opts.totalMs! / 1000)} s)`),
+      opts.totalMs
+    );
+    unref(totalTimer);
+  }
+  armIdle();
+
+  return {
+    signal: controller.signal,
+    ping: () => { started = true; armIdle(); },
+    reason: () => abortReason,
+    dispose: () => { clearTimeout(idleTimer); clearTimeout(totalTimer); }
+  };
+}
+
+/** Añade un `abortSignal` (y opcionalmente un timeout HTTP) sin mutar `params`. */
+function withSignal(
+  params: GenerateContentParameters,
+  signal: AbortSignal,
+  timeoutMs?: number
+): GenerateContentParameters {
+  return {
+    ...params,
+    config: {
+      ...params.config,
+      abortSignal: signal,
+      ...(timeoutMs
+        ? { httpOptions: { ...(params.config?.httpOptions ?? {}), timeout: timeoutMs } }
+        : {})
+    }
+  };
+}
+
 // --- HELPERS ---
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -122,6 +234,9 @@ export async function generateJsonWithProgress(
     onText: (full: string) => void;
     onRetry: (attempt: number, received: number, reason: string) => void;
     onFallback: (reason: string) => void;
+    // Mientras el modelo «piensa» y aún no ha emitido nada, para que la pantalla
+    // no parezca congelada («se queda en recepción del guion y ni progresa»).
+    onWaiting?: (elapsedMs: number) => void;
   }
 ): Promise<string> {
   const STREAM_ATTEMPTS = 2;
@@ -129,9 +244,25 @@ export async function generateJsonWithProgress(
 
   for (let attempt = 1; attempt <= STREAM_ATTEMPTS; attempt++) {
     let accumulated = '';
+    const guard = createTimeoutGuard({
+      firstChunkMs: STREAM_FIRST_CHUNK_MS,
+      stallMs: STREAM_STALL_MS,
+      totalMs: STREAM_TOTAL_MS
+    });
+    // Latido mientras se espera el primer chunk: el modelo puede pensar decenas
+    // de segundos antes de emitir, y sin esto la barra se ve parada.
+    const waitStart = Date.now();
+    let beating = true;
+    const heartbeat = setInterval(() => {
+      if (beating) hooks.onWaiting?.(Date.now() - waitStart);
+    }, 2500);
+    unref(heartbeat);
+    const stopBeat = () => { beating = false; clearInterval(heartbeat); };
     try {
-      const stream = await ai.models.generateContentStream(params);
+      const stream = await ai.models.generateContentStream(withSignal(params, guard.signal));
       for await (const chunk of stream) {
+        guard.ping(); // llegó algo: el stream no está colgado
+        stopBeat();
         const delta = chunk.text ?? '';
         if (!delta) continue;
         accumulated += delta;
@@ -140,24 +271,43 @@ export async function generateJsonWithProgress(
       if (!accumulated.trim()) throw new Error('la API devolvió una respuesta vacía');
       return accumulated;
     } catch (error) {
+      // Si fuimos nosotros quienes abortamos, el `AbortError` del SDK no dice
+      // nada útil: se sustituye por el motivo real (inactividad o tope total).
+      const actual = guard.reason() ?? error;
       // Sin cuota, reintentar solo gasta más cuota; saturado, reintentar en
       // 500 ms no cambia nada. Los dos casos los arregla otro modelo, no otra
-      // vuelta de esta escalera.
-      if (shouldSwitchModel(error)) throw error;
-      lastError = error;
-      hooks.onRetry(attempt, accumulated.length, errorMessage(error));
+      // vuelta de esta escalera. La red y los timeouts sí se reintentan aquí.
+      if (isModelError(actual)) throw actual;
+      lastError = actual;
+      hooks.onRetry(attempt, accumulated.length, errorMessage(actual));
       await sleep(500 * attempt);
+    } finally {
+      stopBeat();
+      guard.dispose();
     }
   }
 
   hooks.onFallback(errorMessage(lastError));
-  const response = await ai.models.generateContent(params);
-  const text = response.text;
-  if (!text || !text.trim()) {
-    throw lastError instanceof Error ? lastError : new Error('la API devolvió una respuesta vacía');
+  const guard = createTimeoutGuard({ totalMs: REQUEST_TOTAL_MS });
+  try {
+    const response = await ai.models.generateContent(withSignal(params, guard.signal, REQUEST_TOTAL_MS));
+    const text = response.text;
+    if (!text || !text.trim()) {
+      throw lastError instanceof Error ? lastError : new Error('la API devolvió una respuesta vacía');
+    }
+    hooks.onText(text);
+    return text;
+  } catch (error) {
+    const actual = guard.reason() ?? error;
+    if (isModelError(actual)) throw actual;
+    // Agotada la escalera contra este modelo por red o timeout: ya no es un
+    // corte transitorio de un intento, así que se marca conmutable para que la
+    // cadena baje al siguiente modelo en vez de rendirse. Un corte de red suelto
+    // (sin pasar por aquí) sigue sin cambiar de modelo.
+    throw markSwitchable(lastError instanceof Error ? lastError : actual);
+  } finally {
+    guard.dispose();
   }
-  hooks.onText(text);
-  return text;
 }
 
 // --- BASE64 <-> BYTES (audio en streaming) ---
@@ -1175,6 +1325,15 @@ export const generateLessonPlan = async (
             },
             onFallback: (reason) => {
               reporter.log(`Streaming no disponible (${briefly(reason)}); se pide la respuesta completa`, 'warn');
+            },
+            onWaiting: (elapsedMs) => {
+              // El modelo aún no ha emitido nada: se mueve el detalle para que no
+              // parezca congelado, sin inventar porcentaje (no hay denominador).
+              if (exercisesStarted || turnsSeen > 0) return;
+              reporter.update('dialogue', {
+                detail: `esperando la respuesta del modelo… (${Math.round(elapsedMs / 1000)} s)`,
+                counters: [{ label: 'Espera', value: `${Math.round(elapsedMs / 1000)} s` }]
+              });
             }
           }
         ),
@@ -1529,9 +1688,15 @@ async function synthesizeWithProgress(
   for (let attempt = 1; attempt <= STREAM_ATTEMPTS; attempt++) {
     const chunks: Uint8Array[] = [];
     let total = 0;
+    const guard = createTimeoutGuard({
+      firstChunkMs: AUDIO_FIRST_CHUNK_MS,
+      stallMs: AUDIO_STALL_MS,
+      totalMs: STREAM_TOTAL_MS
+    });
     try {
-      const stream = await ai.models.generateContentStream(params);
+      const stream = await ai.models.generateContentStream(withSignal(params, guard.signal));
       for await (const chunk of stream) {
+        guard.ping(); // llegó algo: la síntesis no está colgada
         for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
           const data = part.inlineData?.data;
           if (!data) continue;
@@ -1544,19 +1709,31 @@ async function synthesizeWithProgress(
       if (total === 0) throw new Error('el modelo no devolvió datos de audio');
       return concatBytes(chunks, total);
     } catch (error) {
+      const actual = guard.reason() ?? error;
       // Quedarse sin cuota no se arregla repitiendo: cada reintento es otra
       // petición contra el mismo límite. Con los dos intentos de streaming más
       // el fallback sin streaming, un solo 429 gastaba tres llamadas de las
-      // diez que da el nivel gratuito al día. Los errores de red sí se reintentan.
-      if (isQuotaError(error)) throw error;
-      lastError = error;
-      hooks.onRetry(attempt, total, errorMessage(error));
+      // diez que da el nivel gratuito al día. Los errores de red y los timeouts
+      // sí se reintentan.
+      if (isQuotaError(actual)) throw actual;
+      lastError = actual;
+      hooks.onRetry(attempt, total, errorMessage(actual));
       await sleep(500 * attempt);
+    } finally {
+      guard.dispose();
     }
   }
 
   hooks.onFallback(errorMessage(lastError));
-  const response = await ai.models.generateContent(params);
+  const guard = createTimeoutGuard({ totalMs: REQUEST_TOTAL_MS });
+  let response;
+  try {
+    response = await ai.models.generateContent(withSignal(params, guard.signal, REQUEST_TOTAL_MS));
+  } catch (error) {
+    throw guard.reason() ?? error;
+  } finally {
+    guard.dispose();
+  }
   const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
   if (!audioData) {
     console.error('[TTS] No audio data in response. Response structure:', JSON.stringify(response, null, 2));
