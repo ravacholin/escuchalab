@@ -37,6 +37,31 @@ export const GENERATION_MODELS = [
 
 export type GenerationModel = (typeof GENERATION_MODELS)[number];
 
+/**
+ * Cómo limitar el "pensamiento" previo al primer token, por familia de modelo.
+ *
+ * El síntoma que arregla: el guion de la lección se pedía **sin ninguna
+ * configuración de pensamiento**, así que un modelo pensante como
+ * `gemini-3.6-flash` razonaba con presupuesto dinámico y tardaba ~37 s en emitir
+ * el primer token —de ahí que `STREAM_FIRST_CHUNK_MS` tuviera que ser de 90 s—.
+ * Ese silencio inicial era toda la lentitud percibida.
+ *
+ * Se calcula por modelo porque el mismo `config` se reutiliza en toda la cadena y
+ * las familias no toman el mismo control: los 3.x usan `thinkingLevel` y el 2.5
+ * usa `thinkingBudget` numérico. `runWithModelFallback` ya llama a `run(model)`
+ * con el modelo concreto en mano, así que el tope se resuelve ahí.
+ *
+ * Bajar el presupuesto aquí es seguro: la calidad de los ejercicios la sostienen
+ * `verifyExercises()` y los motores deterministas, no la profundidad del
+ * razonamiento; la cadena existe por disponibilidad, no por capacidad.
+ */
+export function thinkingConfigFor(model: string): Record<string, unknown> {
+  // Los 3.x no permiten apagar el pensamiento del todo; `low` es el mínimo.
+  if (model.startsWith('gemini-3')) return { thinkingLevel: 'low' };
+  // 2.5-flash sí admite desactivarlo por completo.
+  return { thinkingBudget: 0 };
+}
+
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 

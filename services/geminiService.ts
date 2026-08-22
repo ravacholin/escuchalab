@@ -16,7 +16,8 @@ import {
   isQuotaError,
   markSwitchable,
   modelsFrom,
-  runWithModelFallback
+  runWithModelFallback,
+  thinkingConfigFor
 } from "./modelFallback";
 import {
   ProgressListener,
@@ -1270,6 +1271,9 @@ export const generateLessonPlan = async (
               systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
               responseMimeType: "application/json",
               temperature: parseRetryBump ? 0.4 : 0.0,
+              // Sin esto el modelo pensante razona con presupuesto dinámico y
+              // tarda ~37 s en emitir el primer token: toda la lentitud del guion.
+              thinkingConfig: thinkingConfigFor(model),
             },
           },
           {

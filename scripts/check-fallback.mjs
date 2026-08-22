@@ -52,7 +52,8 @@ const {
   markSwitchable,
   modelsFrom,
   runWithModelFallback,
-  shouldSwitchModel
+  shouldSwitchModel,
+  thinkingConfigFor
 } = await loadModule('services/modelFallback.ts');
 const { generateJsonWithProgress } = await loadModule('services/geminiService.ts');
 
@@ -85,6 +86,40 @@ const check = (label, condition, detail = '') => {
     modelsFrom(GENERATION_MODELS[0]).length === GENERATION_MODELS.length);
   check('modelsFrom() de un modelo desconocido devuelve la cadena entera',
     modelsFrom('gemini-inventado').length === GENERATION_MODELS.length);
+}
+
+// --- 1b. El tope de pensamiento -------------------------------------------
+// Sin configuración de pensamiento, un modelo pensante razona con presupuesto
+// dinámico y tarda ~37 s en emitir el primer token: toda la lentitud del guion.
+// Un tope que ningún modelo aplique se pierde en silencio, así que se comprueba
+// que cada modelo de la cadena recibe uno acotado, y que las dos familias toman
+// el campo que les corresponde.
+{
+  const isBounded = (cfg) => {
+    if (!cfg || typeof cfg !== 'object') return false;
+    if (typeof cfg.thinkingLevel === 'string') {
+      // Nunca 'high' ni un nivel sin fijar: el objetivo es bajar el pensamiento.
+      return cfg.thinkingLevel === 'minimal' || cfg.thinkingLevel === 'low';
+    }
+    // 'budget' acotado y no dinámico: -1 es AUTOMATIC (presupuesto dinámico),
+    // que es justo lo que hacía lento el primer token.
+    return typeof cfg.thinkingBudget === 'number' && cfg.thinkingBudget >= 0;
+  };
+
+  for (const model of GENERATION_MODELS) {
+    check(
+      `thinkingConfigFor("${model}") acota el pensamiento`,
+      isBounded(thinkingConfigFor(model)),
+      JSON.stringify(thinkingConfigFor(model))
+    );
+  }
+
+  check('los 3.x usan thinkingLevel bajo',
+    thinkingConfigFor('gemini-3.6-flash').thinkingLevel === 'low',
+    JSON.stringify(thinkingConfigFor('gemini-3.6-flash')));
+  check('el 2.5 usa thinkingBudget desactivado',
+    thinkingConfigFor('gemini-2.5-flash').thinkingBudget === 0,
+    JSON.stringify(thinkingConfigFor('gemini-2.5-flash')));
 }
 
 // --- 2. Clasificación de errores -----------------------------------------
