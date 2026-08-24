@@ -649,11 +649,11 @@ const App: React.FC = () => {
                                                 value={customAudioPrompt}
                                                 onChange={(e) => setCustomAudioPrompt(e.target.value)}
                                                 rows={3}
-                                                placeholder="Ej: que uno de los personajes esté nervioso; incluye un malentendido gracioso; ambienta en invierno..."
+                                                placeholder="Ej: que uno de los personajes esté nervioso; una charla entre tres amigos; incluye un malentendido gracioso; ambienta en invierno..."
                                                 className="w-full bg-zinc-900/60 border border-zinc-800 p-3 font-mono text-xs text-white outline-none focus:border-white focus:bg-zinc-900 transition-all placeholder:text-zinc-600 resize-y scrollbar-thin"
                                             />
                                             <p className="mt-1 text-[9px] font-mono text-zinc-600 leading-relaxed">
-                                                Ajusta el contenido del diálogo. No cambia el nivel, el acento ni el número de hablantes.
+                                                Ajusta el contenido del diálogo: tono, personajes, giro… y si lo pides, más de dos hablantes (hasta 4; con tres o más voces cuesta alguna generación extra y se distinguen menos). No cambia el nivel ni el acento.
                                             </p>
                                         </div>
                                         <div>

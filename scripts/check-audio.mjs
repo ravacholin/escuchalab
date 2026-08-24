@@ -249,6 +249,25 @@ for (const accent of Object.values(Accent)) {
   const solo = assignSpeakerVoices(['Locutor'], [{ name: 'Locutor', gender: 'Male' }]);
   check('el monólogo asigna una única voz', solo.length === 1, `${solo.length} voces`);
   check('el monólogo respeta el género del locutor', solo[0].pitchHz < 140, `${solo[0].voice} ${solo[0].pitchHz} Hz`);
+
+  // Tres o más hablantes (solo cuando el usuario lo pide): la garantía es más
+  // débil que para dos —el catálogo no da separación de par a par para tantas—,
+  // pero las voces tienen que ser DISTINTAS y respetar el género donde se puede.
+  const tres = assignSpeakerVoices(
+    ['Ana', 'Marta', 'Diego'],
+    [{ name: 'Ana', gender: 'Female' }, { name: 'Marta', gender: 'Female' }, { name: 'Diego', gender: 'Male' }]
+  );
+  check('tres hablantes reciben tres voces distintas', new Set(tres.map(a => a.voice)).size === 3, tres.map(a => a.voice).join(' / '));
+  check('las dos mujeres reciben voz femenina', tres[0].pitchHz > 170 && tres[1].pitchHz > 170, tres.map(a => `${a.voice} ${a.pitchHz}`).join(' / '));
+  check('el hombre recibe voz masculina', tres[2].pitchHz < 140, `${tres[2].voice} ${tres[2].pitchHz}`);
+  check('las dos voces femeninas de un trío no coinciden', tres[0].voice !== tres[1].voice, `${tres[0].voice} / ${tres[1].voice}`);
+
+  const cuatro = assignSpeakerVoices(
+    ['A', 'B', 'C', 'D'],
+    [{ name: 'A', gender: 'Female' }, { name: 'B', gender: 'Male' }, { name: 'C', gender: 'Female' }, { name: 'D', gender: 'Male' }]
+  );
+  check('cuatro hablantes reciben cuatro voces distintas', new Set(cuatro.map(a => a.voice)).size === 4, cuatro.map(a => a.voice).join(' / '));
+  check('cada una de las cuatro voces trae su tono de referencia', cuatro.every(a => Number.isFinite(a.pitchHz) && a.pitchHz > 0 && a.timbre));
 }
 
 // --- 8. El verificador de voces ------------------------------------------
@@ -383,6 +402,29 @@ for (const accent of Object.values(Accent)) {
     'el texto que se envía no lleva la etiqueta del hablante',
     plan.requests.every(r => r.lines.every(l => !/^(Lucía|Andrés):/.test(l))),
     plan.requests[0].lines[0].slice(0, 20)
+  );
+
+  // Tres hablantes (el usuario los pidió): una petición por voz, ningún turno
+  // perdido y cada petición con una sola voz configurada.
+  const trioCast = [
+    { name: 'Ana', gender: 'Female' },
+    { name: 'Beto', gender: 'Male' },
+    { name: 'Caro', gender: 'Female' }
+  ];
+  const trioDialogue = Array.from({ length: 9 }, (_, i) => ({
+    speaker: ['Ana', 'Beto', 'Caro'][i % 3],
+    text: speech(i + 1)
+  }));
+  const trioPlan = planAudioRequests(trioDialogue, trioCast, Accent.Madrid);
+  check(
+    'tres hablantes cuestan tres peticiones, una por voz',
+    trioPlan.requests.length === 3 && new Set(trioPlan.requests.map(r => r.owner.voice)).size === 3,
+    `${trioPlan.requests.length} peticiones · ${trioPlan.requests.map(r => r.owner.voice).join(' / ')}`
+  );
+  check(
+    'con tres hablantes no se pierde ningún turno',
+    new Set(trioPlan.requests.flatMap(r => r.turnAt)).size === trioDialogue.length,
+    `${new Set(trioPlan.requests.flatMap(r => r.turnAt)).size} de ${trioDialogue.length}`
   );
 
   // Un monólogo sigue siendo una sola petición.

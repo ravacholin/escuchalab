@@ -1065,11 +1065,14 @@ export const generateLessonPlan = async (
   mode: AppMode,
   onProgress?: ProgressListener,
   /**
-   * Instrucciones libres del usuario. Son ADITIVAS: se apilan sobre las reglas
-   * pedagógicas, nunca las sustituyen. Aun si el usuario pide algo que rompe una
-   * invariante (producción escrita, una clave que no se oye…), el verificador y
-   * los motores deterministas siguen filtrando la salida, así que como mucho se
-   * pierde un ejercicio, nunca se cuela uno falso.
+   * Instrucciones libres del usuario. Se siguen con la mayor libertad posible.
+   * En los ejercicios son ADITIVAS y el verificador y los motores deterministas
+   * siguen filtrando la salida, así que aunque el usuario pida algo que rompa una
+   * invariante de corrección (producción escrita, una clave que no se oye…), como
+   * mucho se pierde un ejercicio y nunca se cuela uno falso. En el guion pueden
+   * ampliar incluso el número de hablantes por encima del habitual (uno/dos): el
+   * tope duro solo se levanta hasta `MAX_SPEAKERS` cuando hay un prompt de audio,
+   * y el modelo solo lo supera si el propio usuario lo pide (ver SPEAKERS).
    */
   customPrompts?: { audio?: string; exercises?: string }
 ): Promise<LessonPlan> => {
@@ -1142,8 +1145,12 @@ export const generateLessonPlan = async (
   const blueprint = getBlueprint(level, textType, mode, dataPoint, length);
   const customAudioPrompt = customPrompts?.audio?.trim();
   const customExercisePrompt = customPrompts?.exercises?.trim();
+  // El tope duro de hablantes solo se levanta cuando el usuario escribió un
+  // prompt de audio. Aun así el modelo solo pasa de dos si el prompt lo pide
+  // explícitamente: por defecto se le sigue exigiendo el número de siempre.
+  const allowMoreSpeakers = Boolean(customAudioPrompt);
   const exerciseLogic = buildExercisePrompt(blueprint) + (customExercisePrompt
-    ? `\n\nPREFERENCIAS DEL USUARIO PARA LOS EJERCICIOS (respétalas SIEMPRE que no contradigan los PRINCIPIOS INNEGOCIABLES ni cambien el formato, la etapa, la habilidad ni el número de ejercicios pedidos arriba; si chocan, mandan las reglas): ${customExercisePrompt}`
+    ? `\n\nPREFERENCIAS DEL USUARIO PARA LOS EJERCICIOS: aplícalas con la mayor libertad posible al contenido, el enfoque, la dificultad y los ejemplos. El sistema fija cuántos ejercicios hay y de qué formato, etapa y habilidad es cada uno (eso no lo cambies); dentro de ese marco, adapta todo lo que puedas a estas preferencias. Los únicos principios innegociables son de corrección: nada de producción escrita u oral, y ninguna clave que no se oiga en el audio. Preferencias: ${customExercisePrompt}`
     : '');
   const registerInstruction = getRegisterInstruction(textType);
 
@@ -1224,16 +1231,25 @@ export const generateLessonPlan = async (
   for (let attempt = 1; attempt <= MAX_SPEAKER_RETRIES; attempt++) {
     if (attempt > 1) reporter.reset(['dialogue', 'exercises', 'parse']);
     reporter.start('prompt');
+    const defaultSpeakerWord = numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES';
+    // Cuántos hablantes se admiten como máximo en esta generación: el número de
+    // siempre salvo que el usuario haya abierto la puerta con un prompt de audio.
+    const speakerCap = allowMoreSpeakers ? MAX_SPEAKERS : numSpeakers;
     // Strengthen constraint on retry attempts
-    const speakerEmphasis = attempt > 1
-      ? `⚠️ REINTENTO ${attempt}/${MAX_SPEAKER_RETRIES}: DETECCIÓN PREVIA DE MÁS DE 2 PERSONAJES. ESTO ES ABSOLUTAMENTE CRÍTICO - USA SOLO ${numSpeakers} ${numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES'}. NO AGREGUES PERSONAJES SECUNDARIOS, MESEROS, RECEPCIONISTAS, ETC.`
-      : `CRITICAL: El diálogo debe tener EXACTAMENTE ${numSpeakers} ${numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES'} hablando. NUNCA más de 2 personajes. El sistema TTS solo soporta máximo 2 voces.`;
+    const speakerEmphasis = allowMoreSpeakers
+      ? (attempt > 1
+          ? `⚠️ REINTENTO ${attempt}/${MAX_SPEAKER_RETRIES}: el guion trajo demasiados personajes con turnos de habla. Usa como MÁXIMO ${MAX_SPEAKERS} personajes.`
+          : `Por defecto ${numSpeakers} ${defaultSpeakerWord}. Puedes usar MÁS de dos personajes SOLO si las instrucciones del usuario en USER_AUDIO lo piden explícitamente (nombran a más personas, piden un grupo, una reunión, una mesa redonda, varias voces…). En ese caso usa los que la escena necesite, hasta un máximo de ${MAX_SPEAKERS} personajes con turnos de habla, cada uno con un nombre estable y consistente en todos sus turnos. Si el usuario NO pide más personajes, mantén EXACTAMENTE ${numSpeakers}.`)
+      : (attempt > 1
+          ? `⚠️ REINTENTO ${attempt}/${MAX_SPEAKER_RETRIES}: DETECCIÓN PREVIA DE MÁS DE 2 PERSONAJES. ESTO ES ABSOLUTAMENTE CRÍTICO - USA SOLO ${numSpeakers} ${defaultSpeakerWord}. NO AGREGUES PERSONAJES SECUNDARIOS, MESEROS, RECEPCIONISTAS, ETC.`
+          : `CRITICAL: El diálogo debe tener EXACTAMENTE ${numSpeakers} ${defaultSpeakerWord} hablando. NUNCA más de 2 personajes. El sistema TTS solo soporta máximo 2 voces.`);
 
-    // Instrucciones libres del usuario sobre el CONTENIDO del audio. Se aplican
-    // al guion (tema, tono, personajes, giro…) pero nunca por encima del nivel,
-    // el registro, la localización ni el número de hablantes.
+    // Instrucciones libres del usuario sobre el CONTENIDO del audio. Se siguen
+    // con la mayor libertad posible —tema, tono, personajes, número de hablantes
+    // (ver SPEAKERS), giro…— y solo el nivel, el registro y la localización se
+    // mantienen por encima.
     const customAudioBlock = customAudioPrompt
-      ? `\n  USER_AUDIO (preferencias del usuario para el guion; respétalas mientras no contradigan NIVEL, REGISTER, LOCALIZE ni SPEAKERS): ${customAudioPrompt}`
+      ? `\n  USER_AUDIO (preferencias del usuario para el guion; síguelas con la mayor libertad posible —incluido el número de personajes si lo pides, según SPEAKERS— mientras no contradigan NIVEL, REGISTER ni LOCALIZE): ${customAudioPrompt}`
       : '';
 
     const prompt = `
@@ -1429,19 +1445,21 @@ export const generateLessonPlan = async (
         delete plan.ambientScene;
       }
 
-      // Validate speaker count
+      // Validate speaker count. El tope es 2 salvo que el usuario haya pedido más
+      // con un prompt de audio, en cuyo caso llega hasta MAX_SPEAKERS: cada
+      // hablante se sintetiza en su propia petición y ninguno se pierde del audio.
       const uniqueSpeakers = new Set(plan.dialogue.map(d => d.speaker?.trim()).filter(Boolean));
-      if (uniqueSpeakers.size > 2) {
-        console.warn(`[Attempt ${attempt}/${MAX_SPEAKER_RETRIES}] Detected ${uniqueSpeakers.size} speakers: ${Array.from(uniqueSpeakers).join(', ')}. Retrying...`);
+      if (uniqueSpeakers.size > speakerCap) {
+        console.warn(`[Attempt ${attempt}/${MAX_SPEAKER_RETRIES}] Detected ${uniqueSpeakers.size} speakers (cap ${speakerCap}): ${Array.from(uniqueSpeakers).join(', ')}. Retrying...`);
         reporter.fail('parse', `${uniqueSpeakers.size} hablantes: ${Array.from(uniqueSpeakers).join(', ')}`);
         reporter.log(
-          `Descartado: el guion trae ${uniqueSpeakers.size} hablantes y el TTS admite 2. Reintento ${attempt + 1}/${MAX_SPEAKER_RETRIES}`,
+          `Descartado: el guion trae ${uniqueSpeakers.size} hablantes y el máximo es ${speakerCap}. Reintento ${attempt + 1}/${MAX_SPEAKER_RETRIES}`,
           'warn'
         );
 
         // If this was the last attempt, throw error
         if (attempt === MAX_SPEAKER_RETRIES) {
-          throw new Error(`El sistema no pudo generar un diálogo con máximo 2 personajes después de ${MAX_SPEAKER_RETRIES} intentos.`);
+          throw new Error(`El sistema no pudo generar un diálogo con máximo ${speakerCap} ${speakerCap === 1 ? 'personaje' : 'personajes'} después de ${MAX_SPEAKER_RETRIES} intentos.`);
         }
 
         // Otherwise, continue to next iteration (retry)
@@ -1820,6 +1838,18 @@ const pitchDistance = (a: number, b: number) => Math.abs(12 * Math.log2(a / b));
  */
 const MIN_VOICE_SEPARATION_SEMITONES = 4.5;
 
+/**
+ * Tope de hablantes cuando el usuario abre la puerta con un prompt de audio (ver
+ * `assignSpeakerVoices` y la validación en `generateLessonPlan`). Por defecto el
+ * app trabaja con uno o dos —el coste fijo de dos peticiones y las dos voces bien
+ * separadas—; este límite existe solo para el caso en que el usuario pide
+ * explícitamente más personas. Cada hablante cuesta al menos una petición de TTS
+ * (el tier gratuito da 10 al día), así que se mantiene modesto: por encima de dos
+ * voces el catálogo tampoco garantiza separación de par a par (los cuatro hombres
+ * caben en 2,2 semitonos), y más peticiones acercan el límite diario.
+ */
+const MAX_SPEAKERS = 4;
+
 export interface SpeakerVoiceAssignment {
   /** La etiqueta tal como viene en el guion. */
   speaker: string;
@@ -1915,6 +1945,47 @@ function pickVoicePair(genders: Array<Character['gender'] | undefined>): [TtsVoi
 }
 
 /**
+ * Elige N voces distintas para tres o más hablantes. Este camino solo se usa
+ * cuando el usuario pide explícitamente más de dos personas (ver la validación
+ * en `generateLessonPlan`); su garantía es más débil que la de dos voces, porque
+ * el catálogo no da separación de par a par para tantas: los cuatro hombres caben
+ * en 2,2 semitonos. Lo que sí se garantiza es que las voces son **distintas** y
+ * **lo más separadas que el catálogo permita**, respetando el género donde se
+ * puede. Estrategia de punto más lejano: se siembra con la voz más aguda del
+ * grupo del primer hablante y cada siguiente maximiza la distancia mínima a las
+ * ya elegidas.
+ */
+function pickVoiceSet(genders: Array<Character['gender'] | undefined>): TtsVoice[] {
+  const chosen: TtsVoice[] = [];
+
+  for (const gender of genders) {
+    const unused = TTS_VOICES.filter(v => !chosen.some(c => c.name === v.name));
+    if (!unused.length) {
+      // Más hablantes que voces en el catálogo (no debería ocurrir bajo
+      // MAX_SPEAKERS): se admite repetir antes que dejar a alguien mudo.
+      chosen.push(TTS_VOICES[chosen.length % TTS_VOICES.length]);
+      continue;
+    }
+    const matching = unused.filter(v => gender && v.gender === gender);
+    const pool = matching.length ? matching : unused;
+
+    let best = pool[0];
+    let bestScore = -Infinity;
+    for (const v of pool) {
+      // Con nadie elegido todavía se prefiere una voz extrema (la más aguda) para
+      // que el conjunto tenga de dónde separarse; después, el punto más lejano.
+      const score = chosen.length
+        ? Math.min(...chosen.map(c => pitchDistance(c.pitchHz, v.pitchHz)))
+        : v.pitchHz;
+      if (score > bestScore) { bestScore = score; best = v; }
+    }
+    chosen.push(best);
+  }
+
+  return chosen;
+}
+
+/**
  * Asigna una voz distinta a cada hablante. Distinta **y separable**: no basta
  * con que el nombre de la voz sea otro. Se calcula una vez para todo el diálogo
  * y se reutiliza en cada tramo y en cada reintento.
@@ -1931,12 +2002,13 @@ export function assignSpeakerVoices(speakers: string[], characters: Character[])
     return [{ speaker: speakers[0], label: labels[0], voice: voice.name, pitchHz: voice.pitchHz, timbre: voice.timbre }];
   }
 
-  const [first, second] = pickVoicePair([genders[0], genders[1]]);
-  const chosen = [first, second];
+  // Dos hablantes: el par más separado que respete el género (el caso de siempre).
+  // Tres o más (solo si el usuario lo pidió): N voces distintas y bien repartidas.
+  const chosen = speakers.length === 2
+    ? pickVoicePair([genders[0], genders[1]])
+    : pickVoiceSet(genders);
 
   return speakers.map((speaker, i) => {
-    // Solo se sintetizan los dos hablantes con más turnos, pero si llegara un
-    // tercero aquí no puede repetir voz.
     const voice = chosen[i] || TTS_VOICES.find(v => !chosen.some(c => c.name === v.name)) || TTS_VOICES[i % TTS_VOICES.length];
     return { speaker, label: labels[i], voice: voice.name, pitchHz: voice.pitchHz, timbre: voice.timbre };
   });
@@ -2062,7 +2134,9 @@ export function planAudioRequests(
   if (sortedSpeakers.length === 0) return null;
 
   const isMultiSpeaker = sortedSpeakers.length >= 2;
-  const assignments = assignSpeakerVoices(sortedSpeakers.slice(0, 2), characters);
+  // Hasta dos por defecto; más solo cuando el usuario lo pidió y la validación
+  // aguas arriba lo dejó pasar. Cada hablante se sintetiza en su propia petición.
+  const assignments = assignSpeakerVoices(sortedSpeakers.slice(0, MAX_SPEAKERS), characters);
 
   // Cada turno guarda su posición en el diálogo: se piden agrupados por hablante
   // y hay que devolverlos a su sitio al montar la pista.
@@ -2145,15 +2219,15 @@ export const generateAudio = async (
   reporter.finish(
     'prepare',
     `${plural(dialogue.length, 'turno', 'turnos')} · ${formatCount(spokenChars)} caracteres de habla · ` +
-      `${isMultiSpeaker ? 'dos voces' : 'una voz'} (${assignedVoices.join(', ')}) · ` +
+      `${isMultiSpeaker ? plural(assignments.length, 'voz', 'voces') : 'una voz'} (${assignedVoices.join(', ')}) · ` +
       `${plural(totalChunks, 'petición', 'peticiones')}`
   );
   reporter.log(`Modelo TTS: ${AUDIO_MODEL} · PCM ${TTS_SAMPLE_RATE / 1000} kHz 16 bits mono`, 'info');
   if (isMultiSpeaker) {
     reporter.log(
       'Una petición por hablante, con una sola voz configurada en cada una: no hay atribución ' +
-        'que el modelo pueda equivocar, así que las dos voces están garantizadas sin gastar ' +
-        'ninguna petición en comprobarlo. Los turnos se intercalan aquí, al recibirlos.',
+        'que el modelo pueda equivocar, así que cada voz está garantizada sin gastar ninguna ' +
+        'petición en comprobarlo. Los turnos se intercalan aquí, al recibirlos.',
       'info'
     );
   }
