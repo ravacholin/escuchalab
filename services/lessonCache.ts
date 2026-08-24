@@ -27,6 +27,11 @@ export interface LessonCacheKeyParts {
   length: Length;
   textType: TextType;
   accent: Accent;
+  /** Instrucciones libres del usuario para el guion. Cambian el resultado, así
+   *  que forman parte de la clave: sin esto, dos prompts distintos colisionarían. */
+  customAudioPrompt?: string;
+  /** Instrucciones libres del usuario para los ejercicios. */
+  customExercisePrompt?: string;
 }
 
 interface CachedLesson {
@@ -52,7 +57,16 @@ export const isCacheable = (parts: LessonCacheKeyParts): boolean =>
   parts.mode !== AppMode.AccentChallenge;
 
 export const lessonCacheKey = (parts: LessonCacheKeyParts): string =>
-  [parts.mode, parts.level, parts.textType, parts.accent, parts.length, parts.topic.trim()].join(' :: ');
+  [
+    parts.mode,
+    parts.level,
+    parts.textType,
+    parts.accent,
+    parts.length,
+    parts.topic.trim(),
+    (parts.customAudioPrompt ?? '').trim(),
+    (parts.customExercisePrompt ?? '').trim(),
+  ].join(' :: ');
 
 // --- BASE64 <-> BYTES (el audio circula en base64, se guarda en crudo) ---
 const base64ToBytes = (base64: string): Uint8Array => {

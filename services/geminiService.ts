@@ -1063,7 +1063,15 @@ export const generateLessonPlan = async (
   textType: TextType,
   accent: Accent,
   mode: AppMode,
-  onProgress?: ProgressListener
+  onProgress?: ProgressListener,
+  /**
+   * Instrucciones libres del usuario. Son ADITIVAS: se apilan sobre las reglas
+   * pedagógicas, nunca las sustituyen. Aun si el usuario pide algo que rompe una
+   * invariante (producción escrita, una clave que no se oye…), el verificador y
+   * los motores deterministas siguen filtrando la salida, así que como mucho se
+   * pierde un ejercicio, nunca se cuela uno falso.
+   */
+  customPrompts?: { audio?: string; exercises?: string }
 ): Promise<LessonPlan> => {
 
   const reporter = new ProgressReporter('plan', PLAN_STEPS, onProgress);
@@ -1132,7 +1140,11 @@ export const generateLessonPlan = async (
   }
 
   const blueprint = getBlueprint(level, textType, mode, dataPoint, length);
-  const exerciseLogic = buildExercisePrompt(blueprint);
+  const customAudioPrompt = customPrompts?.audio?.trim();
+  const customExercisePrompt = customPrompts?.exercises?.trim();
+  const exerciseLogic = buildExercisePrompt(blueprint) + (customExercisePrompt
+    ? `\n\nPREFERENCIAS DEL USUARIO PARA LOS EJERCICIOS (respétalas SIEMPRE que no contradigan los PRINCIPIOS INNEGOCIABLES ni cambien el formato, la etapa, la habilidad ni el número de ejercicios pedidos arriba; si chocan, mandan las reglas): ${customExercisePrompt}`
+    : '');
   const registerInstruction = getRegisterInstruction(textType);
 
   const stageCount = new Set(blueprint.map(slot => slot.stage)).size;
@@ -1217,6 +1229,13 @@ export const generateLessonPlan = async (
       ? `⚠️ REINTENTO ${attempt}/${MAX_SPEAKER_RETRIES}: DETECCIÓN PREVIA DE MÁS DE 2 PERSONAJES. ESTO ES ABSOLUTAMENTE CRÍTICO - USA SOLO ${numSpeakers} ${numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES'}. NO AGREGUES PERSONAJES SECUNDARIOS, MESEROS, RECEPCIONISTAS, ETC.`
       : `CRITICAL: El diálogo debe tener EXACTAMENTE ${numSpeakers} ${numSpeakers === 1 ? 'PERSONAJE' : 'PERSONAJES'} hablando. NUNCA más de 2 personajes. El sistema TTS solo soporta máximo 2 voces.`;
 
+    // Instrucciones libres del usuario sobre el CONTENIDO del audio. Se aplican
+    // al guion (tema, tono, personajes, giro…) pero nunca por encima del nivel,
+    // el registro, la localización ni el número de hablantes.
+    const customAudioBlock = customAudioPrompt
+      ? `\n  USER_AUDIO (preferencias del usuario para el guion; respétalas mientras no contradigan NIVEL, REGISTER, LOCALIZE ni SPEAKERS): ${customAudioPrompt}`
+      : '';
+
     const prompt = `
   JSON Lesson (Spanish). Modo: ${mode}. Nivel: ${level}. Tema: ${finalTopic}. Accent: ${accent}.
 
@@ -1224,7 +1243,7 @@ export const generateLessonPlan = async (
   RULES: ${constraint}
   REGISTER: ${registerInstruction}
   LOCALIZE: ${localizationInstruction}
-  SPEAKERS: ${speakerEmphasis}
+  SPEAKERS: ${speakerEmphasis}${customAudioBlock}
   EXERCISES: ${exerciseLogic}
   ${lengthInstruction}
   AMBIENT: ${ambientInstruction}

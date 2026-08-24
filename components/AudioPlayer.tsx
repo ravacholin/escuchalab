@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX, Download } from 'lucide-react';
 import { resolveAmbienceScene } from '../services/ambiencePresets';
 import {
   AmbienceEngine,
@@ -24,6 +24,8 @@ interface AudioPlayerProps {
   /** A scene id the model named, if it produced a valid one. */
   sceneHint?: string;
   hideTrackInfo?: boolean; // Hide source metadata
+  /** Base filename (sin extensión) para descargar el audio de la lección. */
+  downloadName?: string;
 }
 
 // ----------------------------------------------------------------------
@@ -124,6 +126,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   scenarioActionLabel,
   textType,
   sceneHint,
+  downloadName,
 }) => {
   const speechRef = useRef<HTMLAudioElement | null>(null);
 
@@ -397,6 +400,32 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     setIsPlaying(true);
   };
 
+  // Descarga el audio hablado de la lección como WAV. Reutiliza el mismo blob
+  // que ya se reproduce (`speechUrl`); es sólo la voz, sin el ambiente, que se
+  // mezcla en vivo en el navegador y no forma parte del archivo generado.
+  const sanitizeFilename = (name: string) =>
+    (name || 'escuchalab')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .toLowerCase()
+      .slice(0, 60) || 'escuchalab';
+
+  const handleDownload = () => {
+    if (!speechUrl) return;
+    try {
+      const a = document.createElement('a');
+      a.href = speechUrl;
+      a.download = `${sanitizeFilename(downloadName || 'escuchalab')}.wav`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (e) {
+      console.warn('[Audio] Descarga fallida.', e);
+    }
+  };
+
   const formatTime = (t: number) => {
     if (isNaN(t)) return '00:00';
     const m = Math.floor(t / 60);
@@ -543,6 +572,16 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           >
             <span className="font-mono text-[10px] font-bold block">{playbackRate}x</span>
             <span className="text-[8px] uppercase text-zinc-600 group-hover:text-black">Vel</span>
+          </button>
+          <button
+            onClick={handleDownload}
+            disabled={!speechUrl}
+            title="Descargar audio (WAV, solo voz)"
+            aria-label="Descargar audio"
+            className="flex-1 flex flex-col items-center justify-center hover:bg-white hover:text-black transition-colors disabled:opacity-40 group"
+          >
+            <Download size={14} className="mb-0.5" />
+            <span className="text-[8px] uppercase text-zinc-600 group-hover:text-black">WAV</span>
           </button>
         </div>
       </div>
