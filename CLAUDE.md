@@ -556,11 +556,17 @@ Two kinds changed *datum*, not just spelling, because their natural datum is not
 - Retry logic with exponential backoff (3 attempts, 1s → 2s delay)
 
 ### Persistence Strategy
-- Generated lessons are cached in **IndexedDB** (`services/lessonCache.ts`), keyed by `{mode, level, textType, accent, length, topic}`, LRU-capped at 20 entries. The dialogue is requested with `temperature: 0.0`, so repeating a configuration used to re-pay the whole pipeline for essentially the same lesson. Only *complete* lessons (plan **and** audio) are stored — a cached lesson without audio would have to go back to the TTS anyway. `AppMode.AccentChallenge` is **never** cached: it draws two random accents per run, so its key does not describe its contents. A «Regenerar» button in the header invalidates the entry and forces a fresh lesson. The PCM is stored as raw bytes and re-encoded to base64 on read, so the app boundary is unchanged.
+- Generated lessons are cached in **IndexedDB** (`services/lessonCache.ts`), keyed by `{mode, level, textType, accent, length, topic, customAudioPrompt, customExercisePrompt}`, LRU-capped at 20 entries. The two custom-prompt fields are part of the key on purpose: two different free-text instructions produce different lessons, so leaving them out would serve one from the other's entry. The dialogue is requested with `temperature: 0.0`, so repeating a configuration used to re-pay the whole pipeline for essentially the same lesson. Only *complete* lessons (plan **and** audio) are stored — a cached lesson without audio would have to go back to the TTS anyway. `AppMode.AccentChallenge` is **never** cached: it draws two random accents per run, so its key does not describe its contents. A «Regenerar» button in the header invalidates the entry and forces a fresh lesson. The PCM is stored as raw bytes and re-encoded to base64 on read, so the app boundary is unchanged.
 - API key stored in localStorage for session continuity
 - Lazy initialization in `useState` prevents auth screen flash
 - Storage event listener detects cross-tab key changes
 - Failsafe recovery on mount if lazy init failed
+
+### Custom Prompts (audio + exercises)
+The config screen has an **«Instrucciones personalizadas»** panel (`App.tsx`) with two free-text fields, available in every mode: one steers the **dialogue** and one steers the **exercises**. Both are **additive**, never a replacement: they travel to `generateLessonPlan()` as `customPrompts: { audio, exercises }` and are injected as clearly-labelled extra blocks (`USER_AUDIO` in the main prompt; a `PREFERENCIAS DEL USUARIO` line appended to `buildExercisePrompt()`'s output) that the model is told to honour **only where they don't contradict** level, register, localization, speaker count, the fixed formats/stages/skills, or the non-negotiable principles. This is safe precisely because the guardrails downstream are unchanged: `verifyExercises()` and the deterministic engines still filter everything, so a user instruction that would produce a false key or written production loses at most one card rather than shipping something wrong. Both strings are part of the cache key (see Persistence Strategy).
+
+### Audio Download
+The player (`components/AudioPlayer.tsx`) exposes a **WAV download** of the generated speech, reusing the same `pcmToWavBlob` object URL it already plays — so it costs nothing extra and needs no re-encode. It is **voice only**: the ambience is mixed live in the browser (see Ambient Sound System) and is not part of the file. The filename comes from the lesson title (`downloadName` prop), slugified (NFD-stripped, non-alphanumerics collapsed to `-`, ≤60 chars, with an `escuchalab` fallback).
 
 ### Styling Approach
 - Tailwind CSS via CDN (no build-time processing)

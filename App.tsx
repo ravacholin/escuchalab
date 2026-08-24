@@ -12,7 +12,7 @@ import AuthScreen from './components/AuthScreen';
 import SelectInput from './components/SelectInput';
 import MatrixSelector from './components/MatrixSelector';
 import { SCENARIO_DATABASE, ScenarioContext, ScenarioAction } from './data/scenarios';
-import { ArrowRight, AlertTriangle, BookOpen, ChevronDown, ChevronUp, Mic2, Layout, Search, Key, RefreshCw } from 'lucide-react';
+import { ArrowRight, AlertTriangle, BookOpen, ChevronDown, ChevronUp, Mic2, Layout, Search, Key, RefreshCw, Terminal, Sparkles } from 'lucide-react';
 
 const LEVELS = Object.values(Level);
 const LENGTHS = Object.values(Length);
@@ -162,6 +162,13 @@ const App: React.FC = () => {
     // Dedicated Input for Vocabulary Mode
     const [vocabTopic, setVocabTopic] = useState('');
 
+    // Instrucciones libres del usuario (avanzado): una para el guion del audio y
+    // otra para los ejercicios. Se apilan sobre las reglas pedagógicas, no las
+    // sustituyen. Disponibles en cualquier modo.
+    const [customAudioPrompt, setCustomAudioPrompt] = useState('');
+    const [customExercisePrompt, setCustomExercisePrompt] = useState('');
+    const [showAdvancedPrompts, setShowAdvancedPrompts] = useState(false);
+
     // La lección se abre por los ejercicios, no por la transcripción: leer el
     // texto antes de escuchar convierte cualquier tarea de comprensión auditiva
     // en una de comprensión lectora.
@@ -306,13 +313,18 @@ const App: React.FC = () => {
             return;
         }
 
+        const trimmedAudioPrompt = customAudioPrompt.trim();
+        const trimmedExercisePrompt = customExercisePrompt.trim();
+
         const cacheParts = {
             mode: state.config.mode,
             level: state.config.level,
             topic: finalTopic,
             length: state.config.length,
             textType: state.config.textType,
-            accent: state.config.accent
+            accent: state.config.accent,
+            customAudioPrompt: trimmedAudioPrompt,
+            customExercisePrompt: trimmedExercisePrompt
         };
         const cacheKey = lessonCacheKey(cacheParts);
         const cacheable = isCacheable(cacheParts);
@@ -342,7 +354,8 @@ const App: React.FC = () => {
                 state.config.textType,
                 state.config.accent,
                 state.config.mode,
-                trackProgress
+                trackProgress,
+                { audio: trimmedAudioPrompt, exercises: trimmedExercisePrompt }
             );
 
             setState(prev => ({
@@ -467,7 +480,7 @@ const App: React.FC = () => {
 
                     <div className="flex items-center justify-between mt-12 md:mt-0">
                         <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">
-                            v3.8.0 // PERSISTENCE FIX
+                            v3.9.0 // DESCARGA + PROMPTS
                         </div>
                         <button onClick={handleResetKey} className="text-zinc-700 hover:text-white transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2">
                             <Key size={10} /> Configuración de Clave
@@ -602,6 +615,65 @@ const App: React.FC = () => {
                                     onChange={(e: any) => setState({ ...state, config: { ...state.config, length: e.target.value } })}
                                 />
                             </div>
+
+                            {/* --- ADVANCED: CUSTOM PROMPTS --- */}
+                            {/* Instrucciones libres para el guion y para los ejercicios. Son
+                                aditivas: se apilan sobre las reglas pedagógicas, no las
+                                sustituyen (el verificador y los motores siguen filtrando). */}
+                            <div className="pt-4 border-t border-zinc-900">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAdvancedPrompts(v => !v)}
+                                    aria-expanded={showAdvancedPrompts}
+                                    className="w-full flex items-center justify-between text-left group"
+                                >
+                                    <span className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-zinc-500 group-hover:text-white transition-colors">
+                                        <Terminal size={12} />
+                                        Instrucciones personalizadas
+                                        {(customAudioPrompt.trim() || customExercisePrompt.trim()) && (
+                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Instrucciones activas" />
+                                        )}
+                                    </span>
+                                    {showAdvancedPrompts
+                                        ? <ChevronUp size={14} className="text-zinc-600" />
+                                        : <ChevronDown size={14} className="text-zinc-600" />}
+                                </button>
+
+                                {showAdvancedPrompts && (
+                                    <div className="mt-4 space-y-5 animate-in fade-in slide-in-from-top-1 duration-200">
+                                        <div>
+                                            <label className="block text-[10px] font-mono uppercase tracking-widest text-zinc-400 mb-2">
+                                                Guion del audio
+                                            </label>
+                                            <textarea
+                                                value={customAudioPrompt}
+                                                onChange={(e) => setCustomAudioPrompt(e.target.value)}
+                                                rows={3}
+                                                placeholder="Ej: que uno de los personajes esté nervioso; incluye un malentendido gracioso; ambienta en invierno..."
+                                                className="w-full bg-zinc-900/60 border border-zinc-800 p-3 font-mono text-xs text-white outline-none focus:border-white focus:bg-zinc-900 transition-all placeholder:text-zinc-600 resize-y scrollbar-thin"
+                                            />
+                                            <p className="mt-1 text-[9px] font-mono text-zinc-600 leading-relaxed">
+                                                Ajusta el contenido del diálogo. No cambia el nivel, el acento ni el número de hablantes.
+                                            </p>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-mono uppercase tracking-widest text-zinc-400 mb-2">
+                                                Ejercicios
+                                            </label>
+                                            <textarea
+                                                value={customExercisePrompt}
+                                                onChange={(e) => setCustomExercisePrompt(e.target.value)}
+                                                rows={3}
+                                                placeholder="Ej: céntrate en los conectores; que las preguntas sean más difíciles; enfatiza el vocabulario de negocios..."
+                                                className="w-full bg-zinc-900/60 border border-zinc-800 p-3 font-mono text-xs text-white outline-none focus:border-white focus:bg-zinc-900 transition-all placeholder:text-zinc-600 resize-y scrollbar-thin"
+                                            />
+                                            <p className="mt-1 text-[9px] font-mono text-zinc-600 leading-relaxed">
+                                                Orienta las preguntas dentro de los formatos y etapas ya previstos. Las claves se siguen verificando contra el audio.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
 
                         <button
@@ -689,6 +761,7 @@ const App: React.FC = () => {
                                 scenarioLabel={state.config.mode === AppMode.Standard && !isCustomMode ? selectedLocus.label : undefined}
                                 scenarioActionLabel={state.config.mode === AppMode.Standard && !isCustomMode ? selectedModus.label : undefined}
                                 hideTrackInfo={state.config.mode === AppMode.AccentChallenge}
+                                downloadName={state.lessonPlan?.title}
                             />
                         ) : (
                             <div className="p-4 text-center font-mono text-xs text-zinc-500 uppercase">
