@@ -951,6 +951,25 @@ ${slotBlock}
 Devuélvelos en el array "exercises" en ese mismo orden.`;
 };
 
+/**
+ * El principio que ata el tono a la SITUACIÓN, no al acento, y que impide que
+ * el perfil dialectal empuje jerga donde la escena pide respeto.
+ *
+ * El síntoma que arregla: en una consulta médica, un trámite o una atención al
+ * cliente aparecían "che" y lunfardo porque el `REGISTER` genérico del diálogo
+ * "PERMITÍA coloquialismos y léxico dialectal del acento" sin condición, y esa
+ * línea pesaba más que el registro fino de la escena (que además iba enterrado
+ * dentro de `Tema:`). Lo regional tiene que oírse en cómo se pronuncia y se
+ * conjuga, no en las muletillas: así la variante se mantiene sin romper el tono.
+ */
+const REGISTER_CONSISTENCY =
+  'CONSISTENCIA DE REGISTRO: el tono lo fija la SITUACIÓN, no el acento. Lo regional se oye en la ' +
+  'PRONUNCIACIÓN, la gramática (voseo/tuteo/ustedeo), el léxico cotidiano y la realia — NO en la jerga. ' +
+  'Los apelativos y muletillas coloquiales ("che", "boludo", "weón", "güey", "tío", "po", "pana"…) y el ' +
+  'lunfardo/argot solo caben entre pares en contextos distendidos; en trato de servicio, jerárquico, ' +
+  'profesional, sanitario, administrativo o institucional se usa trato de respeto (usted donde corresponda) ' +
+  'y se omiten. Que suene natural y coherente con la escena, nunca forzado ni caricaturesco.';
+
 const getRegisterInstruction = (textType: TextType): string => {
   switch (textType) {
     case TextType.RadioNews:
@@ -961,8 +980,41 @@ const getRegisterInstruction = (textType: TextType): string => {
       return `REGISTRO MONÓLOGO/STORYTELLING: Narrativo cuidado y coherente. Puede ser cercano si es personal, pero con dicción clara. PERMITIDO: coloquialidad moderada y rasgos dialectales suaves si el contexto lo justifica. PROHIBIDO: jerga fuerte o insultos; no saturar con muletillas.`;
     case TextType.Dialogue:
     default:
-      return `REGISTRO DIÁLOGO: Conversación natural entre nativos. Ajusta formalidad según la situación: si hay jerarquía/servicio/trámite, usa trato formal; si es entre pares, registro informal respetuoso. PERMITIDO: coloquialismos y léxico dialectal del acento. EVITA: groserías o lunfardo excesivo salvo que el tema lo exija explícitamente.`;
+      return `REGISTRO DIÁLOGO: Conversación natural entre nativos, con la formalidad que pida la situación: trato de respeto en jerarquía/servicio/trámite/consulta profesional, informal respetuoso entre pares. Los rasgos del acento (pronunciación, gramática, léxico y realia) son siempre bienvenidos; las groserías y el argot fuerte, solo si el tema lo exige explícitamente.`;
   }
+};
+
+/**
+ * Separa la situación del registro fino de la escena. El selector de escenarios
+ * (Standard) manda el registro preciso de cada lugar (`ScenarioContext.registerInstruction`)
+ * pegado al tema con el marcador `|| Registro: …`. Ese registro es lo que debe
+ * gobernar el tono, así que aquí se extrae para: (a) dejar el `Tema:` limpio y
+ * (b) elevarlo a directiva `REGISTER` autoritativa en vez de dejarlo enterrado.
+ */
+const REGISTER_MARKER = '|| Registro:';
+const extractScenarioRegister = (topic: string): { topic: string; register: string | null } => {
+  const idx = topic.indexOf(REGISTER_MARKER);
+  if (idx === -1) return { topic: topic.trim(), register: null };
+  const register = topic.slice(idx + REGISTER_MARKER.length).trim();
+  return {
+    topic: topic.slice(0, idx).replace(/\s*\|\|\s*$/, '').trim(),
+    register: register.length > 0 ? register : null
+  };
+};
+
+/**
+ * Compone la directiva REGISTER final: la base del formato, el registro concreto
+ * de la escena (si lo hay, y manda sobre la base), y el principio de consistencia
+ * que rige en todos los modos —incluidos Vocabulario, AccentChallenge y tema libre,
+ * donde no hay escenario del que sacar registro pero el tono igual debe ir con la
+ * situación—.
+ */
+const composeRegisterInstruction = (textType: TextType, scenarioRegister: string | null): string => {
+  const base = getRegisterInstruction(textType);
+  const scene = scenarioRegister
+    ? ` REGISTRO DE ESTA SITUACIÓN (manda sobre lo anterior): ${scenarioRegister}`
+    : '';
+  return `${base}${scene} ${REGISTER_CONSISTENCY}`;
 };
 
 // --- PROGRESO MEDIBLE DE LA FASE 1 ---
@@ -1083,8 +1135,13 @@ export const generateLessonPlan = async (
   // DYNAMIC INSTANTIATION WITH STORED KEY
   const ai = getAi();
 
+  // El registro fino de la escena viaja pegado al tema (`… || Registro: …`).
+  // Se separa aquí: el `Tema:` queda limpio (lugar + situación) y el registro
+  // pasa a gobernar la directiva REGISTER en vez de competir enterrado con ella.
+  const { topic: situationTopic, register: scenarioRegister } = extractScenarioRegister(topic);
+
   let profileInstruction = "";
-  let finalTopic = topic;
+  let finalTopic = situationTopic;
   let numSpeakers = (textType === TextType.RadioNews || textType === TextType.Monologue) ? 1 : 2;
 
   // REGLAS ESPECÍFICAS DE NIVEL
@@ -1093,7 +1150,7 @@ export const generateLessonPlan = async (
   // sitios que lo necesitan: el prompt del diálogo (para que se diga) y el
   // blueprint (para que los ejercicios pregunten por él y no por otra cosa).
   const isLowLevel = level === Level.Intro || level === Level.Beginner;
-  const dataPoint = isLowLevel ? inferDataPoint(topic) : undefined;
+  const dataPoint = isLowLevel ? inferDataPoint(situationTopic) : undefined;
   const dataPointInstruction = dataPoint ? DATA_POINTS[dataPoint].instruction : "";
 
   if (level === Level.Intro) {
@@ -1135,7 +1192,7 @@ export const generateLessonPlan = async (
 
   } else if (mode === AppMode.Vocabulary) {
     const baseProfile = DIALECT_PROFILES[accent];
-    profileInstruction = `${baseProfile}. OBJETIVO: DENSIDAD LÉXICA ALTA sobre "${topic}". AMBOS HABLANTES USAN ESTE ACENTO.`;
+    profileInstruction = `${baseProfile}. OBJETIVO: DENSIDAD LÉXICA ALTA sobre "${situationTopic}". AMBOS HABLANTES USAN ESTE ACENTO.`;
 
   } else {
     const baseProfile = DIALECT_PROFILES[accent];
@@ -1152,7 +1209,7 @@ export const generateLessonPlan = async (
   const exerciseLogic = buildExercisePrompt(blueprint) + (customExercisePrompt
     ? `\n\nPREFERENCIAS DEL USUARIO PARA LOS EJERCICIOS: aplícalas con la mayor libertad posible al contenido, el enfoque, la dificultad y los ejemplos. El sistema fija cuántos ejercicios hay y de qué formato, etapa y habilidad es cada uno (eso no lo cambies); dentro de ese marco, adapta todo lo que puedas a estas preferencias. Los únicos principios innegociables son de corrección: nada de producción escrita u oral, y ninguna clave que no se oiga en el audio. Preferencias: ${customExercisePrompt}`
     : '');
-  const registerInstruction = getRegisterInstruction(textType);
+  const registerInstruction = composeRegisterInstruction(textType, scenarioRegister);
 
   const stageCount = new Set(blueprint.map(slot => slot.stage)).size;
   reporter.finish(
