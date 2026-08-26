@@ -75,6 +75,32 @@ export const STEM_MAKEUP = 2.6;    // bundled continuous textures
 export const EVENT_OVER_BED = 10.4;
 
 /**
+ * A single global trim pulling every discrete event DOWN, uniformly, relative to the
+ * bed it sits over — applied at playback (see `fire()`), not baked into the scene's
+ * declared design.
+ *
+ * The headrooms the recipes declare were authored so that the loudest one-shot in a
+ * scene sits *above* its bed: a café at +6 dB, a restaurant at +3, a bar and a market
+ * at +2. For a field recording that is right — a dropped fork is louder than the room.
+ * But this ambience is meant to sit *under* a dialogue as a sense of place, and the ear
+ * reading it as "a place" rather than as "a sound-effects reel" depends on the
+ * continuous bed being the foreground and the discrete events being subordinate to it.
+ * When the loudest thing you hear every few seconds is a pitched porcelain clink poking
+ * over the bed, the whole mix collapses into "little bells over nothing" — which is
+ * exactly the report this trim answers.
+ *
+ * It lives in the runtime `fire()` path rather than in `eventScaleFor` on purpose. The
+ * offline renderer that drives `check:ambience:scenes` reads `eventScaleFor`, and that
+ * check measures whether the scenes are *distinguishable by design* — a question about
+ * the catalogue's diversity, which this presentation choice must not perturb. Because
+ * the trim is one uniform offset, the relative contrast between scenes survives it in
+ * playback too: the café's clinks stay louder than the library's, just all of them sit
+ * further under their beds.
+ */
+export const EVENT_TRIM_DB = 8;
+const EVENT_TRIM = Math.pow(10, -EVENT_TRIM_DB / 20);
+
+/**
  * Turn a scene's declared event headroom into the scale its events are fired at.
  *
  * The old arithmetic multiplied bed gain and event scale by the same boost, which made
@@ -856,6 +882,26 @@ const MATERIALS: Record<string, {
   plastic:   { base: [900, 1900],  ratios: [1, 1.94, 3.2],        decays: [1, 0.3, 0.12],       baseDecay: [0.03, 0.07], noise: 0.95, noiseHz: 3000, body: 0.9, bodyHz: 1500, bodyMs: 18 },
 };
 
+/**
+ * How much of a struck object's sound is its TUNED RING versus its noisy body.
+ *
+ * The "campanitas" report is, at bottom, this ratio being wrong. A cup, a coin, a fork
+ * meeting a plate is overwhelmingly a brief broadband CLINK with only a faint pitched
+ * tail; the decaying sine partials are the least of it. When those partials are as loud
+ * and as long as the contact noise, a cup reads as a glockenspiel note — a little bell.
+ *
+ * So the pitched partials are pulled well below the noisy contact/body (RING_LEVEL) and
+ * their tail is shortened (RING_DECAY_SCALE), while the broadband body that actually
+ * carries the object's identity is brought up a touch (BODY_BOOST). The result is a
+ * clink or a tick with a hint of material, not a tuned chime.
+ *
+ * This is a runtime-timbre change: it is not seen by the offline renderer (which drives
+ * scene-distance) or by the graph-shape runtime check, so it can be judged only by ear.
+ */
+const RING_LEVEL = 0.45;
+const RING_DECAY_SCALE = 0.55;
+const BODY_BOOST = 1.2;
+
 function material(c: EventContext, name: keyof typeof MATERIALS, strength: number, pan: number) {
   const m = MATERIALS[name];
   const base = rand(c.rng, m.base[0], m.base[1]);
@@ -864,14 +910,14 @@ function material(c: EventContext, name: keyof typeof MATERIALS, strength: numbe
     c,
     m.ratios.map((ratio, i) => ({
       freq: base * ratio * (1 + (c.rng() - 0.5) * 0.024),
-      decayS: baseDecay * m.decays[i],
-      amp: (strength / (1 + i * 0.9)),
+      decayS: baseDecay * m.decays[i] * RING_DECAY_SCALE,
+      amp: (strength / (1 + i * 0.9)) * RING_LEVEL,
     })),
     {
       pan,
       noiseAmount: m.noise * strength,
       noiseHz: m.noiseHz,
-      bodyAmount: m.body * strength,
+      bodyAmount: m.body * strength * BODY_BOOST,
       bodyHz: m.bodyHz * rand(c.rng, 0.85, 1.18),
       bodyMs: m.bodyMs * rand(c.rng, 0.8, 1.3),
     },
@@ -1086,18 +1132,23 @@ export const EVENT_SYNTHS: Record<EventKind, EventSynth> = {
     material({ ...c, at: c.at + rand(c.rng, 0.03, 0.09), gain: c.gain * 0.5 }, 'metal', 0.4, pan);
   },
   doorChime: (c) => {
+    // A shop-door chime IS a bell, so it stays one — but the old version was a piercing
+    // 0.85 s ring high up at 1900-2400 Hz struck 2-4 times, which is precisely the
+    // "campanita" a learner hears standing proud of the whole mix. Two strikes, a lower
+    // fundamental, a ring shortened to a third of its length and a soft mallet body turn
+    // it into a brief "ding" you register as a door rather than as a wind-chime.
     const pan = rand(c.rng, -0.5, 0.5);
-    const strikes = randInt(c.rng, 2, 4);
+    const strikes = randInt(c.rng, 1, 2);
     for (let k = 0; k < strikes; k++) {
-      const base = rand(c.rng, 1900, 2400);
+      const base = rand(c.rng, 1500, 1950);
       modalHit(
-        { ...c, at: c.at + k * rand(c.rng, 0.09, 0.22), gain: c.gain * Math.pow(0.72, k) },
+        { ...c, at: c.at + k * rand(c.rng, 0.11, 0.2), gain: c.gain * Math.pow(0.6, k) },
         [
-          { freq: base, decayS: 0.85, amp: 1 },
-          { freq: base * 1.53, decayS: 0.5, amp: 0.5 },
-          { freq: base * 2.31, decayS: 0.2, amp: 0.22 },
+          { freq: base, decayS: 0.3, amp: 1 },
+          { freq: base * 1.53, decayS: 0.18, amp: 0.35 },
+          { freq: base * 2.31, decayS: 0.08, amp: 0.14 },
         ],
-        { pan, noiseAmount: 0.25, noiseHz: 5000 },
+        { pan, noiseAmount: 0.3, noiseHz: 4600, bodyAmount: 0.4, bodyHz: base * 0.8, bodyMs: 22 },
       );
     }
   },
@@ -2285,7 +2336,9 @@ export class AmbienceEngine {
           send,
           at,
           intensity: eff,
-          gain: spec.gain * this.eventScale * (0.55 + eff * 0.75),
+          // EVENT_TRIM keeps the discrete one-shots subordinate to the bed at
+          // playback, so the ambience reads as a place rather than as bells over it.
+          gain: spec.gain * this.eventScale * EVENT_TRIM * (0.55 + eff * 0.75),
           track: this.trackNode,
         },
         this.scene.recipe,
