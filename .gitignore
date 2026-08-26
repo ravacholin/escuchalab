@@ -36,3 +36,7 @@ dist-ssr
 .tts-live/
 .tts-live-*/
 .probe/
+
+# Raw ambience source recordings (fetched by scripts/ambience/build-beds.mjs)
+.ambience-cache/
+scratch-ambience/

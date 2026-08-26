@@ -1,1309 +1,236 @@
 import { TextType } from '../types';
 
+/**
+ * Ambient scene catalogue — the real-recording rebuild.
+ *
+ * The whole previous system synthesised its ambience: 20 DSP-generated stems plus ~39
+ * synthesised "events" (footsteps, cutlery, coins, machines) and formant-synth crowd
+ * babble. It was rebuilt twice and still sounded, in the words that prompted this, like
+ * "un robot en lata" — because synthesised ambience, and synthesised discrete events
+ * above all, read as synthetic almost by definition. The tuned partials of the struck
+ * objects were the worst of it ("campanitas que no corresponden a ningún sonido real").
+ *
+ * This version starts from real sound. Every bed is a short seamless loop cut from a
+ * **real public-domain field recording** of the named kind of place (radio aporee /
+ * Internet Archive, Public Domain Mark 1.0). A real café recording sounds like a café
+ * because it is one; there is nothing to fake. See public/ambience/CREDITS.md.
+ *
+ * On top of that base sits a deliberately small, deliberately subtle layer of
+ * synthesised events — and the one rule that keeps them from sounding robotic: they are
+ * **shaped noise transients only, never tuned oscillators**. A cup set on a table is a
+ * short dull broadband knock, not a ringing partial; a keyboard is a tick; paper is a
+ * rustle. With no sine partials there is no bell to ring, so the failure mode that
+ * produced the "campanitas" cannot occur. Events are used sparingly, mostly to give a
+ * little life to the quiet indoor rooms whose real bed is nearly stationary.
+ *
+ * The engine (services/ambienceEngine.ts) fetches /ambience/<bed>.wav, loops it under
+ * two lightly-detuned playheads for width and to hide the loop, colours it per scene,
+ * and schedules the events. There is no synthetic reverb on the beds: the recordings
+ * carry their own room.
+ */
+
 // ---------------------------------------------------------------------------
-// Scenes
-//
-// This replaces the old five-value `EnvironmentProfile`. That taxonomy had a fatal
-// distribution problem: 30 of the 40 curated scenarios resolved to `OFFICE` and
-// therefore played the identical office.wav — a mechanic's workshop, an art gallery,
-// a wine tasting, a film set and a gym all sounded the same. `NATURE` was unreachable
-// from any curated scenario at all, and the 108 labels belonging to the RadioNews,
-// PodcastInterview and Monologue formats fell through to a keyword regex that almost
-// always landed on `ROOM`, the emptiest bed of the five.
-//
-// A scene here is a RECIPE, not an asset: a handful of bundled stems mixed at chosen
-// gains, a room to convolve them in, and the discrete events that happen in that
-// place. Twelve stems (public/ambience/*.wav) therefore cover ~35 scenes, and adding
-// a scene costs a few lines rather than another 2 MB of audio.
+// Beds — the bundled real recordings (plus two honest "quiet air" synth beds).
+// Each corresponds to public/ambience/<id>.wav. Adding one means: bake it with
+// scripts/ambience/build-beds.mjs, add its id here, and reference it from a recipe.
 // ---------------------------------------------------------------------------
 
-export type StemId =
-  | 'babble_close'
-  | 'babble_hall'
-  | 'babble_open'
-  | 'traffic_near'
-  | 'traffic_far'
-  | 'kitchen'
-  | 'hvac_office'
-  | 'room_tone'
-  | 'studio_tone'
-  | 'transit_hum'
-  | 'rain'
-  | 'wind_leaves'
-  // Character stems added to break up the support cluster: `room_tone` was in 29 of
-  // 42 scenes and `hvac_office` in 20, which is why so many places were made of the
-  // same thing.
-  | 'office_life'
-  | 'pa_concourse'
-  | 'tiled_corridor'
-  | 'home_life'
-  | 'booth_tight'
-  | 'workshop_tools'
-  | 'crowd_far'
-  | 'sports_hall';
+export type BedId =
+  | 'cafe' | 'restaurant' | 'pub' | 'market' | 'shop'
+  | 'street' | 'plaza' | 'park' | 'forest' | 'rain'
+  | 'station' | 'airport' | 'train_interior'
+  | 'office' | 'kitchen' | 'pool' | 'hall' | 'workshop'
+  | 'studio_air' | 'room_air';
 
-export const STEM_IDS: StemId[] = [
-  'babble_close', 'babble_hall', 'babble_open', 'traffic_near', 'traffic_far',
-  'kitchen', 'hvac_office', 'room_tone', 'studio_tone', 'transit_hum', 'rain', 'wind_leaves',
-  'office_life', 'pa_concourse', 'tiled_corridor', 'home_life', 'booth_tight',
-  'workshop_tools', 'crowd_far', 'sports_hall',
+export const BED_IDS: BedId[] = [
+  'cafe', 'restaurant', 'pub', 'market', 'shop',
+  'street', 'plaza', 'park', 'forest', 'rain',
+  'station', 'airport', 'train_interior',
+  'office', 'kitchen', 'pool', 'hall', 'workshop',
+  'studio_air', 'room_air',
 ];
 
-/**
- * The RMS level each stem is baked at, in dBFS. Mirrors `targetRms` in
- * scripts/ambience/stems.mjs; scripts/check-ambience.mjs asserts the two agree.
- *
- * The engine needs these to place events relative to the bed. Without them, a fixed
- * event makeup gain puts the same footstep 11 dB over a café and 25 dB over a quiet
- * waiting room — which is how you get a lone thump that sounds like someone dropped
- * a piano in a library.
- */
-export const STEM_LEVELS_DBFS: Record<StemId, number> = {
-  babble_close: -26,
-  babble_hall: -27,
-  babble_open: -26,
-  traffic_near: -25,
-  traffic_far: -30,
-  kitchen: -28,
-  hvac_office: -32,
-  room_tone: -36,
-  studio_tone: -42,
-  transit_hum: -28,
-  rain: -27,
-  wind_leaves: -30,
-  office_life: -30,
-  pa_concourse: -30,
-  tiled_corridor: -34,
-  home_life: -33,
-  booth_tight: -44,
-  workshop_tools: -28,
-  crowd_far: -31,
-  sports_hall: -29,
-};
+export const isBedId = (v: unknown): v is BedId =>
+  typeof v === 'string' && (BED_IDS as string[]).includes(v);
 
-/**
- * The nominal RMS amplitude of a scene's continuous bed, from its stem gains.
- * Events are scaled against this so every scene keeps the same event-over-bed
- * relationship regardless of how loud or quiet its bed is.
- */
-export function bedLevel(recipe: SceneRecipe): number {
-  let power = 0;
-  for (const layer of recipe.stems) {
-    const amp = layer.gain * Math.pow(10, STEM_LEVELS_DBFS[layer.stem] / 20);
-    power += amp * amp;
-  }
-  return Math.sqrt(power);
-}
+// ---------------------------------------------------------------------------
+// Events — shaped-noise transients only. No oscillators, by design.
+// ---------------------------------------------------------------------------
 
-/**
- * Discrete one-shots synthesised live by services/ambienceEngine.ts.
- *
- * Every kind listed here has an entry in that file's EVENT_SYNTHS registry, and
- * scripts/check-ambience.mjs asserts it. That invariant is the fix for the old
- * `AmbienceTag` union, where 23 of 38 tags were assigned to scenarios and silently
- * did nothing — `Café / Restaurante` carried a `kitchen` tag and never produced a
- * single plate.
- */
 export type EventKind =
-  // impacts / handling
-  | 'porcelain' | 'cutlery' | 'glass' | 'coin' | 'metalClank' | 'woodKnock' | 'plasticTap'
-  // people
-  | 'footstep' | 'footstepRun' | 'chairScrape' | 'cough' | 'laugh'
-  // doors and tills
-  | 'doorLatch' | 'doorChime' | 'registerBeep' | 'cashDrawer'
-  // office
-  | 'typing' | 'paperRustle' | 'printer' | 'phoneRing'
-  // street
-  | 'vehiclePass' | 'honk' | 'siren'
-  // kitchen / bar
-  | 'sizzle' | 'steam' | 'grinder'
-  // transit
-  | 'announcement' | 'luggage'
-  // clinical / industrial / leisure
-  | 'monitorBeep' | 'weightClank' | 'impactWrench' | 'compressor' | 'hairDryer'
-  // outdoors
-  | 'bird' | 'windGust' | 'rainDrip'
-  // rooms
-  | 'creak' | 'pageTurn' | 'applause';
+  | 'cup'        // a dull ceramic/glass set-down: broadband knock, fast decay
+  | 'keyboard'   // a soft key tick
+  | 'paper'      // a page/paper rustle
+  | 'chair'      // a chair shift / soft scrape
+  | 'door'       // a distant door thud/latch
+  | 'steps'      // a couple of muffled footsteps
+  | 'till'       // a soft muted counter tap (no beep tone)
+  | 'splash'     // a small water movement
+  | 'page';      // a single page turn
 
-export type RoomSize = 'small' | 'medium' | 'large' | 'hall' | 'outdoor';
+export const EVENT_KINDS: EventKind[] = [
+  'cup', 'keyboard', 'paper', 'chair', 'door', 'steps', 'till', 'splash', 'page',
+];
 
-/** What the floor is made of. Was derived from `RoomSize` alone, which gave every
- *  `large` scene concrete: a workshop, a gym, a library, a bank and a police station
- *  all walked on the same surface because they happened to share a reverb preset. */
-export type Surface = 'tile' | 'wood' | 'concrete' | 'asphalt' | 'carpet';
-
-/**
- * Spectral colour.
- *
- * Measured before this existed: 64 of 103 stem layers were mixed with no filtering at
- * all, and the only per-scene shaping available was a plain `lowpass`/`highpass`. So
- * `room_tone` — which 29 of 42 scenes use — arrived identical in every one of them,
- * and a tiled clinic corridor differed from a carpeted therapy room only in the length
- * of its reverb tail. Absorption is most of what a room does to a sound; this is how a
- * recipe says it.
- */
-export interface SceneTone {
-  /** Broadband tilt in dB: negative is darker (absorptive), positive brighter (hard). */
-  tiltDb?: number;
-  lowShelf?: { hz: number; db: number };
-  highShelf?: { hz: number; db: number };
-  /** One room mode, or the resonance of a duct or a cabinet. */
-  peak?: { hz: number; db: number; q?: number };
-}
-
-export interface SceneRoom {
-  size: RoomSize;
-  wet: number;
-  /** Multiplies the size preset's rt60. Lets two `large` rooms differ in liveness. */
-  rt60Scale?: number;
-  /** Overrides the size preset's HF damping. */
-  damping?: number;
-  /**
-   * The air ceiling: how bright this room lets a distant sound stay.
-   *
-   * This was `outdoor ? 6500 : 5000` — a boolean, and 70% of all event specs went
-   * through it, so the identity of every material above 5 kHz was erased identically
-   * in every indoor scene in the catalogue.
-   */
-  brightnessHz?: number;
-  surface?: Surface;
-}
-
-export interface StemLayer {
-  stem: StemId;
+export interface BedLayer {
+  bed: BedId;
+  /** Playback gain relative to the bed's baked level (all real beds are −24 dBFS RMS). */
   gain: number;
-  /** Optional shaping so one stem can play several roles (near vs. muffled-through-a-wall). */
+  /** Optional shaping so one recording can play a slightly different role. */
   lowpass?: number;
   highpass?: number;
-  /** 0 = mono/centred, 1 = fully decorrelated stereo. */
+  /** 0 = centred/narrow, 1 = the two playheads are fully decorrelated across the stereo field. */
   width?: number;
-  /** Colour for this layer alone — the same builder as the scene's `tone`. */
-  tone?: SceneTone;
+}
+
+export interface SceneTone {
+  /** Broadband tilt in dB: negative darker/absorptive, positive brighter/harder. */
+  tiltDb?: number;
+  lowShelfDb?: number;
+  highShelfDb?: number;
+  /** Telephone-line character for the "on a line" recording setups: [lowHz, highHz]. */
+  bandpass?: [number, number];
 }
 
 export interface EventSpec {
   kind: EventKind;
-  /** Mean seconds between occurrences. Scheduling is Poisson, not uniform. */
+  /** Mean seconds between occurrences at reference intensity. */
   everyS: number;
+  /** Peak gain of the transient, relative to the bed. Kept low on purpose. */
   gain: number;
-  /** Probability that an occurrence spawns a short follow-up cluster. */
-  burst?: number;
-  /** `far` events get lowpassed and pushed into the reverb — this is what creates depth. */
+  /** near = present and a touch brighter; far = muffled and quieter. */
   distance?: 'near' | 'mid' | 'far';
 }
-
-/**
- * How much is going on. Sets the scene's own ceiling on discrete sounds per minute.
- *
- * There used to be one global ceiling, and the recipes were authored between 2 and 220
- * onsets/minute, so 26 of 42 scenes were held to *exactly* 26.00: a full restaurant, a
- * call centre, a market and a newsroom all put the same number of sounds in front of
- * the listener. Density is one of the strongest cues for what kind of place you are
- * in, and it was the axis the old budget flattened hardest.
- */
-export type Activity = 'still' | 'calm' | 'busy' | 'bustling' | 'chaotic';
-
-export const ACTIVITY_ONSETS: Record<Activity, number> = {
-  still: 6, calm: 13, busy: 26, bustling: 40, chaotic: 52,
-};
 
 export interface SceneRecipe {
   /** Shown in the player's status line. */
   label: string;
-  stems: StemLayer[];
-  room: SceneRoom;
-  events: EventSpec[];
-  intensityBias?: number;
-  duckingBias?: number;
-  /** Colour applied to the whole bed. */
+  beds: BedLayer[];
   tone?: SceneTone;
-  /** Defaults to `busy` (26/min), which is the old global ceiling — so an unannotated
-   *  recipe behaves exactly as before. */
-  activity?: Activity;
-  /** Explicit ceiling, wins over `activity`. */
-  maxOnsetsPerMin?: number;
-  /**
-   * How far the loudest event may sit over the bed, in dB.
-   *
-   * This was a scene-independent constant by construction — bed gain and event scale
-   * were multiplied by the same boost, so the loudest spec of *every* scene landed at
-   * exactly +6 dB. But in a library a dropped book is 20 dB over the bed and in a
-   * market a shout is barely 3, and that contrast is precisely the information that
-   * says which room you are standing in. Left unset it reproduces the old value.
-   */
-  eventHeadroomDb?: number;
-  /**
-   * Scenes that are deliberately versions of one another (`street` / `street_rain`)
-   * declare a shared family, so the distance check can ask them to be *audibly*
-   * different without demanding they be different places.
-   */
-  family?: string;
+  /** The subtle synth-event layer. Most scenes have none — the real bed is enough. */
+  events?: EventSpec[];
+  /** Overall trim for the whole scene, 0..~1.3. Default 1. */
+  level?: number;
 }
 
-/** The scene's ceiling on discrete sounds per minute, before intensity. */
-export const sceneOnsetCeiling = (recipe: SceneRecipe): number =>
-  recipe.maxOnsetsPerMin ?? ACTIVITY_ONSETS[recipe.activity ?? 'busy'];
-
-/**
- * How far the loudest authored event sits over the bed.
- *
- * When a recipe does not declare it, this reproduces exactly what the old fixed
- * arithmetic produced, so the two can coexist while the catalogue is annotated. The
- * engine inverts this to derive the event scale, which means the number a recipe
- * writes is the number the ear gets.
- */
-export const eventHeadroomDb = (
-  recipe: SceneRecipe,
-  fallbackRatio: number,
-): number => {
-  if (recipe.eventHeadroomDb !== undefined) return recipe.eventHeadroomDb;
-  const loudest = recipe.events.reduce((m, e) => Math.max(m, e.gain), 0);
-  if (loudest <= 0) return 0;
-  return 20 * Math.log10(loudest * fallbackRatio);
-};
-
-const ev = (kind: EventKind, everyS: number, gain: number, extra?: Omit<EventSpec, 'kind' | 'everyS' | 'gain'>): EventSpec =>
-  ({ kind, everyS, gain, ...extra });
+const B = (bed: BedId, gain: number, opts: Omit<BedLayer, 'bed' | 'gain'> = {}): BedLayer =>
+  ({ bed, gain, ...opts });
+const E = (kind: EventKind, everyS: number, gain: number, distance: EventSpec['distance'] = 'mid'): EventSpec =>
+  ({ kind, everyS, gain, distance });
+const R = (label: string, beds: BedLayer[], extra: Omit<SceneRecipe, 'label' | 'beds'> = {}): SceneRecipe =>
+  ({ label, beds, ...extra });
 
 // ---------------------------------------------------------------------------
-// The scenes
+// The scenes. Every SceneId maps to one (occasionally two) real beds plus, where a
+// quiet room needs it, a few subtle events. The label chooses the recording, never the
+// topic — a bulletin about traffic is still heard from a studio, not a road.
 // ---------------------------------------------------------------------------
 
 export const SCENE_RECIPES = {
   // --- eating and drinking -------------------------------------------------
-  cafe: {
-    label: 'Café',
-    stems: [
-      { stem: 'babble_close', gain: 0.55, width: 0.9 },
-      { stem: 'kitchen', gain: 0.3, lowpass: 4500, width: 0.6 },
-      { stem: 'room_tone', gain: 0.25 },
-    ],
-    room: { size: 'small', wet: 0.16, brightnessHz: 5200, surface: 'tile' },
-    events: [
-      ev('porcelain', 5, 0.5, { burst: 0.45, distance: 'near' }),
-      ev('cutlery', 7, 0.35, { burst: 0.5, distance: 'mid' }),
-      ev('chairScrape', 16, 0.3, { distance: 'mid' }),
-      ev('doorChime', 34, 0.28, { distance: 'far' }),
-      ev('registerBeep', 22, 0.22, { distance: 'far' }),
-      ev('steam', 26, 0.3, { distance: 'far' }),
-      ev('grinder', 48, 0.28, { distance: 'far' }),
-      ev('footstep', 6, 0.22, { distance: 'mid' }),
-    ],
-    activity: 'busy',
-    eventHeadroomDb: 6,
-    tone: { tiltDb: 1.5 },
-  },
-
-  restaurant: {
-    label: 'Restaurante',
-    stems: [
-      { stem: 'babble_close', gain: 0.62, width: 1 },
-      { stem: 'kitchen', gain: 0.24, lowpass: 3200, width: 0.5 },
-      { stem: 'room_tone', gain: 0.2 },
-    ],
-    room: { size: 'medium', wet: 0.2, rt60Scale: 1.05, brightnessHz: 4200, surface: 'wood' },
-    events: [
-      ev('porcelain', 4, 0.45, { burst: 0.55, distance: 'mid' }),
-      ev('cutlery', 3.5, 0.4, { burst: 0.6, distance: 'near' }),
-      ev('glass', 9, 0.35, { burst: 0.4, distance: 'near' }),
-      ev('chairScrape', 14, 0.3, { distance: 'mid' }),
-      ev('laugh', 20, 0.3, { distance: 'far' }),
-      ev('sizzle', 30, 0.26, { distance: 'far' }),
-      ev('footstep', 5, 0.2, { distance: 'mid' }),
-    ],
-    activity: 'bustling',
-    eventHeadroomDb: 3,
-    tone: { tiltDb: -1, lowShelf: { hz: 220, db: 2 } },
-  },
-
-  bar_night: {
-    label: 'Bar (noche)',
-    stems: [
-      { stem: 'babble_close', gain: 0.75, width: 1 },
-      { stem: 'room_tone', gain: 0.2 },
-      { stem: 'kitchen', gain: 0.1, lowpass: 2200 },
-    ],
-    room: { size: 'medium', wet: 0.24, rt60Scale: 0.95, damping: 0.55, brightnessHz: 3400, surface: 'wood' },
-    events: [
-      ev('glass', 4, 0.45, { burst: 0.6, distance: 'near' }),
-      ev('laugh', 11, 0.4, { distance: 'mid' }),
-      ev('coin', 26, 0.25, { distance: 'near' }),
-      ev('cashDrawer', 40, 0.3, { distance: 'mid' }),
-      ev('doorLatch', 38, 0.3, { distance: 'far' }),
-    ],
-    intensityBias: 0.1,
-    duckingBias: 0.1,
-    activity: 'bustling',
-    eventHeadroomDb: 2,
-    tone: { tiltDb: -3, lowShelf: { hz: 160, db: 4 } },
-  },
-
-  wine_tasting: {
-    label: 'Cata / sala privada',
-    stems: [
-      // Glass and bottles carry this room; the voices are few and close.
-      { stem: 'kitchen', gain: 0.24, lowpass: 5200 },
-      { stem: 'room_tone', gain: 0.34 },
-      { stem: 'babble_close', gain: 0.16, lowpass: 2400, width: 0.7 },
-    ],
-    room: { size: 'medium', wet: 0.22, rt60Scale: 0.85, brightnessHz: 6200, surface: 'tile' },
-    events: [
-      ev('glass', 9, 0.35, { burst: 0.35, distance: 'near' }),
-      ev('chairScrape', 30, 0.2, { distance: 'mid' }),
-      ev('footstep', 16, 0.15, { distance: 'far' }),
-    ],
-    intensityBias: -0.15,
-    activity: 'calm',
-    eventHeadroomDb: 11,
-    tone: { tiltDb: 2.5 },
-  },
+  cafe:          R('Café',            [B('cafe', 1.0, { width: 0.8 })],
+                    { events: [E('cup', 9, 0.16, 'near'), E('chair', 22, 0.12)] }),
+  restaurant:    R('Restaurante',     [B('restaurant', 1.0, { width: 0.8 })],
+                    { events: [E('cup', 11, 0.14), E('chair', 26, 0.1)] }),
+  bar_night:     R('Bar',             [B('pub', 1.0, { width: 0.85 })],
+                    { level: 1.0, events: [E('cup', 10, 0.15, 'near')] }),
+  wine_tasting:  R('Cata de vinos',   [B('restaurant', 0.6, { width: 0.7 })],
+                    { level: 0.75, tone: { tiltDb: -2 }, events: [E('cup', 14, 0.12, 'near')] }),
 
   // --- shops and markets ---------------------------------------------------
-  market: {
-    label: 'Mercado',
-    stems: [
-      { stem: 'babble_open', gain: 0.68, width: 1 },
-      { stem: 'traffic_far', gain: 0.22, lowpass: 1400 },
-    ],
-    room: { size: 'outdoor', wet: 0.07, brightnessHz: 7500, surface: 'concrete' },
-    events: [
-      ev('woodKnock', 6, 0.35, { burst: 0.5, distance: 'mid' }),
-      ev('coin', 13, 0.3, { distance: 'near' }),
-      ev('footstep', 4, 0.25, { distance: 'mid' }),
-      ev('announcement', 24, 0.3, { distance: 'far' }),
-      ev('registerBeep', 20, 0.2, { distance: 'far' }),
-    ],
-    intensityBias: 0.1,
-    activity: 'chaotic',
-    eventHeadroomDb: 2,
-    tone: { tiltDb: 2 },
-  },
-
-  shop_small: {
-    label: 'Tienda',
-    stems: [
-      { stem: 'room_tone', gain: 0.4 },
-      { stem: 'babble_close', gain: 0.16, lowpass: 2600, width: 0.6 },
-      { stem: 'hvac_office', gain: 0.28 },
-    ],
-    room: { size: 'small', wet: 0.13, rt60Scale: 0.9, brightnessHz: 6000, surface: 'tile' },
-    events: [
-      ev('doorChime', 26, 0.4, { distance: 'mid' }),
-      ev('registerBeep', 14, 0.3, { distance: 'near' }),
-      ev('plasticTap', 10, 0.25, { burst: 0.4, distance: 'near' }),
-      ev('footstep', 7, 0.22, { distance: 'mid' }),
-      ev('paperRustle', 18, 0.22, { distance: 'near' }),
-    ],
-    activity: 'busy',
-    eventHeadroomDb: 9,
-    tone: { tiltDb: 2 },
-  },
-
-  shop_checkout: {
-    label: 'Caja',
-    stems: [
-      { stem: 'babble_close', gain: 0.3, lowpass: 3000, width: 0.8 },
-      { stem: 'hvac_office', gain: 0.3 },
-      { stem: 'room_tone', gain: 0.22 },
-    ],
-    room: { size: 'medium', wet: 0.12, rt60Scale: 0.9, brightnessHz: 6400, surface: 'tile' },
-    events: [
-      ev('registerBeep', 4.5, 0.4, { burst: 0.5, distance: 'near' }),
-      ev('cashDrawer', 18, 0.35, { distance: 'near' }),
-      ev('coin', 12, 0.3, { distance: 'near' }),
-      ev('plasticTap', 7, 0.25, { burst: 0.6, distance: 'near' }),
-      ev('footstep', 6, 0.2, { distance: 'mid' }),
-    ],
-    activity: 'busy',
-    eventHeadroomDb: 8,
-    tone: { tiltDb: 2.5 },
-  },
-
-  salon: {
-    label: 'Peluquería',
-    stems: [
-      { stem: 'room_tone', gain: 0.38 },
-      { stem: 'babble_close', gain: 0.32, width: 0.8 },
-    ],
-    room: { size: 'small', wet: 0.15, rt60Scale: 0.85, brightnessHz: 6800, surface: 'tile' },
-    events: [
-      ev('hairDryer', 20, 0.4, { distance: 'mid' }),
-      ev('metalClank', 14, 0.2, { distance: 'near' }),
-      ev('chairScrape', 24, 0.22, { distance: 'mid' }),
-      ev('footstep', 9, 0.2, { distance: 'mid' }),
-    ],
-    activity: 'busy',
-    eventHeadroomDb: 7,
-    tone: { tiltDb: 3, peak: { hz: 2600, db: 2, q: 1.1 } },
-  },
+  market:        R('Mercado',         [B('market', 1.0, { width: 0.9 })]),
+  shop_small:    R('Tienda',          [B('shop', 0.9, { width: 0.6 })],
+                    { events: [E('door', 30, 0.14, 'far'), E('till', 24, 0.1)] }),
+  shop_checkout: R('Caja',            [B('shop', 0.95, { width: 0.6 })],
+                    { events: [E('till', 12, 0.14), E('paper', 18, 0.1)] }),
+  salon:         R('Peluquería',      [B('cafe', 0.7, { width: 0.7 })],
+                    { level: 0.85, tone: { highShelfDb: 1 }, events: [E('chair', 20, 0.12)] }),
 
   // --- street and outdoors -------------------------------------------------
-  street: {
-    label: 'Calle',
-    stems: [
-      { stem: 'traffic_near', gain: 0.55, width: 1 },
-      { stem: 'traffic_far', gain: 0.4 },
-      { stem: 'babble_open', gain: 0.14, lowpass: 2000, width: 0.9 },
-    ],
-    room: { size: 'outdoor', wet: 0.05, brightnessHz: 7200, surface: 'asphalt' },
-    events: [
-      ev('vehiclePass', 9, 0.45, { distance: 'near' }),
-      ev('honk', 26, 0.35, { distance: 'far' }),
-      ev('footstep', 4, 0.28, { distance: 'near' }),
-      ev('siren', 70, 0.3, { distance: 'far' }),
-    ],
-    duckingBias: 0.1,
-    activity: 'bustling',
-    eventHeadroomDb: 3,
-    tone: { lowShelf: { hz: 140, db: 3 } },
-    family: 'street',
-  },
+  street:        R('Calle',           [B('street', 1.0, { width: 1.0 })]),
+  plaza:         R('Plaza',           [B('plaza', 1.0, { width: 1.0 })]),
+  park:          R('Parque',          [B('park', 1.0, { width: 1.0 })]),
+  street_rain:   R('Calle con lluvia',[B('rain', 1.0, { width: 1.0 })]),
+  park_rain:     R('Parque con lluvia',[B('rain', 0.9, { width: 1.0 })],
+                    { tone: { highShelfDb: -1 } }),
 
-  plaza: {
-    label: 'Plaza',
-    stems: [
-      { stem: 'crowd_far', gain: 0.46 },
-      { stem: 'babble_open', gain: 0.24, width: 1 },
-      { stem: 'traffic_far', gain: 0.3 },
-    ],
-    room: { size: 'outdoor', wet: 0.08, brightnessHz: 8000, surface: 'concrete' },
-    events: [
-      ev('footstep', 5, 0.25, { distance: 'mid' }),
-      ev('bird', 14, 0.25, { distance: 'far' }),
-      ev('honk', 40, 0.22, { distance: 'far' }),
-    ],
-    activity: 'busy',
-    eventHeadroomDb: 5,
-    tone: { tiltDb: 1 },
-  },
+  // --- work ----------------------------------------------------------------
+  office:        R('Oficina',         [B('office', 0.9, { width: 0.5 })],
+                    { events: [E('keyboard', 5, 0.1), E('paper', 16, 0.09), E('chair', 34, 0.08)] }),
+  open_office:   R('Oficina abierta', [B('office', 1.0, { width: 0.7 })],
+                    { level: 1.0, events: [E('keyboard', 3.5, 0.1), E('paper', 12, 0.09), E('door', 40, 0.09, 'far')] }),
+  office_meeting:R('Sala de reunión', [B('office', 0.6, { width: 0.5 })],
+                    { level: 0.8, events: [E('paper', 18, 0.09), E('chair', 30, 0.08)] }),
+  call_center:   R('Centro de llamadas',[B('office', 0.85, { width: 0.7 })],
+                    { events: [E('keyboard', 4, 0.1), E('chair', 28, 0.08)] }),
+  newsroom:      R('Redacción',       [B('office', 0.95, { width: 0.7 })],
+                    { events: [E('keyboard', 3.5, 0.11), E('paper', 12, 0.1), E('door', 44, 0.08, 'far')] }),
+  workshop_garage:R('Taller',         [B('workshop', 1.0, { width: 0.7 })]),
 
-  park: {
-    label: 'Parque',
-    stems: [
-      { stem: 'wind_leaves', gain: 0.62 },
-      { stem: 'babble_open', gain: 0.12, lowpass: 1800, width: 1 },
-      { stem: 'traffic_far', gain: 0.16, lowpass: 900 },
-    ],
-    room: { size: 'outdoor', wet: 0.06, brightnessHz: 9000, surface: 'asphalt' },
-    events: [
-      ev('bird', 6, 0.35, { burst: 0.5, distance: 'mid' }),
-      ev('windGust', 14, 0.35),
-      ev('footstep', 10, 0.2, { distance: 'mid' }),
-    ],
-    intensityBias: -0.05,
-    activity: 'calm',
-    eventHeadroomDb: 9,
-    tone: { tiltDb: 3, lowShelf: { hz: 200, db: -3 } },
-    family: 'park',
-  },
+  // --- fitness / leisure ---------------------------------------------------
+  gym:           R('Gimnasio',        [B('pool', 0.85, { width: 0.8 })],
+                    { level: 0.9, tone: { tiltDb: -1 } }),
+  backstage:     R('Backstage',       [B('hall', 0.6, { width: 0.7 })],
+                    { level: 0.8, events: [E('door', 34, 0.12, 'far'), E('steps', 20, 0.1)] }),
+  venue_stage:   R('Escenario',       [B('hall', 0.7, { width: 0.85 })],
+                    { level: 0.9 }),
 
-  // --- workplaces ----------------------------------------------------------
-  office: {
-    label: 'Oficina',
-    stems: [
-      { stem: 'office_life', gain: 0.34 },
-      { stem: 'hvac_office', gain: 0.42 },
-      { stem: 'room_tone', gain: 0.2 },
-    ],
-    room: { size: 'medium', wet: 0.1, rt60Scale: 0.8, damping: 0.6, brightnessHz: 4000, surface: 'carpet' },
-    events: [
-      ev('typing', 7, 0.3, { burst: 0.4, distance: 'mid' }),
-      ev('paperRustle', 13, 0.3, { distance: 'near' }),
-      ev('phoneRing', 45, 0.25, { distance: 'far' }),
-      ev('printer', 34, 0.28, { distance: 'far' }),
-      ev('chairScrape', 26, 0.25, { distance: 'near' }),
-    ],
-    intensityBias: -0.1,
-    activity: 'calm',
-    eventHeadroomDb: 9,
-    tone: { tiltDb: -2 },
-  },
+  // --- health --------------------------------------------------------------
+  clinic_waiting:R('Sala de espera',  [B('office', 0.5, { width: 0.5 })],
+                    { level: 0.8, events: [E('door', 30, 0.12, 'far'), E('chair', 26, 0.08), E('paper', 22, 0.07)] }),
+  clinic_room:   R('Consulta',        [B('room_air', 1.0)],
+                    { level: 0.9, events: [E('paper', 16, 0.1), E('chair', 30, 0.08)] }),
+  hospital:      R('Hospital',        [B('hall', 0.55, { width: 0.7 })],
+                    { level: 0.8, tone: { tiltDb: -1 }, events: [E('door', 26, 0.12, 'far'), E('steps', 18, 0.1)] }),
+  therapy_room:  R('Terapia',         [B('room_air', 0.9)],
+                    { level: 0.85, events: [E('chair', 34, 0.07)] }),
 
-  open_office: {
-    label: 'Oficina abierta',
-    stems: [
-      { stem: 'office_life', gain: 0.5 },
-      { stem: 'babble_close', gain: 0.26, lowpass: 2800, width: 0.9 },
-      { stem: 'hvac_office', gain: 0.32 },
-    ],
-    room: { size: 'large', wet: 0.13, rt60Scale: 0.6, damping: 0.65, brightnessHz: 3800, surface: 'carpet' },
-    events: [
-      ev('typing', 4, 0.3, { burst: 0.55, distance: 'mid' }),
-      ev('phoneRing', 30, 0.25, { distance: 'far' }),
-      ev('printer', 26, 0.25, { distance: 'far' }),
-      ev('footstep', 8, 0.2, { distance: 'far' }),
-      ev('chairScrape', 20, 0.22, { distance: 'mid' }),
-    ],
-    activity: 'bustling',
-    eventHeadroomDb: 5,
-    tone: { tiltDb: -2.5 },
-  },
-
-  office_meeting: {
-    label: 'Sala de reunión',
-    stems: [
-      { stem: 'room_tone', gain: 0.42 },
-      { stem: 'hvac_office', gain: 0.3 },
-      // Work happening on the other side of the door, well muffled.
-      { stem: 'office_life', gain: 0.12, lowpass: 1500 },
-    ],
-    room: { size: 'medium', wet: 0.14, rt60Scale: 0.85, damping: 0.55, brightnessHz: 4400, surface: 'carpet' },
-    events: [
-      ev('paperRustle', 12, 0.3, { distance: 'near' }),
-      ev('chairScrape', 22, 0.25, { distance: 'near' }),
-      ev('plasticTap', 20, 0.18, { distance: 'near' }),
-    ],
-    intensityBias: -0.2,
-    duckingBias: -0.1,
-    activity: 'calm',
-    eventHeadroomDb: 12,
-    tone: { tiltDb: -1.5 },
-  },
-
-  call_center: {
-    label: 'Centro de atención',
-    stems: [
-      // Almost all voice and almost no machinery: everyone is talking at once, into
-      // headsets, and the room is carpeted to stop it becoming unbearable.
-      { stem: 'babble_close', gain: 0.5, lowpass: 3400, width: 0.95 },
-      { stem: 'office_life', gain: 0.2, lowpass: 4000 },
-      { stem: 'hvac_office', gain: 0.34 },
-    ],
-    room: { size: 'large', wet: 0.12, rt60Scale: 0.55, damping: 0.7, brightnessHz: 3200, surface: 'carpet' },
-    events: [
-      ev('typing', 3.5, 0.28, { burst: 0.6, distance: 'mid' }),
-      ev('phoneRing', 16, 0.28, { distance: 'far' }),
-      ev('chairScrape', 24, 0.2, { distance: 'far' }),
-    ],
-    activity: 'bustling',
-    eventHeadroomDb: 4,
-    tone: { tiltDb: -3.5, peak: { hz: 900, db: 2, q: 1.2 } },
-  },
-
-  newsroom: {
-    label: 'Redacción',
-    stems: [
-      { stem: 'office_life', gain: 0.56 },
-      { stem: 'babble_close', gain: 0.24, lowpass: 3200, width: 0.9 },
-      { stem: 'room_tone', gain: 0.16 },
-    ],
-    room: { size: 'large', wet: 0.13, rt60Scale: 0.6, damping: 0.6, brightnessHz: 4600, surface: 'carpet' },
-    events: [
-      ev('typing', 2.6, 0.32, { burst: 0.7, distance: 'mid' }),
-      ev('phoneRing', 20, 0.28, { distance: 'far' }),
-      ev('printer', 22, 0.28, { distance: 'far' }),
-      ev('paperRustle', 11, 0.26, { distance: 'near' }),
-    ],
-    intensityBias: 0.05,
-    activity: 'bustling',
-    eventHeadroomDb: 5,
-    tone: { tiltDb: -1 },
-  },
-
-  workshop_garage: {
-    label: 'Taller',
-    stems: [
-      // Was office air plus a bus cabin. Neither of those is a workshop.
-      { stem: 'workshop_tools', gain: 0.6 },
-      { stem: 'transit_hum', gain: 0.22, lowpass: 1600 },
-    ],
-    room: { size: 'large', wet: 0.26, rt60Scale: 1.35, damping: 0.22, brightnessHz: 7000, surface: 'concrete' },
-    events: [
-      ev('metalClank', 6, 0.5, { burst: 0.5, distance: 'mid' }),
-      ev('impactWrench', 16, 0.45, { distance: 'mid' }),
-      ev('compressor', 40, 0.4, { distance: 'far' }),
-      ev('footstep', 9, 0.25, { distance: 'mid' }),
-    ],
-    intensityBias: 0.1,
-    duckingBias: 0.15,
-    activity: 'bustling',
-    eventHeadroomDb: 10,
-    tone: { tiltDb: 3, lowShelf: { hz: 130, db: 4 } },
-  },
-
-  gym: {
-    label: 'Gimnasio',
-    stems: [
-      { stem: 'sports_hall', gain: 0.6 },
-      { stem: 'hvac_office', gain: 0.28 },
-    ],
-    room: { size: 'large', wet: 0.22, rt60Scale: 1.35, damping: 0.25, brightnessHz: 6600, surface: 'wood' },
-    events: [
-      ev('weightClank', 6, 0.45, { burst: 0.4, distance: 'mid' }),
-      ev('footstep', 3.5, 0.25, { distance: 'mid' }),
-      ev('metalClank', 12, 0.3, { distance: 'far' }),
-    ],
-    intensityBias: 0.05,
-    activity: 'busy',
-    eventHeadroomDb: 8,
-    tone: { tiltDb: 2, lowShelf: { hz: 110, db: 3 } },
-  },
-
-  backstage: {
-    label: 'Backstage',
-    stems: [
-      { stem: 'room_tone', gain: 0.22, highpass: 120 },
-      { stem: 'babble_close', gain: 0.4, lowpass: 3000, width: 0.9 },
-      { stem: 'hvac_office', gain: 0.2, highpass: 140 },
-    ],
-    room: { size: 'large', wet: 0.2, rt60Scale: 0.8, brightnessHz: 4200, surface: 'wood' },
-    events: [
-      ev('metalClank', 11, 0.3, { distance: 'mid' }),
-      ev('doorLatch', 20, 0.35, { distance: 'mid' }),
-      ev('footstep', 5, 0.25, { distance: 'near' }),
-      ev('plasticTap', 14, 0.22, { distance: 'near' }),
-    ],
-    activity: 'busy',
-    eventHeadroomDb: 9,
-    tone: { tiltDb: -1 },
-  },
-
-  // --- health and institutions --------------------------------------------
-  clinic_waiting: {
-    label: 'Sala de espera',
-    stems: [
-      { stem: 'babble_hall', gain: 0.34, lowpass: 2600, width: 0.85 },
-      // `hvac_office` and `room_tone` are both low-frequency by nature, so leaning on
-      // both at once buries the waiting room under rumble. The hard-surface stem
-      // carries the room instead, which is also what separates this from an office.
-      { stem: 'tiled_corridor', gain: 0.3 },
-      { stem: 'hvac_office', gain: 0.2, highpass: 140 },
-    ],
-    room: { size: 'medium', wet: 0.16, rt60Scale: 0.9, brightnessHz: 6400, surface: 'tile' },
-    events: [
-      ev('footstep', 8, 0.22, { distance: 'far' }),
-      ev('doorLatch', 24, 0.28, { distance: 'mid' }),
-      ev('cough', 18, 0.25, { distance: 'far' }),
-      ev('pageTurn', 20, 0.2, { distance: 'near' }),
-      ev('announcement', 40, 0.25, { distance: 'far' }),
-    ],
-    intensityBias: -0.1,
-    activity: 'busy',
-    eventHeadroomDb: 10,
-    tone: { tiltDb: 2 },
-  },
-
-  clinic_room: {
-    label: 'Consultorio',
-    stems: [
-      { stem: 'tiled_corridor', gain: 0.44 },
-      { stem: 'hvac_office', gain: 0.24 },
-    ],
-    room: { size: 'small', wet: 0.11, rt60Scale: 0.8, damping: 0.35, brightnessHz: 7200, surface: 'tile' },
-    events: [
-      ev('paperRustle', 14, 0.28, { distance: 'near' }),
-      ev('plasticTap', 18, 0.22, { distance: 'near' }),
-      ev('doorLatch', 40, 0.22, { distance: 'far' }),
-    ],
-    intensityBias: -0.25,
-    duckingBias: -0.1,
-    activity: 'calm',
-    eventHeadroomDb: 13,
-    tone: { tiltDb: 4, peak: { hz: 1800, db: 2.5, q: 1.3 } },
-  },
-
-  hospital: {
-    label: 'Hospital',
-    stems: [
-      { stem: 'tiled_corridor', gain: 0.5 },
-      // A hospital pages people. It is the single most recognisable thing about one.
-      { stem: 'pa_concourse', gain: 0.3, lowpass: 2600 },
-      { stem: 'babble_hall', gain: 0.2, lowpass: 2800, width: 0.9 },
-    ],
-    room: { size: 'hall', wet: 0.2, rt60Scale: 0.85, damping: 0.24, brightnessHz: 7600, surface: 'tile' },
-    events: [
-      ev('monitorBeep', 7, 0.25, { distance: 'far' }),
-      ev('footstep', 5, 0.25, { distance: 'mid' }),
-      ev('announcement', 34, 0.3, { distance: 'far' }),
-      ev('doorLatch', 26, 0.25, { distance: 'far' }),
-    ],
-    activity: 'bustling',
-    eventHeadroomDb: 6,
-    tone: { tiltDb: 3.5 },
-  },
-
-  therapy_room: {
-    label: 'Consulta privada',
-    stems: [
-      { stem: 'room_tone', gain: 0.5 },
-    ],
-    room: { size: 'small', wet: 0.12, rt60Scale: 0.55, damping: 0.75, brightnessHz: 2600, surface: 'carpet' },
-    events: [
-      ev('creak', 22, 0.2, { distance: 'near' }),
-      ev('chairScrape', 40, 0.15, { distance: 'near' }),
-    ],
-    intensityBias: -0.3,
-    duckingBias: -0.15,
-    activity: 'still',
-    eventHeadroomDb: 13,
-    tone: { tiltDb: -6, highShelf: { hz: 5000, db: -4 } },
-  },
-
-  bank: {
-    label: 'Banco',
-    stems: [
-      { stem: 'tiled_corridor', gain: 0.28 },
-      // Behind the counter it is an office, and that is what you actually hear.
-      { stem: 'office_life', gain: 0.3, lowpass: 4200 },
-      { stem: 'hvac_office', gain: 0.28 },
-    ],
-    room: { size: 'large', wet: 0.18, damping: 0.3, brightnessHz: 7000, surface: 'tile' },
-    events: [
-      ev('typing', 9, 0.25, { burst: 0.4, distance: 'mid' }),
-      ev('paperRustle', 12, 0.26, { distance: 'near' }),
-      ev('printer', 30, 0.25, { distance: 'mid' }),
-      ev('footstep', 9, 0.2, { distance: 'far' }),
-    ],
-    intensityBias: -0.1,
-    activity: 'busy',
-    eventHeadroomDb: 9,
-    tone: { tiltDb: 3 },
-  },
-
-  police_station: {
-    label: 'Comisaría',
-    stems: [
-      { stem: 'babble_close', gain: 0.3, lowpass: 2600, width: 0.85 },
-      { stem: 'office_life', gain: 0.24, lowpass: 3400 },
-      { stem: 'hvac_office', gain: 0.3 },
-    ],
-    room: { size: 'large', wet: 0.19, rt60Scale: 0.85, brightnessHz: 5000, surface: 'concrete' },
-    events: [
-      ev('typing', 6, 0.3, { burst: 0.5, distance: 'mid' }),
-      ev('phoneRing', 26, 0.28, { distance: 'far' }),
-      ev('doorLatch', 22, 0.3, { distance: 'mid' }),
-      ev('footstep', 7, 0.24, { distance: 'mid' }),
-    ],
-    activity: 'busy',
-    eventHeadroomDb: 8,
-    tone: { tiltDb: -0.5 },
-  },
-
-  courtroom: {
-    label: 'Sala de vistas',
-    stems: [
-      { stem: 'room_tone', gain: 0.36 },
-      { stem: 'babble_hall', gain: 0.1, lowpass: 1800, width: 0.7 },
-    ],
-    room: { size: 'hall', wet: 0.26, rt60Scale: 0.9, damping: 0.4, brightnessHz: 5400, surface: 'wood' },
-    events: [
-      ev('paperRustle', 13, 0.28, { distance: 'near' }),
-      ev('cough', 20, 0.25, { distance: 'far' }),
-      ev('chairScrape', 26, 0.24, { distance: 'far' }),
-      ev('creak', 30, 0.2, { distance: 'mid' }),
-    ],
-    intensityBias: -0.15,
-    duckingBias: -0.1,
-    activity: 'calm',
-    eventHeadroomDb: 14,
-    tone: { tiltDb: 1, lowShelf: { hz: 250, db: 2 } },
-  },
-
-  classroom: {
-    label: 'Aula',
-    stems: [
-      // A school is never one room: there are other classes down the corridor, and
-      // that distant, reverberant layer is most of what says "school" rather than
-      // "any quiet room with people in it".
-      { stem: 'crowd_far', gain: 0.28, lowpass: 2000 },
-      { stem: 'tiled_corridor', gain: 0.22 },
-      { stem: 'babble_close', gain: 0.2, lowpass: 2200, width: 0.75 },
-      { stem: 'room_tone', gain: 0.2 },
-    ],
-    room: { size: 'medium', wet: 0.18, rt60Scale: 1.1, damping: 0.42, brightnessHz: 5600, surface: 'wood' },
-    events: [
-      ev('chairScrape', 15, 0.3, { distance: 'mid' }),
-      ev('paperRustle', 9, 0.3, { distance: 'near' }),
-      ev('pageTurn', 12, 0.25, { distance: 'near' }),
-      ev('cough', 24, 0.22, { distance: 'far' }),
-    ],
-    intensityBias: -0.15,
-    activity: 'busy',
-    eventHeadroomDb: 11,
-    tone: { tiltDb: 1.5 },
-  },
-
-  library: {
-    label: 'Biblioteca',
-    stems: [
-      // A library is quiet, not muffled. Stacking three low-frequency support stems
-      // produced a rumble rather than a hush, so the tone is highpassed to leave the
-      // room's silence audible as silence.
-      { stem: 'studio_tone', gain: 0.45, highpass: 120 },
-      { stem: 'room_tone', gain: 0.2, highpass: 140 },
-      { stem: 'hvac_office', gain: 0.18, highpass: 160 },
-    ],
-    room: { size: 'large', wet: 0.2, rt60Scale: 0.75, damping: 0.62, brightnessHz: 3000, surface: 'carpet' },
-    events: [
-      ev('pageTurn', 10, 0.3, { distance: 'near' }),
-      ev('footstep', 16, 0.18, { distance: 'far' }),
-      ev('creak', 28, 0.18, { distance: 'mid' }),
-      ev('cough', 34, 0.18, { distance: 'far' }),
-    ],
-    intensityBias: -0.3,
-    duckingBias: -0.15,
-    activity: 'still',
-    eventHeadroomDb: 16,
-    tone: { tiltDb: -5, highShelf: { hz: 6000, db: -3 } },
-  },
-
-  gallery: {
-    label: 'Galería',
-    stems: [
-      { stem: 'tiled_corridor', gain: 0.4 },
-      { stem: 'babble_hall', gain: 0.12, lowpass: 2000, width: 0.8 },
-    ],
-    room: { size: 'hall', wet: 0.28, rt60Scale: 1.15, damping: 0.2, brightnessHz: 8200, surface: 'concrete' },
-    events: [
-      ev('footstep', 7, 0.28, { distance: 'mid' }),
-      ev('cough', 30, 0.2, { distance: 'far' }),
-    ],
-    intensityBias: -0.2,
-    activity: 'calm',
-    eventHeadroomDb: 14,
-    tone: { tiltDb: 4.5 },
-  },
-
-  foyer: {
-    label: 'Vestíbulo',
-    stems: [
-      { stem: 'babble_hall', gain: 0.42, width: 0.95 },
-      { stem: 'tiled_corridor', gain: 0.3 },
-    ],
-    room: { size: 'hall', wet: 0.24, damping: 0.26, brightnessHz: 7400, surface: 'tile' },
-    events: [
-      ev('footstep', 4, 0.26, { distance: 'mid' }),
-      ev('doorLatch', 18, 0.3, { distance: 'mid' }),
-      ev('registerBeep', 26, 0.2, { distance: 'far' }),
-    ],
-    activity: 'busy',
-    eventHeadroomDb: 8,
-    tone: { tiltDb: 3 },
-  },
+  // --- civic / institutional ----------------------------------------------
+  bank:          R('Banco',           [B('hall', 0.55, { width: 0.7 })],
+                    { level: 0.85, tone: { tiltDb: -1 }, events: [E('till', 18, 0.1), E('steps', 22, 0.08)] }),
+  police_station:R('Comisaría',       [B('office', 0.8, { width: 0.6 })],
+                    { events: [E('door', 28, 0.12, 'far'), E('keyboard', 6, 0.09)] }),
+  courtroom:     R('Tribunal',        [B('hall', 0.5, { width: 0.7 })],
+                    { level: 0.8, tone: { tiltDb: -1.5 }, events: [E('paper', 22, 0.08), E('chair', 30, 0.08)] }),
+  classroom:     R('Aula',            [B('office', 0.7, { width: 0.7 })],
+                    { level: 0.85, events: [E('chair', 22, 0.1), E('paper', 18, 0.09)] }),
+  library:       R('Biblioteca',      [B('room_air', 0.9)],
+                    { level: 0.85, events: [E('page', 14, 0.1), E('chair', 30, 0.07), E('steps', 26, 0.07, 'far')] }),
+  gallery:       R('Galería',         [B('hall', 0.5, { width: 0.75 })],
+                    { level: 0.8, tone: { tiltDb: -1 }, events: [E('steps', 20, 0.08, 'far')] }),
+  foyer:         R('Vestíbulo',       [B('hall', 0.7, { width: 0.75 })],
+                    { level: 0.9, events: [E('door', 26, 0.12, 'far'), E('steps', 18, 0.09)] }),
 
   // --- transit -------------------------------------------------------------
-  station: {
-    label: 'Estación',
-    stems: [
-      { stem: 'babble_hall', gain: 0.44, width: 1 },
-      { stem: 'pa_concourse', gain: 0.42 },
-      { stem: 'transit_hum', gain: 0.22, lowpass: 900 },
-    ],
-    room: { size: 'hall', wet: 0.26, rt60Scale: 1.25, damping: 0.2, brightnessHz: 8000, surface: 'tile' },
-    events: [
-      ev('announcement', 20, 0.42, { distance: 'far' }),
-      ev('footstepRun', 7, 0.3, { distance: 'mid' }),
-      ev('luggage', 13, 0.35, { distance: 'mid' }),
-      ev('doorLatch', 30, 0.25, { distance: 'far' }),
-    ],
-    intensityBias: 0.05,
-    duckingBias: 0.1,
-    activity: 'bustling',
-    eventHeadroomDb: 4,
-    tone: { tiltDb: 2.5, lowShelf: { hz: 120, db: 3 } },
-  },
-
-  airport: {
-    label: 'Aeropuerto',
-    stems: [
-      // Same public address as a station, but the room is bigger and softer and the
-      // air handling is the loudest thing in it.
-      { stem: 'babble_hall', gain: 0.38, width: 1 },
-      { stem: 'pa_concourse', gain: 0.26, lowpass: 3200 },
-      { stem: 'hvac_office', gain: 0.48 },
-    ],
-    room: { size: 'hall', wet: 0.24, rt60Scale: 1.4, damping: 0.22, brightnessHz: 6800, surface: 'tile' },
-    events: [
-      ev('announcement', 16, 0.45, { distance: 'far' }),
-      ev('luggage', 9, 0.35, { distance: 'mid' }),
-      ev('footstepRun', 8, 0.28, { distance: 'mid' }),
-      ev('registerBeep', 20, 0.2, { distance: 'mid' }),
-    ],
-    duckingBias: 0.1,
-    activity: 'bustling',
-    eventHeadroomDb: 4,
-    tone: { tiltDb: 1.5 },
-  },
-
-  vehicle_interior: {
-    label: 'En el vehículo',
-    stems: [
-      { stem: 'transit_hum', gain: 0.6 },
-      { stem: 'babble_close', gain: 0.12, lowpass: 1800, width: 0.6 },
-    ],
-    room: { size: 'small', wet: 0.07, rt60Scale: 0.3, damping: 0.85, brightnessHz: 2400, surface: 'carpet' },
-    events: [
-      ev('plasticTap', 9, 0.25, { burst: 0.5, distance: 'near' }),
-      ev('honk', 34, 0.2, { distance: 'far' }),
-      ev('announcement', 45, 0.22, { distance: 'far' }),
-    ],
-    duckingBias: 0.15,
-    activity: 'calm',
-    eventHeadroomDb: 8,
-    tone: { tiltDb: -7, lowShelf: { hz: 130, db: 5 } },
-  },
-
-  hotel_lobby: {
-    label: 'Recepción de hotel',
-    stems: [
-      { stem: 'babble_hall', gain: 0.26, lowpass: 3000, width: 0.9 },
-      { stem: 'hvac_office', gain: 0.38 },
-      { stem: 'home_life', gain: 0.14, lowpass: 1800 },
-    ],
-    room: { size: 'hall', wet: 0.22, rt60Scale: 0.75, damping: 0.5, brightnessHz: 4000, surface: 'carpet' },
-    events: [
-      ev('footstep', 6, 0.26, { distance: 'mid' }),
-      ev('luggage', 18, 0.3, { distance: 'mid' }),
-      ev('doorChime', 30, 0.25, { distance: 'far' }),
-      ev('typing', 12, 0.22, { burst: 0.4, distance: 'near' }),
-      ev('phoneRing', 40, 0.22, { distance: 'far' }),
-    ],
-    intensityBias: -0.05,
-    activity: 'busy',
-    eventHeadroomDb: 9,
-    tone: { tiltDb: -2 },
-  },
+  station:       R('Estación',        [B('station', 1.0, { width: 0.95 })]),
+  airport:       R('Aeropuerto',      [B('airport', 1.0, { width: 0.95 })]),
+  vehicle_interior:R('Vehículo',      [B('train_interior', 1.0, { width: 0.6 })]),
+  hotel_lobby:   R('Recepción de hotel',[B('hall', 0.7, { width: 0.75 })],
+                    { level: 0.9, events: [E('door', 24, 0.12, 'far'), E('till', 26, 0.08)] }),
 
   // --- home ----------------------------------------------------------------
-  home: {
-    label: 'Casa',
-    stems: [
-      { stem: 'home_life', gain: 0.55 },
-      { stem: 'room_tone', gain: 0.24 },
-    ],
-    room: { size: 'small', wet: 0.1, rt60Scale: 0.8, damping: 0.6, brightnessHz: 3600, surface: 'wood' },
-    events: [
-      ev('creak', 20, 0.22, { distance: 'mid' }),
-      ev('porcelain', 26, 0.22, { distance: 'far' }),
-      ev('doorLatch', 34, 0.24, { distance: 'far' }),
-    ],
-    intensityBias: -0.2,
-    activity: 'calm',
-    eventHeadroomDb: 11,
-    tone: { tiltDb: -3, lowShelf: { hz: 170, db: 2 } },
-  },
+  home:          R('Casa',            [B('room_air', 1.0)],
+                    { level: 0.95, events: [E('chair', 30, 0.08), E('door', 40, 0.09, 'far')] }),
+  kitchen_home:  R('Cocina',          [B('kitchen', 0.85, { width: 0.6 })],
+                    { level: 0.9 }),
 
-  // --- broadcast and performance -------------------------------------------
-  studio_radio: {
-    label: 'Estudio de radio',
-    stems: [
-      // A treated booth is a small box, not silence: a strong low mode and no air
-      // above 3 kHz. All four studios used to be studio_tone + room_tone, and being
-      // below the old bed floor they arrived at exactly the same level too.
-      { stem: 'booth_tight', gain: 0.62 },
-      { stem: 'studio_tone', gain: 0.34 },
-    ],
-    room: { size: 'small', wet: 0.05, rt60Scale: 0.4, damping: 0.8, brightnessHz: 2800, surface: 'carpet' },
-    events: [
-      ev('paperRustle', 22, 0.16, { distance: 'near' }),
-    ],
-    intensityBias: -0.35,
-    duckingBias: -0.2,
-    activity: 'still',
-    eventHeadroomDb: 8,
-    tone: { tiltDb: -5, peak: { hz: 180, db: 2.5, q: 6 } },
-  },
-
-  studio_newsroom: {
-    label: 'Estudio / redacción',
-    stems: [
-      { stem: 'studio_tone', gain: 0.5 },
-      { stem: 'hvac_office', gain: 0.24 },
-      { stem: 'babble_close', gain: 0.08, lowpass: 1600, width: 0.6 },
-    ],
-    room: { size: 'small', wet: 0.07, rt60Scale: 0.5, damping: 0.65, brightnessHz: 4200, surface: 'carpet' },
-    events: [
-      ev('typing', 14, 0.16, { burst: 0.4, distance: 'far' }),
-      ev('paperRustle', 18, 0.18, { distance: 'near' }),
-      ev('phoneRing', 55, 0.14, { distance: 'far' }),
-    ],
-    intensityBias: -0.3,
-    duckingBias: -0.15,
-    activity: 'busy',
-    eventHeadroomDb: 6,
-    tone: { tiltDb: -2 },
-  },
-
-  studio_podcast: {
-    label: 'Estudio de podcast',
-    stems: [
-      { stem: 'studio_tone', gain: 0.5 },
-      { stem: 'booth_tight', gain: 0.3 },
-      { stem: 'room_tone', gain: 0.2 },
-    ],
-    room: { size: 'small', wet: 0.08, rt60Scale: 0.45, damping: 0.75, brightnessHz: 3400, surface: 'carpet' },
-    events: [
-      ev('chairScrape', 40, 0.14, { distance: 'near' }),
-      ev('creak', 34, 0.14, { distance: 'near' }),
-    ],
-    intensityBias: -0.35,
-    duckingBias: -0.2,
-    activity: 'still',
-    eventHeadroomDb: 9,
-    tone: { tiltDb: -4 },
-  },
-
-  studio_intimate: {
-    label: 'Grabación íntima',
-    // Storytelling and personal essay: one person, close mic, a domestic room rather
-    // than a booth. Drier and warmer than the podcast studio, with a little more of
-    // the room's own life — someone recording at their desk, not in a facility.
-    stems: [
-      // Recorded at home rather than in a booth — that is the difference between
-      // this and the podcast studio, and it needs to be audible.
-      { stem: 'home_life', gain: 0.3, lowpass: 2600 },
-      { stem: 'room_tone', gain: 0.34 },
-      { stem: 'studio_tone', gain: 0.22 },
-    ],
-    room: { size: 'small', wet: 0.06, rt60Scale: 0.5, damping: 0.72, brightnessHz: 3000, surface: 'carpet' },
-    events: [
-      ev('creak', 26, 0.16, { distance: 'near' }),
-      ev('paperRustle', 34, 0.14, { distance: 'near' }),
-    ],
-    intensityBias: -0.35,
-    duckingBias: -0.2,
-    activity: 'still',
-    eventHeadroomDb: 11,
-    tone: { tiltDb: -4.5, lowShelf: { hz: 200, db: 2 } },
-  },
-
-  venue_stage: {
-    label: 'Auditorio',
-    stems: [
-      // An audience that is listening, not talking: distant, and never near you.
-      { stem: 'crowd_far', gain: 0.2, lowpass: 1600 },
-      { stem: 'room_tone', gain: 0.3 },
-    ],
-    room: { size: 'hall', wet: 0.3, rt60Scale: 1.1, damping: 0.32, brightnessHz: 5800, surface: 'wood' },
-    events: [
-      ev('cough', 13, 0.28, { distance: 'far' }),
-      ev('chairScrape', 20, 0.24, { distance: 'far' }),
-      ev('applause', 90, 0.35, { distance: 'far' }),
-      ev('creak', 26, 0.18, { distance: 'far' }),
-    ],
-    intensityBias: -0.2,
-    duckingBias: -0.1,
-    activity: 'calm',
-    eventHeadroomDb: 12,
-    tone: { tiltDb: 0.5, lowShelf: { hz: 150, db: 2 } },
-  },
-
-  // --- weather-flavoured variants ------------------------------------------
-  // --- recording settings --------------------------------------------------
-  //
-  // A bulletin, a podcast and a monologue are RECORDINGS, and where they were made is
-  // a real and varied fact about them. Before these existed, 106 of the 148 scenario
-  // labels resolved to one of four studios built from the same two featureless stems,
-  // so 72% of all lessons carried no sense of place at all — the same defect the
-  // Dialogue catalogue had been fixed for and nobody had checked for the rest.
-  //
-  // The rule is that the label decides the RECORDING SETUP, never the topic. An
-  // episode about a city is not recorded in that city; an episode about learning to
-  // cook plausibly is recorded at a kitchen table. Where a label implies nothing, the
-  // format's studio remains the answer.
-
-  kitchen_home: {
-    label: 'Cocina de casa',
-    stems: [
-      { stem: 'kitchen', gain: 0.34, lowpass: 6000 },
-      { stem: 'home_life', gain: 0.4 },
-      { stem: 'room_tone', gain: 0.18 },
-    ],
-    room: { size: 'small', wet: 0.13, rt60Scale: 0.85, brightnessHz: 5800, surface: 'tile' },
-    events: [
-      ev('porcelain', 14, 0.34, { burst: 0.4, distance: 'near' }),
-      ev('cutlery', 18, 0.3, { burst: 0.4, distance: 'near' }),
-      ev('woodKnock', 26, 0.26, { distance: 'near' }),
-      ev('sizzle', 46, 0.28, { distance: 'mid' }),
-    ],
-    activity: 'calm',
-    eventHeadroomDb: 10,
-    tone: { tiltDb: 1 },
-  },
-
-  podcast_home: {
-    label: 'Podcast en casa',
-    stems: [
-      { stem: 'home_life', gain: 0.42, lowpass: 3200 },
-      { stem: 'room_tone', gain: 0.3 },
-      { stem: 'studio_tone', gain: 0.2 },
-    ],
-    room: { size: 'small', wet: 0.09, rt60Scale: 0.6, damping: 0.68, brightnessHz: 3300, surface: 'carpet' },
-    events: [
-      ev('chairScrape', 40, 0.2, { distance: 'near' }),
-      ev('creak', 52, 0.18, { distance: 'near' }),
-      ev('plasticTap', 46, 0.16, { distance: 'near' }),
-    ],
-    intensityBias: -0.25,
-    duckingBias: -0.12,
-    activity: 'still',
-    eventHeadroomDb: 10,
-    tone: { tiltDb: -3.5 },
-  },
-
-  podcast_live: {
-    label: 'Podcast ante público',
-    stems: [
-      { stem: 'crowd_far', gain: 0.3, lowpass: 2200 },
-      { stem: 'room_tone', gain: 0.26 },
-      { stem: 'studio_tone', gain: 0.16 },
-    ],
-    room: { size: 'large', wet: 0.24, rt60Scale: 1.05, damping: 0.34, brightnessHz: 5200, surface: 'wood' },
-    events: [
-      ev('laugh', 26, 0.3, { distance: 'far' }),
-      ev('applause', 90, 0.34, { distance: 'far' }),
-      ev('cough', 34, 0.2, { distance: 'far' }),
-      ev('chairScrape', 44, 0.18, { distance: 'mid' }),
-    ],
-    activity: 'calm',
-    eventHeadroomDb: 9,
-    tone: { tiltDb: 0.5 },
-  },
-
-  podcast_remote: {
-    label: 'Invitado a distancia',
-    stems: [
-      // A guest on a line. The band limiting IS the scene: 300-3400 Hz is what a
-      // telephone channel passes, and hearing it is hearing that they are not there.
-      { stem: 'booth_tight', gain: 0.5, highpass: 300, lowpass: 3400 },
-      { stem: 'studio_tone', gain: 0.34 },
-      { stem: 'room_tone', gain: 0.16 },
-    ],
-    room: { size: 'small', wet: 0.05, rt60Scale: 0.4, damping: 0.8, brightnessHz: 3000, surface: 'carpet' },
-    events: [
-      ev('plasticTap', 40, 0.16, { distance: 'near' }),
-      ev('paperRustle', 34, 0.18, { distance: 'near' }),
-    ],
-    intensityBias: -0.3,
-    duckingBias: -0.18,
-    activity: 'still',
-    eventHeadroomDb: 8,
-    tone: { tiltDb: -2, peak: { hz: 1400, db: 3.5, q: 1.1 } },
-  },
-
-  radio_desk: {
-    label: 'Estudio de tertulia',
-    stems: [
-      { stem: 'studio_tone', gain: 0.44 },
-      { stem: 'booth_tight', gain: 0.24 },
-      { stem: 'hvac_office', gain: 0.2 },
-    ],
-    room: { size: 'small', wet: 0.09, rt60Scale: 0.55, damping: 0.66, brightnessHz: 3800, surface: 'carpet' },
-    events: [
-      ev('paperRustle', 20, 0.24, { distance: 'near' }),
-      ev('chairScrape', 44, 0.18, { distance: 'near' }),
-      ev('plasticTap', 38, 0.14, { distance: 'near' }),
-    ],
-    intensityBias: -0.28,
-    duckingBias: -0.16,
-    activity: 'still',
-    eventHeadroomDb: 10,
-    tone: { tiltDb: -3 },
-  },
-
-  radio_street: {
-    label: 'Conexión en la calle',
-    stems: [
-      // A correspondent with a handheld mic. The street is not the subject of the
-      // bulletin, it is where the reporter is standing — which is a fact about the
-      // recording, not a claim about the news.
-      { stem: 'traffic_near', gain: 0.4, width: 0.8 },
-      { stem: 'traffic_far', gain: 0.34 },
-      { stem: 'babble_open', gain: 0.16, lowpass: 2200, width: 0.85 },
-    ],
-    room: { size: 'outdoor', wet: 0.05, brightnessHz: 5400, surface: 'asphalt' },
-    events: [
-      ev('honk', 30, 0.28, { distance: 'far' }),
-      ev('vehiclePass', 13, 0.3, { distance: 'mid' }),
-      ev('footstep', 12, 0.2, { distance: 'near' }),
-    ],
-    duckingBias: 0.14,
-    activity: 'busy',
-    eventHeadroomDb: 4,
-    tone: { tiltDb: -2, lowShelf: { hz: 150, db: 2 } },
-  },
-
-  radio_field: {
-    label: 'Reportaje de campo',
-    stems: [
-      // A reporter outdoors with a windscreened handheld, which is a different sound
-      // from a park: closer to people and traffic, rolled off at the top by the
-      // windscreen, and with the low rumble that a handheld mic always picks up.
-      { stem: 'crowd_far', gain: 0.34, lowpass: 2400 },
-      { stem: 'traffic_far', gain: 0.3 },
-      { stem: 'wind_leaves', gain: 0.16, lowpass: 3200 },
-    ],
-    room: { size: 'outdoor', wet: 0.05, brightnessHz: 4600, surface: 'asphalt' },
-    events: [
-      ev('windGust', 13, 0.36),
-      ev('footstep', 9, 0.28, { distance: 'near' }),
-      ev('paperRustle', 22, 0.26, { distance: 'near' }),
-      ev('vehiclePass', 24, 0.24, { distance: 'far' }),
-    ],
-    intensityBias: -0.05,
-    activity: 'busy',
-    eventHeadroomDb: 8,
-    tone: { tiltDb: -2.5, lowShelf: { hz: 170, db: 4 } },
-  },
-
-  radio_phone: {
-    label: 'Estudio con línea telefónica',
-    stems: [
-      { stem: 'studio_tone', gain: 0.54 },
-      { stem: 'booth_tight', gain: 0.32, highpass: 320, lowpass: 3200 },
-    ],
-    room: { size: 'small', wet: 0.06, rt60Scale: 0.42, damping: 0.78, brightnessHz: 3100, surface: 'carpet' },
-    events: [
-      ev('paperRustle', 26, 0.2, { distance: 'near' }),
-      ev('plasticTap', 44, 0.14, { distance: 'near' }),
-    ],
-    intensityBias: -0.32,
-    duckingBias: -0.18,
-    activity: 'still',
-    eventHeadroomDb: 9,
-    tone: { tiltDb: -4, peak: { hz: 1100, db: 3, q: 1.2 } },
-  },
-
-  street_rain: {
-    label: 'Calle con lluvia',
-    stems: [
-      { stem: 'rain', gain: 0.6 },
-      { stem: 'traffic_near', gain: 0.32, lowpass: 5000, width: 1 },
-      { stem: 'traffic_far', gain: 0.26 },
-    ],
-    room: { size: 'outdoor', wet: 0.06, brightnessHz: 6000, surface: 'asphalt' },
-    events: [
-      ev('vehiclePass', 11, 0.4, { distance: 'near' }),
-      ev('rainDrip', 5, 0.3, { burst: 0.4, distance: 'near' }),
-      ev('honk', 34, 0.25, { distance: 'far' }),
-    ],
-    duckingBias: 0.15,
-    activity: 'busy',
-    eventHeadroomDb: 5,
-    tone: { tiltDb: -1 },
-    family: 'street',
-  },
-
-  park_rain: {
-    label: 'Parque con lluvia',
-    stems: [
-      { stem: 'rain', gain: 0.65 },
-      { stem: 'wind_leaves', gain: 0.3 },
-    ],
-    room: { size: 'outdoor', wet: 0.07, brightnessHz: 6400, surface: 'asphalt' },
-    events: [
-      ev('rainDrip', 4, 0.32, { burst: 0.5, distance: 'near' }),
-      ev('windGust', 16, 0.3),
-      ev('bird', 20, 0.2, { distance: 'far' }),
-    ],
-    duckingBias: 0.1,
-    activity: 'calm',
-    eventHeadroomDb: 8,
-    tone: { tiltDb: -1.5 },
-    family: 'park',
-  },
-} satisfies Record<string, SceneRecipe>;
+  // --- recording setups (studios and lines) --------------------------------
+  studio_radio:    R('Estudio de radio',   [B('studio_air', 1.0)]),
+  studio_newsroom: R('Redacción en directo',[B('office', 0.65, { width: 0.6 })],
+                      { level: 0.85, events: [E('keyboard', 4, 0.1), E('paper', 14, 0.09)] }),
+  studio_podcast:  R('Estudio de podcast',  [B('studio_air', 1.0)]),
+  studio_intimate: R('Estudio íntimo',      [B('studio_air', 0.85)], { level: 0.85 }),
+  podcast_home:    R('Podcast en casa',     [B('room_air', 0.9)], { level: 0.9 }),
+  podcast_live:    R('Podcast en directo',  [B('hall', 0.6, { width: 0.8 })], { level: 0.85 }),
+  podcast_remote:  R('Podcast a distancia', [B('studio_air', 1.0)],
+                      { tone: { bandpass: [320, 3400] } }),
+  radio_desk:      R('Mesa de tertulia',    [B('studio_air', 0.95)],
+                      { events: [E('paper', 16, 0.08)] }),
+  radio_street:    R('Corresponsal en calle',[B('street', 0.85, { width: 0.9 })], { level: 0.9 }),
+  radio_field:     R('Grabación de campo',  [B('forest', 0.9, { width: 1.0 })]),
+  radio_phone:     R('Línea telefónica',    [B('studio_air', 1.0)],
+                      { tone: { bandpass: [300, 3400] } }),
+} as const;
 
 export type SceneId = keyof typeof SCENE_RECIPES;
 export const SCENE_IDS = Object.keys(SCENE_RECIPES) as SceneId[];
@@ -1311,12 +238,18 @@ export const SCENE_IDS = Object.keys(SCENE_RECIPES) as SceneId[];
 export const isSceneId = (value: unknown): value is SceneId =>
   typeof value === 'string' && Object.prototype.hasOwnProperty.call(SCENE_RECIPES, value);
 
+/** Every bed a recipe actually references — used by the checks so a bed can't be dead weight. */
+export const REFERENCED_BEDS = new Set<BedId>(
+  SCENE_IDS.flatMap((id) => SCENE_RECIPES[id].beds.map((l) => l.bed)),
+);
+
 // ---------------------------------------------------------------------------
 // Scenario label -> scene
 //
-// Every one of the 40 `Diálogo (2 personas)` context labels in data/scenarios.ts is
-// listed here. scripts/check-ambience.mjs walks SCENARIO_DATABASE and fails if any
-// label is missing, so the catalogue and this table cannot drift apart.
+// Every context label in data/scenarios.ts is listed here. scripts/check-ambience.mjs
+// walks SCENARIO_DATABASE and fails if any label is missing, so the catalogue and these
+// tables cannot drift apart. The SceneId vocabulary is unchanged from the previous
+// system — only what each scene *sounds like* changed — so these maps are as before.
 // ---------------------------------------------------------------------------
 
 const DIALOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
@@ -1362,31 +295,7 @@ const DIALOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Backstage / Música': 'backstage',
 };
 
-/**
- * Where the single-voice and interview formats were RECORDED.
- *
- * The old version had six overrides for RadioNews, nine for Monologue and no table at
- * all for PodcastInterview, so 106 of the 148 scenario labels landed on one of four
- * studios — and those four studios were the same two featureless stems at four
- * slightly different gains. For 72% of every lesson the app generated, the learner
- * heard no place whatsoever. That is the exact defect the Dialogue catalogue had
- * already been fixed for (30 of 40 scenarios once shared `office.wav`); nobody had
- * measured whether the other three formats had it too. They did, worse.
- *
- * The principle that made those formats studios in the first place still holds and is
- * not being abandoned: a bulletin about traffic is heard from a studio, not from a
- * road, and pretending otherwise contradicts the audio the learner is listening to.
- * What changed is the recognition that "a studio" is not one room. A bulletin can come
- * from an on-air booth, a live newsroom, a talk desk, a correspondent standing in the
- * street, or a contributor on a phone line — all of those are things a listener has
- * actually heard on the radio, and they sound nothing like each other.
- *
- * So: **the label chooses the recording setup, never the topic.** An episode about a
- * city is not recorded in that city. An episode about learning to cook plausibly is
- * recorded at a kitchen table, and one about a hospital stay plausibly is not.
- */
 const RADIO_SCENE_BY_LABEL: Record<string, SceneId> = {
-  // A live newsroom: the story is still moving while it is being read.
   'Última Hora': 'studio_newsroom',
   'Cobertura de Crisis': 'studio_newsroom',
   'Investigación Periodística': 'studio_newsroom',
@@ -1394,7 +303,6 @@ const RADIO_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Noticias del Barrio': 'studio_newsroom',
   'Política Municipal': 'studio_newsroom',
   'Tribunales y Justicia': 'studio_newsroom',
-  // A correspondent outdoors. Traffic and roadworks are reported from the road.
   'Tráfico': 'radio_street',
   'Transporte Público': 'radio_street',
   'Transporte y Movilidad': 'radio_street',
@@ -1402,21 +310,18 @@ const RADIO_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Infraestructura Urbana': 'radio_street',
   'Ferias y Mercados': 'radio_street',
   'Servicios de la Ciudad': 'radio_street',
-  // A field recording, windscreen and all.
   'El Tiempo': 'radio_field',
   'Clima y Estaciones': 'radio_field',
   'Medio Ambiente': 'radio_field',
   'Medio Ambiente Local': 'radio_field',
   'Turismo de la Región': 'radio_field',
   'Deportes Locales': 'radio_field',
-  // A studio taking a contribution down a line — 300-3400 Hz, and you can hear it.
   'Geopolítica': 'radio_phone',
   'Economía y Mercados': 'radio_phone',
   'Economía Nacional': 'radio_phone',
   'Debate Electoral': 'radio_phone',
   'Tecnología y Ética': 'radio_phone',
   'Análisis Político': 'radio_phone',
-  // A talk desk: bigger than a booth, with paper on it.
   'Editorial de Opinión': 'radio_desk',
   'Cultura y Crítica': 'radio_desk',
   'Ciencia Avanzada': 'radio_desk',
@@ -1424,7 +329,6 @@ const RADIO_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Consumo y Ahorro': 'radio_desk',
   'Trabajo y Empleo': 'radio_desk',
   'Cultura y Espectáculos': 'radio_desk',
-  // The remaining seven fall through to `studio_radio`, the on-air booth.
 };
 
 const PODCAST_SCENE_BY_LABEL: Record<string, SceneId> = {
@@ -1440,7 +344,6 @@ const PODCAST_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Mi Deporte Favorito': 'gym',
   'El Día que Me Despidieron': 'studio_podcast',
   'Emprender de Cero': 'open_office',
-  // A guest who lives abroad joins on a line; that is what "a distancia" sounds like.
   'Vivir en el Extranjero': 'podcast_remote',
   'Mi Relación a Distancia': 'podcast_remote',
   'Superé una Lesión': 'gym',
@@ -1465,18 +368,12 @@ const PODCAST_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Perdón y Reconciliación': 'podcast_home',
 };
 
-/**
- * A monologue label is a narration, not a place — so what varies is whether it is
- * PERFORMED to a room, RECORDED alone, or REGISTERED on location.
- */
 const MONOLOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
-  // Performed to an audience.
   'Discurso Motivacional': 'venue_stage',
   'Discurso de Despedida': 'venue_stage',
   'Manifiesto Creativo': 'venue_stage',
   'Análisis Social': 'venue_stage',
   'Monólogo de Humor': 'bar_night',
-  // Recorded alone.
   'Ensayo Personal': 'studio_intimate',
   'Relato Literario': 'studio_intimate',
   'Una Decisión que Cambió Todo': 'studio_intimate',
@@ -1498,7 +395,6 @@ const MONOLOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Una Historia de Superación': 'gym',
   'Una Fiesta Familiar': 'restaurant',
   'Cómo Conocí a mi Mejor Amigo': 'cafe',
-  // Registered on location.
   'Crónica de mi Barrio': 'street',
   'Mi Primer Viaje': 'station',
   'El Día que Perdí Algo': 'station',
@@ -1510,13 +406,9 @@ const MONOLOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
 };
 
 /**
- * How present the place is for a recording made in it.
- *
- * A podcast episode recorded at a kitchen table is not the same as standing in a
- * kitchen: the microphone is close to the speakers, and a full-strength market or
- * café would bury the dialogue while claiming something untrue. Scaling the bed, the
- * events and the onset budget together says the accurate thing — this was recorded
- * there. Studios are exempt: for them, the recording setup IS the place.
+ * How present the place is for a recording *made* in it (a podcast at a kitchen table)
+ * rather than a conversation happening there. Scales the bed and events together so the
+ * ambience never claims the microphone is standing in a full market. Studios are exempt.
  */
 const RECORDING_PRESENCE = 0.62;
 
@@ -1529,25 +421,17 @@ const DEFAULT_SCENE_BY_TEXT_TYPE: Record<string, SceneId> = {
   [TextType.Dialogue]: 'office',
   [TextType.RadioNews]: 'studio_radio',
   [TextType.PodcastInterview]: 'studio_podcast',
-  // A monologue is one person telling a story, usually close-miked in a room rather
-  // than in a two-chair interview booth. Sending it to the same studio as the podcast
-  // would make two thirds of the catalogue share one ambience.
   [TextType.Monologue]: 'studio_intimate',
 };
 
 // ---------------------------------------------------------------------------
-// Free-text inference
-//
-// Used for Vocabulary mode, custom topics and AccentChallenge, where there is no
-// scenario label at all. Unlike the old version this consumes the topic AND the
-// model's keywords — previously `inferTagsFromAction` looked only at the action
-// label, so the richest contextual signal available was thrown away.
+// Free-text inference (Vocabulary mode, custom topics, AccentChallenge).
 // ---------------------------------------------------------------------------
 
 const KEYWORD_SCENES: Array<{ scene: SceneId; pattern: RegExp }> = [
   { scene: 'street_rain', pattern: /(lluvia|tormenta|llover|rain|storm)/i },
   { scene: 'park', pattern: /(parque|bosque|campo|jardín|jardin|montaña|montana|naturaleza|park|forest|nature|hiking|senderismo)/i },
-  { scene: 'plaza', pattern: /(playa|mar|costa|beach|sea|ocean|puerto)/i },
+  { scene: 'plaza', pattern: /(playa|mar|costa|beach|sea|ocean|puerto|plaza)/i },
   { scene: 'airport', pattern: /(aeropuerto|avión|avion|vuelo|airport|flight|embarque)/i },
   { scene: 'station', pattern: /(estación|estacion|tren|metro|subte|andén|anden|station|train|platform)/i },
   { scene: 'vehicle_interior', pattern: /(taxi|autobús|autobus|colectivo|micro|coche|auto|conducir|bus|car|driving)/i },
@@ -1580,16 +464,12 @@ function inferSceneFromText(text: string): SceneId | null {
   return null;
 }
 
-/**
- * Weather and time-of-day modifiers applied on top of a resolved scene.
- *
- * Rain is the only one that changes the scene outright, because it changes what you
- * hear more than the location does. Everything else nudges the mix.
- */
+/** Rain is the only modifier that swaps the scene outright, because it changes what you
+ *  hear more than the place does. */
 function applyModifiers(scene: SceneId, text: string): SceneId {
-  const isOutdoor = SCENE_RECIPES[scene].room.size === 'outdoor';
-  if (isOutdoor && /(lluvia|lloviendo|tormenta|rain|storm|paraguas|umbrella)/i.test(text)) {
-    if (scene === 'park' || scene === 'plaza') return 'park_rain';
+  const outdoorScenes = new Set<SceneId>(['street', 'plaza', 'park', 'radio_street', 'radio_field']);
+  if (outdoorScenes.has(scene) && /(lluvia|lloviendo|tormenta|rain|storm|paraguas|umbrella)/i.test(text)) {
+    if (scene === 'park' || scene === 'plaza' || scene === 'radio_field') return 'park_rain';
     return 'street_rain';
   }
   return scene;
@@ -1612,18 +492,9 @@ export interface AmbienceScene {
 export interface ResolvedAmbience {
   id: SceneId;
   recipe: SceneRecipe;
-  /** How the scene was chosen — surfaced by the test suite and useful when debugging. */
   source: 'label' | 'textType' | 'model' | 'keyword' | 'default';
-  /**
-   * How present the place is, 0-1. Below 1 for a recording *made* somewhere rather
-   * than a conversation happening there.
-   *
-   * A podcast episode about cooking is recorded at a kitchen table, and that is worth
-   * hearing — but at a full market's density and level it would bury the dialogue and
-   * claim something untrue, that the microphone is in the market. Scaling the bed, the
-   * events and the onset budget together says the accurate thing: this was recorded in
-   * that place.
-   */
+  /** How present the place is, 0-1. Below 1 for a recording made somewhere rather than
+   *  a conversation happening there. */
   presence?: number;
 }
 
@@ -1637,7 +508,6 @@ export function resolveAmbienceScene(scene: AmbienceScene): ResolvedAmbience {
 
   const finish = (id: SceneId, source: ResolvedAmbience['source']): ResolvedAmbience => {
     const modified = applyModifiers(id, `${action} ${topic} ${keywords}`);
-    // A recording made in a place, rather than a conversation happening in one.
     const recorded = textType !== undefined
       && textType !== TextType.Dialogue
       && !STUDIO_SCENES.has(modified);
@@ -1649,8 +519,6 @@ export function resolveAmbienceScene(scene: AmbienceScene): ResolvedAmbience {
     };
   };
 
-  // 1. Format-specific label overrides (a bulletin about the courts is still a studio,
-  //    but breaking news comes from a newsroom).
   if (label) {
     if (textType === TextType.RadioNews && RADIO_SCENE_BY_LABEL[label]) {
       return finish(RADIO_SCENE_BY_LABEL[label], 'label');
@@ -1661,11 +529,9 @@ export function resolveAmbienceScene(scene: AmbienceScene): ResolvedAmbience {
     if (textType === TextType.PodcastInterview && PODCAST_SCENE_BY_LABEL[label]) {
       return finish(PODCAST_SCENE_BY_LABEL[label], 'label');
     }
-    // 2. The dialogue catalogue: a real place with a real ambience.
     if ((!textType || textType === TextType.Dialogue) && DIALOGUE_SCENE_BY_LABEL[label]) {
       return finish(DIALOGUE_SCENE_BY_LABEL[label], 'label');
     }
-    // 3. Single-voice and interview formats: the studio they are recorded in.
     if (textType && DEFAULT_SCENE_BY_TEXT_TYPE[textType] && textType !== TextType.Dialogue) {
       return finish(DEFAULT_SCENE_BY_TEXT_TYPE[textType], 'textType');
     }
@@ -1674,26 +540,20 @@ export function resolveAmbienceScene(scene: AmbienceScene): ResolvedAmbience {
     }
   }
 
-  // 4. A scene the model named explicitly, validated against the closed list.
   if (isSceneId(scene.sceneHint)) return finish(scene.sceneHint, 'model');
 
-  // 5. Free text (Vocabulary mode, custom topics, AccentChallenge).
   const inferred = inferSceneFromText(combined);
   if (inferred) return finish(inferred, 'keyword');
 
-  // 6. Whatever the format implies, or a neutral room.
   if (textType && DEFAULT_SCENE_BY_TEXT_TYPE[textType]) {
     return finish(DEFAULT_SCENE_BY_TEXT_TYPE[textType], 'textType');
   }
   return finish('office', 'default');
 }
 
-/** Every scene id the model is allowed to name, for the generation prompt. */
+/** Scenes the model is not allowed to name explicitly. */
 const MODEL_EXCLUDED_SCENES = new Set<SceneId>([
-  // Weather variants are reached by `applyModifiers`, not by naming.
   'street_rain', 'park_rain',
-  // Recording setups, not places. A model asked "where does this happen?" must not be
-  // able to answer "on a telephone line" for a two-person conversation.
   'podcast_remote', 'radio_phone', 'radio_desk', 'podcast_live', 'podcast_home',
 ]);
 

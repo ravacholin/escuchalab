@@ -1,0 +1,24 @@
+{
+  "_comment": "Real public-domain field recordings (radio aporee / archive.org, all Public Domain Mark 1.0). Processed by build-beds.mjs into public/ambience/<id>.wav — a seamless mono loop. Raw sources are cached in .ambience-cache/ (gitignored) and re-fetched from archive.org on demand. Editing this file and running `npm run ambience:build` regenerates the beds. windowStart/loopSec pick a stable stretch of the recording; gainDb is a per-bed trim applied before the shared loudness normalisation so one source does not arrive hotter than the rest.",
+  "_license": "Every entry is Public Domain Mark 1.0 (no rights reserved). Provenance is written to public/ambience/CREDITS.md by the build.",
+  "beds": {
+    "cafe":           { "ia": "aporee_33759_38831", "file": "SevillaCafeSomorgensAlamedadeHercules.mp3", "credit": "Sevilla, España — street café, morning (Alameda de Hércules)", "windowStart": 34, "loopSec": 20 },
+    "restaurant":     { "ia": "aporee_16476_19096", "file": "RestaurantKidsLessPeopleTalkingGerman03.mp3", "credit": "Il Salento — Italian restaurant interior", "windowStart": 70, "loopSec": 20 },
+    "pub":            { "ia": "aporee_37009_42409", "file": "TheLambpub94LambsConduitStreetLondon.mp3", "credit": "The Lamb, Lamb's Conduit Street, London — pub interior", "windowStart": 55, "loopSec": 20 },
+    "market":         { "ia": "aporee_23251_27013", "file": "SoundMap201405102.mp3", "credit": "Viktualienmarkt, Munich — open market", "windowStart": 28, "loopSec": 20 },
+    "shop":           { "ia": "aporee_14262_16602", "file": "chleb.mp3", "credit": "Poznań — small grocery store", "windowStart": 22, "loopSec": 16 },
+    "street":         { "ia": "aporee_36832_42207", "file": "17EdaNG1006172100.mp3", "credit": "Nova Gorica, Slovenia — traffic in the city", "windowStart": 90, "loopSec": 22 },
+    "plaza":          { "ia": "aporee_70856_82616", "file": "orchestraoaxaca.mp3", "credit": "Zócalo de la Ciudad de Oaxaca, México — plaza", "windowStart": 40, "loopSec": 20 },
+    "park":           { "ia": "aporee_19595_22754", "file": "SoundMap201309134.mp3", "credit": "Taipei Botanical Garden — park", "windowStart": 60, "loopSec": 22 },
+    "forest":         { "ia": "aporee_53013_60581", "file": "Forestambiencewithanthropophony20210425120447.mp3", "credit": "Suchsdorf forest, Kiel, Deutschland — forest ambience", "windowStart": 140, "loopSec": 22 },
+    "rain":           { "ia": "aporee_28174_32460", "file": "SlightRain.mp3", "credit": "Carrer Verdi, Barcelona, España — slight rain and street", "windowStart": 90, "loopSec": 22 },
+    "station":        { "ia": "aporee_54105_61839", "file": "TraukiniuStotiesLaukiamojiSale.mp3", "credit": "Kaunas, Lithuania — train station waiting hall", "windowStart": 90, "loopSec": 22 },
+    "airport":        { "ia": "aporee_28099_32378", "file": "abberlin.mp3", "credit": "Aeroporto da Madeira — boarding crowd", "windowStart": 40, "loopSec": 20 },
+    "train_interior": { "ia": "aporee_16124_18707", "file": "LS111027.mp3", "credit": "Transcarpathian elektrichka — train interior", "windowStart": 80, "loopSec": 20 },
+    "office":         { "ia": "aporee_14245_16585", "file": "fan.mp3", "credit": "Poznań — office, ventilation fan", "windowStart": 25, "loopSec": 18 },
+    "kitchen":        { "ia": "aporee_34602_39773", "file": "youaregonejanvier2017.mp3", "credit": "Saint-Girons, France — kitchen atmosphere", "windowStart": 14, "loopSec": 16 },
+    "pool":           { "ia": "aporee_14938_17409", "file": "basen.mp3", "credit": "Prague — YMCA swimming pool hall", "windowStart": 45, "loopSec": 20 },
+    "hall":           { "ia": "aporee_20404_23726", "file": "Archaeologymuseumentryhall.mp3", "credit": "Archaeology Museum, Athens — reverberant entry hall", "windowStart": 30, "loopSec": 18 },
+    "workshop":       { "ia": "aporee_20682_24009", "file": "PowerStationofArt201311282.mp3", "credit": "Shanghai — construction / works", "windowStart": 60, "loopSec": 20 }
+  }
+}
