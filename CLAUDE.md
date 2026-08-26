@@ -300,6 +300,16 @@ pairs sat below the distinguishability floor**, and the reasons were structural:
   `eventHeadroomDb`; unannotated ones reproduce the old value. The catalogue now spans
   14 dB across 14 distinct values, asserted **in both directions** — no scene deafening,
   and the ceilings not all equal.
+- **Events are then trimmed as a whole, at playback, to sit UNDER the bed** (`EVENT_TRIM_DB`,
+  8 dB, applied in `fire()`). The declared headrooms put the loudest one-shot *above* the
+  bed — right for a field recording, wrong for ambience that must read as a background
+  behind a dialogue. When the loudest thing every few seconds is a pitched clink poking
+  over the bed, the mix collapses into "campanitas que no corresponden a ningún sonido de
+  fondo" — bells over nothing, the report this trim answers. It is one uniform offset, so
+  the scene-to-scene contrast the recipes declare survives it, and it lives in the runtime
+  rather than in `eventScaleFor` **on purpose**: the offline renderer that drives
+  `check:ambience:scenes` reads `eventScaleFor`, and that check measures whether scenes are
+  *distinguishable by design* — a question the presentation level must not perturb.
 - **A density budget per scene, not one for the catalogue.** `activity`
   (`still`/`calm`/`busy`/`bustling`/`chaotic` → 6-52 onsets/min) says how often a scene
   puts a discrete sound in front of the listener. There used to be one ceiling of 26, and
@@ -363,6 +373,17 @@ pairs sat below the distinguishability floor**, and the reasons were structural:
   its relief valve. Likewise `coin` accelerates as it settles, `creak` glides upward
   where `chairScrape` is stick-slip, and a weight plate is a heavy modal hit rather than
   `material('metal')` twice.
+- **A struck object is a clink, not a chime.** The tuned sine partials of a `modalHit` are
+  the *least* of what a cup, a coin or a fork sounds like — the sound is overwhelmingly a
+  brief broadband contact and a noisy body, with only a faint pitched tail. When those
+  partials ring as loud and as long as the contact (glass rang 0.35 s, `doorChime` a
+  piercing 0.85 s), crockery reads as a glockenspiel: the "campanitas idiotas" of the
+  report. `material()` therefore pulls the pitched partials well below the body
+  (`RING_LEVEL` 0.45), shortens their tail (`RING_DECAY_SCALE` 0.55) and brings the
+  broadband body up (`BODY_BOOST` 1.2); `doorChime` drops to one or two shorter, lower,
+  softer strikes. This is a runtime-timbre change — the offline renderer mirrors a
+  separate, already-duller impact model (`events.mjs`), so it is judged by ear, not by a
+  check.
 - **Every `EventKind` has a synth**, asserted by `check:ambience` — tags can no longer be
   dead code.
 - **Node lifecycle**: event nodes are released on completion rather than accumulating
