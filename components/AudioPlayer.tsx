@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX, Download } from 'lucide-react';
-import { resolveAmbienceScene } from '../services/ambiencePresets';
+import { resolveAmbienceScene, type ResolvedAmbience } from '../services/ambiencePresets';
 import {
   AmbienceEngine,
   DEFAULT_AMBIENCE_DUCKING,
@@ -160,7 +160,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const effectiveVolume = prefs.muted ? 0 : prefs.volume;
 
   const keywords = ambientKeywords ?? explicitQuery;
-  const scene = useMemo(
+  // El tipo se ancla a mano: sin esto `useMemo` infería `any` para `scene`, así
+  // que `scene.recipe.<campo>` no se comprobaba contra `SceneRecipe`. Fue justo
+  // ese agujero el que dejó pasar la lectura de `recipe.stems`/`recipe.room`
+  // (campos del motor viejo) tras reconstruir el ambiente: compilaba sin quejarse
+  // y reventaba en tiempo de render. Con el tipo puesto, un cambio de forma de la
+  // receta se detecta al compilar, no con la pantalla en negro.
+  const scene: ResolvedAmbience = useMemo(
     () => resolveAmbienceScene({ scenarioLabel, scenarioActionLabel, textType, topic, keywords, sceneHint }),
     [scenarioLabel, scenarioActionLabel, textType, topic, keywords, sceneHint],
   );
@@ -285,10 +291,18 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       // A small amount of the scene's space on the voice, so the speaker sounds like
       // they are in the room rather than pasted over it. Outdoor scenes get almost
       // none — that is the point of being outdoors.
+      //
+      // The rebuilt ambience has no synthetic `room` on the recipe any more (the
+      // real recordings carry their own space), so the voice's room is derived
+      // from which beds the scene uses: an outdoor recording means outdoors, the
+      // museum-`hall` bed means a long, boomy space.
+      const bedIds = scene.recipe.beds.map((l) => l.bed);
+      const isOutdoor = bedIds.some((b) => b === 'street' || b === 'plaza' || b === 'park' || b === 'rain' || b === 'forest');
+      const isHall = bedIds.includes('hall');
       const wet = ctx.createGain();
-      wet.gain.value = scene.recipe.room.size === 'outdoor' ? 0.04 : Math.min(0.18, scene.recipe.room.wet);
+      wet.gain.value = isOutdoor ? 0.04 : 0.12;
       const dly = ctx.createDelay(0.2);
-      dly.delayTime.value = scene.recipe.room.size === 'hall' ? 0.055 : 0.032;
+      dly.delayTime.value = isHall ? 0.055 : 0.032;
       const fb = ctx.createGain();
       fb.gain.value = 0.32;
       const tone = ctx.createBiquadFilter();
@@ -465,7 +479,14 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     );
   }
 
-  const totalStems = scene.recipe.stems.length;
+  // El motor reconstruido sobre grabaciones reales expone las camas en
+  // `recipe.beds` (antes eran `recipe.stems` sintéticos). Leer el campo viejo
+  // aquí, en el cuerpo del render, lanzaba `Cannot read properties of undefined
+  // (reading 'length')` al montar el reproductor y, sin error boundary, dejaba
+  // la app en negro justo al pasar a la pantalla que reproduce la lección. El
+  // total de capas es el número de camas: es lo que el motor cuenta como
+  // `layerCount` al reportar `onStemsReady`.
+  const totalStems = scene.recipe.beds.length;
   const setPref = (patch: Partial<AmbiencePrefs>) => setPrefs((p) => ({ ...p, ...patch }));
 
   return (
