@@ -250,6 +250,17 @@ for (const accent of Object.values(Accent)) {
   check('el monólogo asigna una única voz', solo.length === 1, `${solo.length} voces`);
   check('el monólogo respeta el género del locutor', solo[0].pitchHz < 140, `${solo[0].voice} ${solo[0].pitchHz} Hz`);
 
+  // El tono declarado del personaje viaja a su asignación de voz, para leerse con
+  // ese carácter; un personaje sin tono deja el campo vacío sin romper nada.
+  const conTono = assignSpeakerVoices(
+    ['Ana', 'Diego'],
+    [{ name: 'Ana', gender: 'Female', tone: 'empleada cordial, trato de usted, calmada' }, { name: 'Diego', gender: 'Male' }]
+  );
+  check('el tono del personaje llega a su voz', conTono[0].tone === 'empleada cordial, trato de usted, calmada', conTono[0].tone);
+  check('un personaje sin tono deja el campo sin definir', conTono[1].tone === undefined, String(conTono[1].tone));
+  const soloTono = assignSpeakerVoices(['Locutor'], [{ name: 'Locutor', gender: 'Male', tone: 'narrador sobrio y pausado' }]);
+  check('el monólogo también arrastra su tono', soloTono[0].tone === 'narrador sobrio y pausado', soloTono[0].tone);
+
   // Tres o más hablantes (solo cuando el usuario lo pide): la garantía es más
   // débil que para dos —el catálogo no da separación de par a par para tantas—,
   // pero las voces tienen que ser DISTINTAS y respetar el género donde se puede.

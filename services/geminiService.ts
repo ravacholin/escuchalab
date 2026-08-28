@@ -1017,6 +1017,33 @@ const composeRegisterInstruction = (textType: TextType, scenarioRegister: string
   return `${base}${scene} ${REGISTER_CONSISTENCY}`;
 };
 
+/**
+ * Reparte el registro global (REGISTER, que fija el tono de la SITUACIÓN) en un
+ * perfil de tono por HABLANTE, para que cada personaje suene igual a sí mismo de
+ * principio a fin en vez de que la coherencia dependa turno a turno.
+ *
+ * El síntoma que arregla: REGISTER fija el tono de la escena, pero nada obligaba a
+ * que un mismo hablante lo mantuviera —una empleada podía abrir con trato de usted
+ * y deslizarse al tuteo, o un cliente cordial endurecerse sin motivo— porque el
+ * único control por turno era `emotion`, libre y sin ancla. Ahora cada personaje
+ * declara su tono en `characters[].tone` (una vez), ese tono gobierna todos sus
+ * turnos, y `emotion` pasa a ser solo una modulación momentánea, nunca un cambio de
+ * registro. El campo viaja además al TTS (`singleVoiceDirective`) para que la voz se
+ * lea con ese carácter. El tono de cada hablante NUNCA contradice REGISTER: es su
+ * concreción por persona (rol, trato y línea emocional), no una licencia para
+ * saltárselo.
+ */
+const SPEAKER_TONE_INSTRUCTION =
+  'TONO POR HABLANTE (coherencia de personaje): a cada personaje de "characters" asígnale un campo ' +
+  '"tone" con su tono y registro CONSTANTES, derivados de su ROL en la situación y SIEMPRE dentro de ' +
+  'REGISTER (nunca lo contradice). En 4–12 palabras: manera de hablar, formalidad del trato ' +
+  '(tú/vos/usted según LOCALIZE) y línea emocional de base — p. ej. "empleada cordial y servicial, ' +
+  'trato de usted, calmada" o "cliente apurado pero educado, informal respetuoso". Mantén ese tono en ' +
+  'TODOS los turnos de ese hablante: el "emotion" de cada turno es solo una modulación momentánea de su ' +
+  'tono base (más animado, dubitativo, aliviado…), nunca un cambio de registro ni de trato. Dos ' +
+  'personajes de la misma escena pueden —y suelen— tener tonos distintos, pero cada uno es consistente ' +
+  'consigo mismo.';
+
 // --- PROGRESO MEDIBLE DE LA FASE 1 ---
 
 /**
@@ -1239,7 +1266,7 @@ export const generateLessonPlan = async (
     "communicativeFunction": "String",
     "ambientKeywords": "String",
     "ambientScene": "String",
-    "characters": [{ "name": "String", "gender": "Male" | "Female" }],
+    "characters": [{ "name": "String", "gender": "Male" | "Female", "tone": "String" }],
     "dialogue": [{ "speaker": "String", "text": "String", "emotion": "String" }],
     "exercises": [
       { "id": "ex1", "slotId": "...", "stage": "...", "skill": "...", "type": "...", "question": "...", "explanation": "...", "sourceTurns": [0], "correctAnswer": "..." }
@@ -1315,6 +1342,7 @@ export const generateLessonPlan = async (
   CONTEXT: ${profileInstruction}
   RULES: ${constraint}
   REGISTER: ${registerInstruction}
+  TONE: ${SPEAKER_TONE_INSTRUCTION}
   LOCALIZE: ${localizationInstruction}
   SPEAKERS: ${speakerEmphasis}${customAudioBlock}
   EXERCISES: ${exerciseLogic}
@@ -1917,6 +1945,13 @@ export interface SpeakerVoiceAssignment {
   pitchHz: number;
   /** Descripción de la voz que se le da al modelo dentro del prompt. */
   timbre: string;
+  /**
+   * Tono y registro del personaje (`Character.tone`), si el guion lo declaró. Se le
+   * pasa al TTS para que lea la voz con ese carácter y de forma consistente en todo
+   * el bloque del hablante (cada hablante es una sola petición, así que el tono no
+   * puede cambiar a mitad).
+   */
+  tone?: string;
 }
 
 /** Minúsculas, sin tildes, sin acotaciones ni puntuación. Solo para comparar. */
@@ -2049,14 +2084,17 @@ function pickVoiceSet(genders: Array<Character['gender'] | undefined>): TtsVoice
  */
 export function assignSpeakerVoices(speakers: string[], characters: Character[]): SpeakerVoiceAssignment[] {
   const labels = canonicalSpeakerLabels(speakers);
-  const genders = speakers.map(s => findCharacter(s, characters)?.gender);
+  const matched = speakers.map(s => findCharacter(s, characters));
+  const genders = matched.map(c => c?.gender);
+  // El tono declarado del personaje viaja al TTS para leer la voz con su carácter.
+  const tones = matched.map(c => c?.tone?.trim() || undefined);
 
   if (speakers.length === 1) {
     // Sin diálogo no hay nada que separar, así que no interesa un extremo del
     // catálogo: se toma la voz central de su grupo.
     const pool = TTS_VOICES.filter(v => v.gender === (genders[0] || 'Female'));
     const voice = pool[Math.floor(pool.length / 2)] || TTS_VOICES[0];
-    return [{ speaker: speakers[0], label: labels[0], voice: voice.name, pitchHz: voice.pitchHz, timbre: voice.timbre }];
+    return [{ speaker: speakers[0], label: labels[0], voice: voice.name, pitchHz: voice.pitchHz, timbre: voice.timbre, tone: tones[0] }];
   }
 
   // Dos hablantes: el par más separado que respete el género (el caso de siempre).
@@ -2067,7 +2105,7 @@ export function assignSpeakerVoices(speakers: string[], characters: Character[])
 
   return speakers.map((speaker, i) => {
     const voice = chosen[i] || TTS_VOICES.find(v => !chosen.some(c => c.name === v.name)) || TTS_VOICES[i % TTS_VOICES.length];
-    return { speaker, label: labels[i], voice: voice.name, pitchHz: voice.pitchHz, timbre: voice.timbre };
+    return { speaker, label: labels[i], voice: voice.name, pitchHz: voice.pitchHz, timbre: voice.timbre, tone: tones[i] };
   });
 }
 
@@ -2118,8 +2156,15 @@ function assignmentFor(
  * audio para volver a intercalar los turnos.
  */
 function singleVoiceDirective(assignment: SpeakerVoiceAssignment): string {
+  // El tono del personaje, si el guion lo declaró, se añade para leer la voz con
+  // ese carácter. Como cada hablante es una sola petición, el tono es constante en
+  // todo el bloque por construcción; aquí solo se le pide al modelo que lo respete.
+  const tone = assignment.tone
+    ? `Speak in a consistent manner throughout, matching this character: ${assignment.tone}. `
+    : '';
   return (
     `Read the following aloud with ${assignment.timbre}, and keep that same voice throughout. ` +
+    tone +
     `Each paragraph is a separate utterance: pause clearly between paragraphs.`
   );
 }

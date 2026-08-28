@@ -98,6 +98,28 @@ Key implementation notes:
 - Audio generation picks the voice pair by **measured pitch distance** (`TTS_VOICES`), not by gender pools — see Audio Generation below
 - Multi-speaker TTS labels each turn with the same canonical speaker string used in `speechConfig`
 
+### Speaker Tone (`services/geminiService.ts`)
+
+`REGISTER` fixes the tone of the **situation** (see `composeRegisterInstruction`); it is the
+scene's register, not each person's. Nothing used to keep an individual speaker consistent to
+one manner across their turns — the only per-turn control was `emotion`, free-form and
+unanchored, so a clerk could open with `usted` and slide into tuteo, or a cordial client
+harden for no reason.
+
+`SPEAKER_TONE_INSTRUCTION` (prompt block `TONE:`) closes that. It asks the model to give every
+`characters[]` entry a constant `tone` (`Character.tone`) — 4–12 words: manner, formality of
+address (tú/vos/usted per `LOCALIZE`), and an emotional baseline — **derived from the
+speaker's role and always inside `REGISTER`, never contradicting it**. That tone then governs
+all of that speaker's turns; the per-turn `emotion` becomes a momentary modulation of it, not
+a change of register. Two speakers in one scene can differ from each other, but each stays
+consistent with itself.
+
+The tone is decided **once** and reused everywhere: it is authored in `characters`, it steers
+the dialogue, and `assignSpeakerVoices()` copies it onto the `SpeakerVoiceAssignment` so the
+TTS reads each voice in character (see Audio Generation). It is optional and additive — a
+script without it behaves exactly as before. `check:audio` pins that the tone propagates from
+the character to its voice assignment (and that a character without one leaves it undefined).
+
 ### Audio Generation
 
 The governing fact, and the one that took three failed fixes to internalise:
@@ -162,6 +184,11 @@ that is local arithmetic, which cannot run out of quota.
   than cosmetic. Each turn travels as its own paragraph, and the pause the model leaves
   between them is the boundary `splitIntoTurns` looks for afterwards. Everything the prompt
   can do to make that boundary crisp is one fewer turn cut by proportional fallback.
+- **The directive also carries the speaker's declared tone.** Each character owns a
+  constant `tone` (see Speaker Tone below); it is copied onto the `SpeakerVoiceAssignment`
+  and appended to `singleVoiceDirective()` so the voice is read in that character. Because a
+  speaker is a single request, the tone cannot drift mid-block — the request shape guarantees
+  the same consistency the pitch-distance rule gives the timbre.
 - **`splitIntoTurns()` (`services/ttsTurnSplit.ts`) cuts each speaker's block back into
   turns.** It knows k and the character count of every turn, so it computes where each
   boundary is *expected*, finds the interior silences of ≥180 ms, and picks the k-1 that
