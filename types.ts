@@ -51,6 +51,19 @@ export enum Accent {
 export interface Character {
   name: string;
   gender: 'Male' | 'Female';
+  /**
+   * El tono y registro CONSTANTES de este hablante dentro de la escena, decididos
+   * una sola vez y mantenidos en todos sus turnos: manera de hablar, formalidad del
+   * trato (tú/vos/usted) y línea emocional de base ("empleada cordial y servicial,
+   * trato de usted, calmada"; "cliente apurado pero educado, informal respetuoso").
+   *
+   * Es lo que ata la coherencia del personaje: la directiva REGISTER fija el tono de
+   * la SITUACIÓN, y este campo lo reparte por hablante para que cada uno suene igual
+   * a sí mismo de principio a fin. El `emotion` de cada turno es solo una modulación
+   * momentánea de este tono, nunca un cambio de registro. Viaja además al TTS para
+   * que la lectura de cada voz sea consistente con su carácter.
+   */
+  tone?: string;
 }
 
 export interface DialogueLine {
