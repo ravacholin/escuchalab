@@ -442,18 +442,23 @@ const App: React.FC = () => {
     // --- SCREEN: ERROR ---
     if (state.status === 'error') {
         return (
-            <div className="h-screen w-full bg-black flex items-center justify-center p-8">
-                <div className="border border-red-600 p-12 max-w-lg w-full relative">
-                    <div className="absolute top-0 left-0 bg-red-600 text-black font-mono text-[10px] px-2 py-1 uppercase font-bold">Registro de Error</div>
-                    <h2 className="font-display text-3xl uppercase text-white mb-6">Fallo en Ejecución</h2>
-                    <p className="font-mono text-red-500 text-sm mb-8 border-l-2 border-red-900 pl-4">{state.error}</p>
-                    <div className="flex gap-4">
-                        <button onClick={resetApp} className="flex-1 px-6 py-3 border border-zinc-700 text-zinc-300 hover:border-white hover:text-white font-mono text-xs uppercase tracking-widest transition-all">
-                            Reiniciar Sistema
+            <div className="min-h-[100dvh] w-full bg-ink flex items-center justify-center p-6">
+                <div className="w-full max-w-lg rounded-2xl border border-line bg-panel p-8 sm:p-10">
+                    <div className="flex items-center gap-3 mb-5">
+                        <div className="w-9 h-9 rounded-xl bg-panel-2 border border-line flex items-center justify-center">
+                            <AlertTriangle size={18} className="text-fg" />
+                        </div>
+                        <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-faint">Registro de error</span>
+                    </div>
+                    <h2 className="font-display text-3xl font-semibold text-fg mb-4">Algo salió mal</h2>
+                    <p className="text-sm text-muted leading-relaxed mb-8 border-l-2 border-line pl-4 font-mono">{state.error}</p>
+                    <div className="flex gap-3">
+                        <button onClick={resetApp} className="flex-1 px-6 py-3.5 rounded-xl bg-accent text-ink font-display font-semibold text-sm hover:brightness-105 transition-all">
+                            Reiniciar
                         </button>
                         {/* Botón para cambiar API Key si el error es de autenticación */}
-                        <button onClick={handleResetKey} className="px-6 py-3 border border-red-900 text-red-500 hover:bg-red-900 hover:text-white font-mono text-xs uppercase tracking-widest transition-all" title="Cambiar API Key">
-                            <Key size={14} />
+                        <button onClick={handleResetKey} className="px-5 py-3.5 rounded-xl border border-line text-muted hover:text-fg hover:border-faint transition-all flex items-center gap-2 text-sm font-medium" title="Cambiar API Key">
+                            <Key size={15} /> Clave
                         </button>
                     </div>
                 </div>
@@ -464,54 +469,61 @@ const App: React.FC = () => {
     // --- SCREEN: IDLE (Landing) ---
     if (state.status === 'idle') {
         return (
-            <div className="h-screen w-full bg-black text-white overflow-hidden flex flex-col md:flex-row">
+            <div className="min-h-[100dvh] w-full bg-ink text-fg flex flex-col md:flex-row">
 
-                {/* LEFT: MANIFESTO */}
-                <div className="w-full md:w-1/2 border-r border-zinc-800 p-8 md:p-12 flex flex-col justify-between relative bg-[url('https://grainy-gradients.vercel.app/noise.svg')] bg-opacity-20 hidden md:flex">
+                {/* LEFT: HERO */}
+                <div className="hidden md:flex md:w-[44%] lg:w-[42%] border-r border-line p-12 flex-col justify-between relative overflow-hidden bg-gradient-to-b from-[#0d1116] to-[#0a0d10]">
+                    <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(120% 80% at 15% 0%, rgba(255,255,255,0.06), transparent 60%)' }} />
                     <div className="relative z-10">
-                        <div className="mb-8">
-                            <img src="/escucha-logo.png" alt="EscuchaLAB" className="w-full max-w-[620px] drop-shadow-[0_0_40px_rgba(255,255,255,0.08)]" />
-                        </div>
-                        <p className="font-mono text-sm text-zinc-400 max-w-md leading-relaxed uppercase">
-                            Sistema avanzado de inmersión lingüística generado por inteligencia artificial.
-                            Síntesis en tiempo real de dialectos, contextos y evaluaciones pedagógicas.
+                        <img src="/escucha-logo.png" alt="EscuchaLAB" className="w-full max-w-[560px] drop-shadow-[0_0_40px_rgba(255,255,255,0.06)]" />
+                        <p className="mt-6 text-muted max-w-[34ch] leading-relaxed">
+                            Laboratorio de comprensión auditiva. Diálogos, voces y ambiente reales, generados a tu nivel.
                         </p>
+                        <div className="flex items-end gap-1 h-12 mt-9" aria-hidden="true">
+                            {[40,75,55,100,65,85,45,70,90,50,80,60].map((h, i) => (
+                                <span key={i} className="w-1 rounded-sm bg-gradient-to-t from-white/25 to-accent animate-eq" style={{ height: `${h}%`, animationDelay: `${(i % 6) * 0.09}s` }} />
+                            ))}
+                        </div>
                     </div>
 
-                    <div className="flex items-center justify-between mt-12 md:mt-0">
-                        <div className="font-mono text-[10px] text-zinc-600 uppercase tracking-widest">
-                            v3.9.0 // DESCARGA + PROMPTS
-                        </div>
-                        <button onClick={handleResetKey} className="text-zinc-700 hover:text-white transition-colors text-[10px] font-mono uppercase tracking-widest flex items-center gap-2">
-                            <Key size={10} /> Configuración de Clave
+                    <div className="relative z-10 flex items-center justify-between">
+                        <div className="font-mono text-[11px] text-faint uppercase tracking-[0.14em]">v4.0 · rediseño</div>
+                        <button onClick={handleResetKey} className="text-faint hover:text-fg transition-colors text-[11px] font-mono uppercase tracking-[0.14em] flex items-center gap-2">
+                            <Key size={11} /> Configuración de clave
                         </button>
                     </div>
                 </div>
 
                 {/* RIGHT: CONFIG */}
-                <div className="w-full md:w-1/2 overflow-y-auto bg-black scrollbar-thin">
+                <div className="w-full md:w-[56%] lg:w-[58%] md:h-[100dvh] md:overflow-y-auto bg-ink">
                     <div className="min-h-full flex flex-col">
                         {/* Mobile Header */}
-                        <div className="md:hidden p-8 pb-0">
-                            <img src="/escucha-logo.png" alt="EscuchaLAB" className="w-56" />
+                        <div className="md:hidden px-6 pt-8 pb-2 flex items-center justify-between">
+                            <img src="/escucha-logo.png" alt="EscuchaLAB" className="h-9 w-auto" />
+                            <button onClick={handleResetKey} className="text-faint hover:text-fg transition-colors" title="Configuración de clave" aria-label="Configuración de clave">
+                                <Key size={16} />
+                            </button>
                         </div>
 
-                        <div className="flex-1 p-8 md:p-12 space-y-10">
+                        <div className="flex-1 px-6 py-8 sm:px-10 md:p-12 space-y-8">
 
                             {/* --- MODE SELECTOR --- */}
                             <div>
-                                <label className="block text-[10px] font-mono uppercase tracking-widest text-zinc-500 mb-3">MODALIDAD DE PRÁCTICA</label>
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                                    {MODES.map((m) => (
+                                <label className="block text-xs font-medium text-muted mb-3">Modalidad de práctica</label>
+                                <div className="grid grid-cols-3 gap-2.5">
+                                    {MODES.map((m) => {
+                                        const active = state.config.mode === m.value;
+                                        return (
                                         <button
                                             key={m.value}
                                             onClick={() => setState({ ...state, config: { ...state.config, mode: m.value } })}
-                                            className={`flex flex-col items-center justify-center p-4 border transition-all ${state.config.mode === m.value ? 'bg-white text-black border-white' : 'bg-black text-zinc-500 border-zinc-800 hover:border-zinc-500 hover:text-white'}`}
+                                            className={`flex flex-col items-center justify-center gap-2.5 rounded-2xl border px-2 py-4 transition-all ${active ? 'bg-white/[0.06] text-fg border-accent/50' : 'bg-panel text-muted border-line hover:border-faint hover:text-fg hover:-translate-y-0.5'}`}
                                         >
-                                            <m.icon size={20} className="mb-2" />
-                                            <span className="font-display uppercase font-bold text-xs">{m.label}</span>
+                                            <m.icon size={22} strokeWidth={1.7} />
+                                            <span className="font-display font-semibold text-[13px] text-center leading-tight">{m.label}</span>
                                         </button>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
 
@@ -556,47 +568,43 @@ const App: React.FC = () => {
 
                             {/* MODE: VOCABULARY */}
                             {state.config.mode === AppMode.Vocabulary && (
-                                <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
-                                    <div className="relative group">
-                                        <label className="block text-[10px] font-mono uppercase tracking-widest text-white mb-2 font-bold">
-                                            Tema Específico de Vocabulario
-                                        </label>
-                                        <div className="relative">
-                                            <input
-                                                type="text"
-                                                value={vocabTopic}
-                                                onChange={(e) => setVocabTopic(e.target.value)}
-                                                placeholder="Ej: Astrofísica, Cocina Vegana, Arquitectura Gótica..."
-                                                className="w-full bg-zinc-900 border-b border-zinc-700 p-4 pl-12 font-display text-xl text-white outline-none focus:border-white focus:bg-zinc-800 transition-all placeholder:text-zinc-600"
-                                                autoFocus
-                                            />
-                                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={20} />
-                                        </div>
-                                        <p className="mt-2 text-[10px] font-mono text-zinc-500">
-                                            Se generará un diálogo denso en terminología sobre este tema.
-                                        </p>
+                                <div>
+                                    <label className="block text-xs font-medium text-fg mb-2">Tema específico de vocabulario</label>
+                                    <div className="relative">
+                                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-faint" size={18} />
+                                        <input
+                                            type="text"
+                                            value={vocabTopic}
+                                            onChange={(e) => setVocabTopic(e.target.value)}
+                                            placeholder="Ej: Astrofísica, cocina vegana, arquitectura gótica…"
+                                            className="w-full rounded-xl border border-line bg-panel py-4 pl-12 pr-4 font-sans text-lg text-fg outline-none transition-all focus:border-accent focus:ring-2 focus:ring-white/10 placeholder:text-faint"
+                                            autoFocus
+                                        />
                                     </div>
+                                    <p className="mt-2 text-xs text-faint">Se generará un diálogo denso en terminología sobre este tema.</p>
                                 </div>
                             )}
 
                             {/* MODE: ACCENT CHALLENGE */}
                             {state.config.mode === AppMode.AccentChallenge && (
-                                <div className="p-6 border border-zinc-800 bg-zinc-900/30 animate-in fade-in duration-500">
-                                    <Mic2 size={32} className="text-zinc-500 mb-4" />
-                                    <h3 className="font-display text-xl uppercase font-bold text-white mb-2">Reto de Escucha a Ciegas</h3>
-                                    <p className="font-sans text-sm text-zinc-400 leading-relaxed">
-                                        Dos hablantes de <strong>diferentes regiones</strong> hispanohablantes conversarán.
-                                        Tu objetivo es identificar su origen basándote en su vocabulario, gramática y expresiones.
+                                <div className="rounded-2xl border border-line bg-panel p-6">
+                                    <div className="w-11 h-11 rounded-xl bg-panel-2 border border-line flex items-center justify-center mb-4">
+                                        <Mic2 size={22} className="text-fg" />
+                                    </div>
+                                    <h3 className="font-display text-xl font-semibold text-fg mb-2">Reto de escucha a ciegas</h3>
+                                    <p className="text-sm text-muted leading-relaxed">
+                                        Dos hablantes de <strong className="text-fg font-medium">diferentes regiones</strong> hispanohablantes conversarán.
+                                        Tu objetivo es identificar su origen por su vocabulario, gramática y expresiones.
                                     </p>
                                 </div>
                             )}
 
                             {/* --- FOOTER SETTINGS --- */}
-                            <div className="space-y-8 pt-4 border-t border-zinc-900">
+                            <div className="pt-6 border-t border-line-soft grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 {/* Accent Selector: HIDE in AccentChallenge */}
                                 {state.config.mode !== AppMode.AccentChallenge && (
                                     <SelectInput
-                                        label="Acento Preferente"
+                                        label="Acento preferente"
                                         value={state.config.accent}
                                         options={ACCENTS}
                                         onChange={(e: any) => {
@@ -620,54 +628,48 @@ const App: React.FC = () => {
                             {/* Instrucciones libres para el guion y para los ejercicios. Son
                                 aditivas: se apilan sobre las reglas pedagógicas, no las
                                 sustituyen (el verificador y los motores siguen filtrando). */}
-                            <div className="pt-4 border-t border-zinc-900">
+                            <div className="rounded-2xl border border-line bg-panel-2 overflow-hidden">
                                 <button
                                     type="button"
                                     onClick={() => setShowAdvancedPrompts(v => !v)}
                                     aria-expanded={showAdvancedPrompts}
-                                    className="w-full flex items-center justify-between text-left group"
+                                    className={`w-full flex items-center gap-2.5 px-4 py-4 text-left transition-colors ${showAdvancedPrompts ? 'text-fg border-b border-line-soft' : 'text-muted hover:text-fg'}`}
                                 >
-                                    <span className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-zinc-500 group-hover:text-white transition-colors">
-                                        <Terminal size={12} />
-                                        Instrucciones personalizadas
-                                        {(customAudioPrompt.trim() || customExercisePrompt.trim()) && (
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="Instrucciones activas" />
-                                        )}
-                                    </span>
+                                    <Terminal size={14} />
+                                    <span className="text-sm font-medium">Instrucciones personalizadas</span>
+                                    {(customAudioPrompt.trim() || customExercisePrompt.trim()) && (
+                                        <span className="w-2 h-2 rounded-full bg-accent" title="Instrucciones activas" />
+                                    )}
                                     {showAdvancedPrompts
-                                        ? <ChevronUp size={14} className="text-zinc-600" />
-                                        : <ChevronDown size={14} className="text-zinc-600" />}
+                                        ? <ChevronUp size={16} className="text-faint ml-auto" />
+                                        : <ChevronDown size={16} className="text-faint ml-auto" />}
                                 </button>
 
                                 {showAdvancedPrompts && (
-                                    <div className="mt-4 space-y-5 animate-in fade-in slide-in-from-top-1 duration-200">
+                                    <div className="p-4 space-y-5">
                                         <div>
-                                            <label className="block text-[10px] font-mono uppercase tracking-widest text-zinc-400 mb-2">
-                                                Guion del audio
-                                            </label>
+                                            <label className="block text-xs font-medium text-muted mb-2">Guion del audio</label>
                                             <textarea
                                                 value={customAudioPrompt}
                                                 onChange={(e) => setCustomAudioPrompt(e.target.value)}
                                                 rows={3}
-                                                placeholder="Ej: que uno de los personajes esté nervioso; una charla entre tres amigos; incluye un malentendido gracioso; ambienta en invierno..."
-                                                className="w-full bg-zinc-900/60 border border-zinc-800 p-3 font-mono text-xs text-white outline-none focus:border-white focus:bg-zinc-900 transition-all placeholder:text-zinc-600 resize-y scrollbar-thin"
+                                                placeholder="Ej: que uno de los personajes esté nervioso; una charla entre tres amigos; incluye un malentendido gracioso…"
+                                                className="w-full rounded-xl bg-panel border border-line p-3 font-sans text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-white/10 transition-all placeholder:text-faint resize-y"
                                             />
-                                            <p className="mt-1 text-[9px] font-mono text-zinc-600 leading-relaxed">
-                                                Ajusta el contenido del diálogo: tono, personajes, giro… y si lo pides, más de dos hablantes (hasta 4; con tres o más voces cuesta alguna generación extra y se distinguen menos). No cambia el nivel ni el acento.
+                                            <p className="mt-1.5 text-xs text-faint leading-relaxed">
+                                                Ajusta el contenido del diálogo: tono, personajes, giro… y si lo pedís, más de dos hablantes (hasta 4; con tres o más voces cuesta alguna generación extra y se distinguen menos). No cambia el nivel ni el acento.
                                             </p>
                                         </div>
                                         <div>
-                                            <label className="block text-[10px] font-mono uppercase tracking-widest text-zinc-400 mb-2">
-                                                Ejercicios
-                                            </label>
+                                            <label className="block text-xs font-medium text-muted mb-2">Ejercicios</label>
                                             <textarea
                                                 value={customExercisePrompt}
                                                 onChange={(e) => setCustomExercisePrompt(e.target.value)}
                                                 rows={3}
-                                                placeholder="Ej: céntrate en los conectores; que las preguntas sean más difíciles; enfatiza el vocabulario de negocios..."
-                                                className="w-full bg-zinc-900/60 border border-zinc-800 p-3 font-mono text-xs text-white outline-none focus:border-white focus:bg-zinc-900 transition-all placeholder:text-zinc-600 resize-y scrollbar-thin"
+                                                placeholder="Ej: céntrate en los conectores; que las preguntas sean más difíciles; enfatiza el vocabulario de negocios…"
+                                                className="w-full rounded-xl bg-panel border border-line p-3 font-sans text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-white/10 transition-all placeholder:text-faint resize-y"
                                             />
-                                            <p className="mt-1 text-[9px] font-mono text-zinc-600 leading-relaxed">
+                                            <p className="mt-1.5 text-xs text-faint leading-relaxed">
                                                 Orienta las preguntas dentro de los formatos y etapas ya previstos. Las claves se siguen verificando contra el audio.
                                             </p>
                                         </div>
@@ -676,13 +678,16 @@ const App: React.FC = () => {
                             </div>
                         </div>
 
-                        <button
-                            onClick={() => void handleGenerate()}
-                            className="w-full py-8 bg-white text-black font-display text-2xl uppercase font-bold tracking-tight hover:bg-zinc-300 transition-colors flex items-center justify-center gap-4 group"
-                        >
-                            {state.config.mode === AppMode.AccentChallenge ? 'Iniciar Reto' : 'Generar Lección'}
-                            <ArrowRight className="group-hover:translate-x-2 transition-transform" />
-                        </button>
+                        {/* Sticky generate button */}
+                        <div className="sticky bottom-0 px-6 sm:px-10 md:px-12 pb-6 pt-4 bg-gradient-to-t from-ink via-ink/95 to-transparent">
+                            <button
+                                onClick={() => void handleGenerate()}
+                                className="w-full py-5 rounded-2xl bg-accent text-ink font-display text-xl font-semibold tracking-tight hover:brightness-105 active:brightness-95 transition-all flex items-center justify-center gap-3 group shadow-[0_12px_34px_-12px_rgba(255,255,255,0.4)]"
+                            >
+                                {state.config.mode === AppMode.AccentChallenge ? 'Iniciar reto' : 'Generar lección'}
+                                <ArrowRight size={22} className="group-hover:translate-x-1.5 transition-transform" />
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -690,63 +695,69 @@ const App: React.FC = () => {
     }
 
     // --- SCREEN: READY (Main App) ---
+    const modeBadge = state.config.mode === AppMode.Standard ? 'STD' : (state.config.mode === AppMode.Vocabulary ? 'VOC' : 'RETO');
     return (
-        <div className="h-screen flex flex-col bg-black overflow-hidden">
+        <div className="min-h-[100dvh] md:h-[100dvh] flex flex-col bg-ink md:overflow-hidden">
             {/* TOP BAR */}
-            <header className="h-14 border-b border-zinc-800 flex items-center justify-between px-6 bg-black z-20 flex-shrink-0">
-                <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-white"></div>
-                    <span className="font-display font-bold uppercase tracking-tight text-2xl cursor-pointer" onClick={resetApp}>Escucha<span className="text-zinc-600">LAB</span></span>
-                </div>
-                <div className="flex items-center gap-6 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+            <header className="h-14 flex-none border-b border-line flex items-center justify-between px-4 sm:px-6 bg-ink/85 backdrop-blur-md sticky top-0 z-30">
+                <button className="flex items-center gap-2.5 group" onClick={resetApp} title="Volver a la configuración">
+                    <span className="w-2 h-2 rounded-[3px] bg-accent shadow-[0_0_12px_rgba(244,246,248,0.5)]"></span>
+                    <span className="font-display font-bold tracking-tight text-xl sm:text-2xl group-hover:text-fg transition-colors">Escucha<span className="text-faint">LAB</span></span>
+                </button>
+                <div className="flex items-center gap-2 sm:gap-3">
                     {currentCacheKey && (
                         <button
                             onClick={() => void handleRegenerate()}
                             title="Genera una lección nueva para esta misma configuración"
-                            className="flex items-center gap-2 border border-zinc-800 px-2 py-1 transition-colors hover:border-white hover:text-white"
+                            className="flex items-center gap-2 rounded-lg border border-line px-2.5 py-1.5 text-xs font-medium text-muted transition-colors hover:border-faint hover:text-fg"
                         >
-                            <RefreshCw size={11} />
+                            <RefreshCw size={13} />
                             <span className="hidden sm:inline">Regenerar</span>
                         </button>
                     )}
-                    <span className="hidden sm:inline">NIV: {state.config.level.split(' ')[0]}</span>
+                    <span className="hidden sm:inline-flex items-center rounded-lg border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[11px] text-muted">
+                        NIV · {state.config.level.split(' ')[0]}
+                    </span>
                     {state.config.mode !== AppMode.AccentChallenge && (
-                        <span className="hidden sm:inline">MOD: {state.config.accent.split(' ')[0]}</span>
+                        <span className="hidden md:inline-flex items-center rounded-lg border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[11px] text-muted">
+                            AC · {state.config.accent.split(' ')[0]}
+                        </span>
                     )}
-                    <span className="bg-zinc-800 text-white px-2 py-0.5 rounded-sm">
-                        {state.config.mode === AppMode.Standard ? 'STD' : (state.config.mode === AppMode.Vocabulary ? 'VOC' : 'RETO')}
+                    <span className="inline-flex items-center rounded-lg border border-accent/40 bg-white/[0.06] px-2.5 py-1.5 font-mono text-[11px] text-fg">
+                        {modeBadge}
                     </span>
                 </div>
             </header>
 
-            <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+            <div className="flex-1 flex flex-col md:flex-row md:min-h-0">
 
-                {/* LEFT PANEL: CONTEXT & PLAYER */}
-                <div className="w-full md:w-5/12 lg:w-1/3 bg-zinc-950/50 border-r border-zinc-800 flex flex-col h-[40vh] md:h-full z-10">
-                    <div className="p-8 flex-1 overflow-y-auto">
+                {/* LEFT RAIL: CONTEXT & PLAYER */}
+                <aside className="w-full md:w-[35%] lg:w-[32%] flex flex-col md:border-r md:border-line md:min-h-0 bg-gradient-to-b from-[#0d1014] to-[#0b0d10]">
+                    <div className="px-6 pt-6 md:p-8 md:flex-1 md:overflow-y-auto">
                         {state.lessonPlan && (
                             <div>
-                                <span className="font-mono text-[10px] text-zinc-500 border border-zinc-800 px-2 py-1 uppercase mb-6 inline-block">
+                                <span className="inline-flex items-center rounded-lg border border-line bg-panel-2 px-2.5 py-1.5 font-mono text-[11px] text-muted mb-5">
                                     {state.lessonPlan.communicativeFunction}
                                 </span>
-                                <h1 className="font-display text-3xl md:text-4xl uppercase font-bold leading-none mb-6 text-white break-words">
+                                <h1 className="font-display text-3xl md:text-[2.1rem] font-semibold leading-[1.05] mb-5 text-fg break-words">
                                     {state.lessonPlan.title}
                                 </h1>
-                                <p className="font-sans text-sm text-zinc-400 leading-relaxed border-l border-zinc-800 pl-4 mb-8">
+                                <p className="text-[15px] text-muted leading-relaxed border-l-2 border-accent pl-4 mb-6">
                                     {state.lessonPlan.situationDescription}
                                 </p>
                             </div>
                         )}
                     </div>
 
-                    {/* Player docked at bottom of left panel */}
-                    <div className="mt-auto border-t border-zinc-800">
+                    {/* Player: docked in rail on desktop, fixed to bottom on mobile */}
+                    <div className="md:mt-auto md:border-t md:border-line max-md:fixed max-md:bottom-0 max-md:inset-x-0 max-md:z-40 max-md:px-2 max-md:pb-2 max-md:pointer-events-none">
+                        <div className="max-md:pointer-events-auto max-md:rounded-2xl max-md:border max-md:border-line max-md:bg-panel max-md:shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.8)] max-md:overflow-hidden">
                         {audioError ? (
-                            <div className="p-4 flex gap-4 items-center bg-red-950/20">
-                                <AlertTriangle className="text-red-500" size={24} />
-                                <div className="flex flex-col">
-                                    <span className="font-mono text-xs text-red-500 uppercase font-bold">Error de Audio</span>
-                                    <span className="font-mono text-[10px] text-red-400/70">{audioError.substring(0, 50)}...</span>
+                            <div className="p-4 flex gap-3 items-center bg-panel-2">
+                                <AlertTriangle className="text-fg flex-shrink-0" size={20} />
+                                <div className="flex flex-col min-w-0">
+                                    <span className="text-xs text-fg font-medium">Error de audio</span>
+                                    <span className="font-mono text-[10px] text-faint truncate">{audioError.substring(0, 60)}…</span>
                                 </div>
                             </div>
                         ) : state.audioBlob ? (
@@ -764,17 +775,18 @@ const App: React.FC = () => {
                                 downloadName={state.lessonPlan?.title}
                             />
                         ) : (
-                            <div className="p-4 text-center font-mono text-xs text-zinc-500 uppercase">
-                                Inicializando Stream...
+                            <div className="p-4 text-center font-mono text-xs text-faint uppercase tracking-wider">
+                                Inicializando audio…
                             </div>
                         )}
+                        </div>
                     </div>
-                </div>
+                </aside>
 
                 {/* RIGHT PANEL: CONTENT */}
-                <div className="flex-1 flex flex-col bg-black h-full overflow-hidden relative">
-                    {/* Custom Tabs */}
-                    <div className="flex border-b border-zinc-800 flex-shrink-0 bg-black">
+                <main className="flex-1 flex flex-col md:min-h-0 bg-ink">
+                    {/* Tabs */}
+                    <div className="flex gap-1 px-4 sm:px-6 pt-3 border-b border-line flex-none sticky top-14 md:static z-20 bg-ink">
                         {[
                             { id: 'exercises', label: 'Ejercicios' },
                             { id: 'transcript', label: 'Transcripción' }
@@ -782,56 +794,55 @@ const App: React.FC = () => {
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id as any)}
-                                className={`flex-1 py-4 font-mono text-[10px] sm:text-xs uppercase tracking-widest border-r border-zinc-800 hover:bg-zinc-900 transition-colors relative
-                                ${activeTab === tab.id ? 'bg-white text-black border-r-white' : 'text-zinc-500'}
-                            `}
+                                className={`relative px-4 py-3 font-display text-[15px] font-semibold rounded-t-lg transition-colors
+                                ${activeTab === tab.id ? 'text-fg' : 'text-muted hover:text-fg'}`}
                             >
                                 {tab.label}
-                                {activeTab === tab.id && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-black"></div>}
+                                {activeTab === tab.id && <span className="absolute left-3 right-3 -bottom-px h-0.5 bg-accent rounded-full"></span>}
                             </button>
                         ))}
                     </div>
 
                     {/* Content Area */}
-                    <div className="flex-1 overflow-y-auto p-6 md:p-12 scrollbar-thin">
+                    <div className="md:flex-1 md:overflow-y-auto px-4 sm:px-6 py-7 pb-32 md:pb-10">
 
                         {/* TRANSCRIPT VIEW */}
                         {activeTab === 'transcript' && (
-                            <div className="max-w-2xl mx-auto space-y-8 pb-20">
-                                <div className="flex items-start gap-3 border border-amber-900/60 bg-amber-950/20 p-4">
-                                    <AlertTriangle size={16} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                                    <p className="font-mono text-[11px] leading-relaxed text-amber-200/80 uppercase tracking-wide">
+                            <div className="max-w-2xl mx-auto">
+                                <div className="flex items-start gap-3 rounded-xl border border-line bg-panel-2 p-4 mb-8">
+                                    <AlertTriangle size={16} className="text-muted flex-shrink-0 mt-0.5" />
+                                    <p className="text-[13px] leading-relaxed text-muted">
                                         La transcripción es material de apoyo para el final.
                                         {hasAnticipationStage && ' Empezá por «Antes de escuchar».'} Si la leés
                                         antes de trabajar el audio, los ejercicios pasan a medir comprensión
                                         lectora y no auditiva.
                                     </p>
                                 </div>
-                                {state.lessonPlan?.dialogue?.map((line, idx) => (
-                                    <div key={idx} className="grid grid-cols-[60px_1fr] gap-4 group">
-                                        <div className="font-mono text-xs text-zinc-500 pt-1 text-right uppercase">
-                                            {line.speaker}
+                                <div className="flex flex-col">
+                                    {state.lessonPlan?.dialogue?.map((line, idx) => (
+                                        <div key={idx} className="grid grid-cols-[76px_1fr] gap-4 py-3 border-b border-line-soft last:border-0 group">
+                                            <div className="font-mono text-[11px] text-faint pt-1 text-right leading-relaxed">
+                                                {line.speaker}
+                                                {line.emotion && (
+                                                    <span className="block text-faint/70 mt-1 normal-case">[{line.emotion}]</span>
+                                                )}
+                                            </div>
+                                            <div className="border-l-2 border-line pl-4 group-hover:border-faint transition-colors">
+                                                <p className="text-[16px] text-muted leading-relaxed group-hover:text-fg transition-colors">
+                                                    {line.text}
+                                                </p>
+                                            </div>
                                         </div>
-                                        <div className="relative border-l border-zinc-800 pl-6 pb-2 transition-all group-hover:border-white">
-                                            <p className="font-sans text-lg text-zinc-300 leading-relaxed group-hover:text-white transition-colors">
-                                                {line.text}
-                                            </p>
-                                            {line.emotion && (
-                                                <span className="absolute -left-[5.5rem] top-6 font-mono text-[9px] text-zinc-700 uppercase opacity-0 group-hover:opacity-100 transition-opacity text-right w-16">
-                                                    [{line.emotion}]
-                                                </span>
-                                            )}
-                                        </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
                         )}
 
                         {/* EXERCISES VIEW — recorrido por etapas de escucha */}
                         {activeTab === 'exercises' && (
-                            <div className="max-w-3xl mx-auto pb-20">
+                            <div className="max-w-2xl mx-auto flex flex-col gap-4">
                                 {stagedExercises.length === 0 && (
-                                    <p className="font-mono text-xs text-zinc-500">
+                                    <p className="text-sm text-muted">
                                         No se pudo construir ningún ejercicio verificable para este audio.
                                     </p>
                                 )}
@@ -839,38 +850,45 @@ const App: React.FC = () => {
                                     const isOpen = openStages.has(group.stage);
                                     const keyOf = (ex: Exercise, idx: number) => ex.id || `${group.stage}_${idx}`;
                                     const done = group.items.filter((ex, idx) => keyOf(ex, idx) in answered).length;
+                                    const total = group.items.length;
+                                    const pct = total ? Math.round((done / total) * 100) : 0;
+                                    const allDone = done === total && total > 0;
                                     return (
-                                    <section key={group.stage} className={isOpen ? 'mb-16' : 'mb-4'}>
+                                    <section key={group.stage} className={`rounded-2xl border bg-panel overflow-hidden transition-colors ${isOpen ? 'border-accent/25' : 'border-line'}`}>
                                         <button
                                             type="button"
                                             onClick={() => toggleStage(group.stage)}
                                             aria-expanded={isOpen}
-                                            className={`w-full text-left border-b border-zinc-800 pb-4 group ${isOpen ? 'mb-10' : ''}`}
+                                            className="w-full text-left flex items-center gap-3.5 px-4 sm:px-5 py-4 group"
                                         >
-                                            <div className="flex items-baseline gap-3 flex-wrap">
-                                                <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-600">
-                                                    {String(group.position).padStart(2, '0')}
-                                                </span>
-                                                <h3 className="font-display text-2xl uppercase font-bold text-white group-hover:text-zinc-300 transition-colors">
-                                                    {STAGE_META[group.stage].label}
-                                                </h3>
-                                                <span className={`font-mono text-[10px] uppercase tracking-widest ml-auto ${done === group.items.length ? 'text-emerald-500' : 'text-zinc-600'}`}>
-                                                    {done}/{group.items.length} resueltos
-                                                </span>
-                                                {isOpen
-                                                    ? <ChevronUp size={16} className="text-zinc-600 flex-shrink-0" />
-                                                    : <ChevronDown size={16} className="text-zinc-600 flex-shrink-0" />}
-                                            </div>
-                                            {isOpen && (
-                                                <p className="font-mono text-xs text-zinc-500 mt-2 leading-relaxed">
-                                                    {STAGE_META[group.stage].hint}
-                                                </p>
-                                            )}
+                                            <span className="font-mono text-[12px] text-faint">
+                                                {String(group.position).padStart(2, '0')}
+                                            </span>
+                                            <h3 className="font-display text-lg font-semibold text-fg flex-1 group-hover:text-fg transition-colors">
+                                                {STAGE_META[group.stage].label}
+                                            </h3>
+                                            {/* progress ring */}
+                                            <span
+                                                className="relative w-7 h-7 rounded-full grid place-items-center flex-none"
+                                                style={{ background: `conic-gradient(${allDone ? '#f4f6f8' : '#c4cace'} ${pct}%, #20262d 0)` }}
+                                                title={`${done}/${total} resueltos`}
+                                            >
+                                                <span className="absolute inset-[3px] rounded-full bg-panel" />
+                                                <span className="relative z-10 font-mono text-[9px] font-bold text-fg tabular-nums">{done}/{total}</span>
+                                            </span>
+                                            {isOpen
+                                                ? <ChevronUp size={17} className="text-faint flex-shrink-0" />
+                                                : <ChevronDown size={17} className="text-faint flex-shrink-0" />}
                                         </button>
+                                        {isOpen && (
+                                            <p className="px-4 sm:px-5 -mt-1 pb-3 text-[13px] text-faint leading-relaxed">
+                                                {STAGE_META[group.stage].hint}
+                                            </p>
+                                        )}
                                         {/* Ocultas, no desmontadas: el estado de corrección vive
                                             dentro de cada tarjeta, así que desmontarlas haría que
                                             plegar una etapa para mirar otra borrase lo respondido. */}
-                                        <div hidden={!isOpen}>
+                                        <div hidden={!isOpen} className="px-2 sm:px-3 pb-3 flex flex-col gap-3">
                                             {group.items.map((ex, idx) => (
                                                 <ExerciseCard
                                                     key={keyOf(ex, idx)}
@@ -887,7 +905,7 @@ const App: React.FC = () => {
                             </div>
                         )}
                     </div>
-                </div>
+                </main>
             </div>
         </div>
     );

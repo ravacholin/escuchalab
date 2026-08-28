@@ -12,31 +12,32 @@ interface SelectInputProps {
 }
 
 const SelectInput: React.FC<SelectInputProps> = ({ label, value, options, onChange, highlight, extraAction, subLabel }) => (
-    <div className="group relative">
-        <div className="flex justify-between items-end mb-1">
-            <label className={`block text-[10px] font-mono uppercase tracking-widest transition-colors ${highlight ? 'text-white font-bold' : 'text-zinc-500 group-hover:text-white'}`}>
+    <div className="group">
+        <div className="flex justify-between items-center mb-2">
+            <label className={`block text-xs font-medium tracking-tight ${highlight ? 'text-fg' : 'text-muted'}`}>
                 {label}
             </label>
             {extraAction}
         </div>
         <div className="relative">
-            <select 
-                className={`w-full bg-transparent border-b py-3 pr-8 font-display text-xl sm:text-2xl uppercase font-medium appearance-none outline-none transition-all cursor-pointer hover:bg-zinc-900/50
-                    ${highlight ? 'text-white border-white' : 'text-zinc-300 border-zinc-800 focus:border-white focus:text-white'}
+            <select
+                className={`w-full appearance-none cursor-pointer rounded-xl border bg-panel px-4 py-3.5 pr-11 font-sans text-base font-medium outline-none transition-all
+                    hover:bg-panel-2 hover:border-faint focus:border-accent focus:ring-2 focus:ring-white/10
+                    ${highlight ? 'text-fg border-accent/40' : 'text-fg border-line'}
                 `}
                 value={value}
                 onChange={onChange}
             >
                 {options.map((opt: any) => (
-                    <option key={opt.value || opt} value={opt.value || opt} className="bg-black text-sm text-white">
+                    <option key={opt.value || opt} value={opt.value || opt}>
                         {opt.label || opt}
                     </option>
                 ))}
             </select>
-            <ChevronDown className="absolute right-0 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none group-hover:text-white" size={16} />
+            <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-faint pointer-events-none group-hover:text-muted transition-colors" size={16} />
         </div>
         {subLabel && (
-             <p className="font-mono text-[10px] text-zinc-600 mt-1 leading-tight">
+             <p className="text-xs text-faint mt-2 leading-snug">
                 {subLabel}
              </p>
         )}

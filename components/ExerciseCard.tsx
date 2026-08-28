@@ -289,8 +289,8 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
   }, [dialogue, safeExercise]);
 
   const getStatusColor = () => {
-      if (!isSubmitted) return 'border-zinc-800';
-      return isCorrect() ? 'border-green-500' : 'border-red-500';
+      if (!isSubmitted) return 'border-line';
+      return isCorrect() ? 'border-accent' : 'border-faint';
   };
 
   // --- RENDERERS ---
@@ -303,14 +303,14 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
    */
   const renderSelectionHint = (count: number, isMultiSelect: boolean) => (
     <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-6 pt-6 font-mono text-[10px] uppercase tracking-widest">
-        <span className="flex items-center gap-2 text-zinc-500">
+        <span className="flex items-center gap-2 text-muted">
             <MousePointerClick size={12} className="flex-shrink-0" />
             {isMultiSelect
                 ? 'Respuesta múltiple · tocá para marcar, tocá otra vez para desmarcar'
                 : 'Respuesta única · tocá una opción'}
         </span>
         {isMultiSelect && (
-            <span className={count > 0 ? 'text-white' : 'text-zinc-600'}>
+            <span className={count > 0 ? 'text-fg' : 'text-faint'}>
                 {count} marcada{count === 1 ? '' : 's'}
             </span>
         )}
@@ -353,9 +353,9 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                 // Clave que el alumno no marcó: ni acierto ni error de marcado.
                 const isMissedKey = isSubmitted && isMultiSelect && isActuallyCorrect && !isSelected;
 
-                let containerClass = "relative p-4 border transition-all duration-200 cursor-pointer flex items-center gap-4 group";
+                let containerClass = "relative p-3.5 rounded-xl border transition-all duration-200 cursor-pointer flex items-center gap-3.5 group";
                 // Adjust styling for Grid mode
-                if (isGridSuitable) containerClass = "relative h-24 border transition-all duration-200 cursor-pointer flex flex-col items-center justify-center gap-2 pt-8 px-3 group text-center";
+                if (isGridSuitable) containerClass = "relative h-24 rounded-xl border transition-all duration-200 cursor-pointer flex flex-col items-center justify-center gap-2 pt-8 px-3 group text-center";
 
                 // Casilla (múltiple) vs. redondel (única): la forma sola ya dice
                 // cuántas respuestas admite el ejercicio.
@@ -364,34 +364,34 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
 
                 if (isSubmitted) {
                     if (isMissedKey) {
-                        containerClass += " border-amber-500 bg-amber-500/10";
-                        indicatorClass += " border-amber-500 text-amber-500";
+                        containerClass += " border-muted bg-accent/[0.05]";
+                        indicatorClass += " border-muted text-muted";
                     } else if (isActuallyCorrect) {
-                        containerClass += " border-green-500 bg-green-500/10";
-                        indicatorClass += " border-green-500 bg-green-500 text-black";
+                        containerClass += " border-accent bg-accent/10";
+                        indicatorClass += " border-accent bg-accent text-ink";
                         indicatorGlyph = <Check size={12} strokeWidth={3} />;
                     } else if (isSelected) {
                         // Selected but wrong
-                        containerClass += " border-red-500 bg-red-500/10";
-                        indicatorClass += " border-red-500 bg-red-500 text-white";
+                        containerClass += " border-faint bg-accent/[0.04]";
+                        indicatorClass += " border-faint bg-faint text-fg";
                         indicatorGlyph = <X size={12} strokeWidth={3} />;
                     } else {
                         // Not selected, not correct
-                        containerClass += " border-zinc-800 opacity-50";
-                        indicatorClass += " border-zinc-600";
+                        containerClass += " border-line opacity-50";
+                        indicatorClass += " border-faint";
                     }
                 } else {
                     if (isSelected) {
-                        containerClass += " border-white bg-white";
-                        indicatorClass += " border-black bg-black text-white";
+                        containerClass += " border-accent bg-accent";
+                        indicatorClass += " border-line bg-panel text-fg";
                         // Marca visible dentro de la casilla: el estado no depende
                         // de recordar que la tarjeta invertida significa "elegida".
                         indicatorGlyph = isMultiSelect
                             ? <Check size={12} strokeWidth={3} />
-                            : <span className="w-2 h-2 rounded-full bg-white" />;
+                            : <span className="w-2 h-2 rounded-full bg-accent" />;
                     } else {
-                        containerClass += " border-zinc-800 hover:border-zinc-500 bg-zinc-900/50";
-                        indicatorClass += " border-zinc-600 group-hover:border-zinc-400";
+                        containerClass += " border-line hover:border-faint bg-panel-2";
+                        indicatorClass += " border-faint group-hover:border-muted";
                     }
                 }
 
@@ -410,7 +410,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                             <div className={indicatorClass}>{indicatorGlyph}</div>
                         </div>
 
-                        <span className={`text-sm font-sans leading-snug ${isSelected && !isSubmitted ? 'text-black font-medium' : 'text-zinc-300'} ${isGridSuitable ? 'font-display uppercase tracking-wider font-bold text-base' : 'text-left'}`}>
+                        <span className={`text-sm font-sans leading-snug ${isSelected && !isSubmitted ? 'text-ink font-medium' : 'text-muted'} ${isGridSuitable ? 'font-display uppercase tracking-wider font-bold text-base' : 'text-left'}`}>
                             {opt.text}
                         </span>
 
@@ -418,15 +418,15 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                         {isGridSuitable && isSubmitted && (
                             <div className="absolute top-2 right-2">
                                 {isMissedKey
-                                    ? <AlertCircle size={14} className="text-amber-500" />
+                                    ? <AlertCircle size={14} className="text-muted" />
                                     : isActuallyCorrect
-                                        ? <Check size={14} className="text-green-500" />
-                                        : isSelected && <X size={14} className="text-red-500" />}
+                                        ? <Check size={14} className="text-fg" />
+                                        : isSelected && <X size={14} className="text-faint" />}
                             </div>
                         )}
 
                         {!isGridSuitable && isMissedKey && (
-                            <span className="ml-auto font-mono text-[10px] uppercase tracking-widest text-amber-500 flex-shrink-0">
+                            <span className="ml-auto font-mono text-[10px] uppercase tracking-widest text-muted flex-shrink-0">
                                 se te pasó
                             </span>
                         )}
@@ -435,10 +435,10 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
             })}
             </div>
             {isSubmitted && isMultiSelect && (
-                <p className="px-6 pb-6 -mt-2 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
-                    <span className="text-green-500">verde</span> = la marcaste y va ·{' '}
-                    <span className="text-amber-500">ámbar</span> = va y no la marcaste ·{' '}
-                    <span className="text-red-500">roja</span> = la marcaste y no va
+                <p className="px-6 pb-6 -mt-2 font-mono text-[10px] uppercase tracking-widest text-muted">
+                    <span className="text-fg font-bold">✓</span> la marcaste y va ·{' '}
+                    <span className="text-muted font-bold">○</span> va y no la marcaste ·{' '}
+                    <span className="text-faint font-bold">✕</span> la marcaste y no va
                 </p>
             )}
         </>
@@ -454,9 +454,9 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
               <table className="w-full text-left border-collapse min-w-[600px]">
                   <thead>
                       <tr>
-                          <th className="pb-4 border-b border-zinc-800 font-mono text-[10px] uppercase text-zinc-500 w-1/3">Ítem</th>
+                          <th className="pb-4 border-b border-line font-mono text-[10px] uppercase text-muted w-1/3">Ítem</th>
                           {columns.map(col => (
-                              <th key={col.id} className="pb-4 border-b border-zinc-800 font-mono text-[10px] uppercase text-zinc-500 text-center px-2">
+                              <th key={col.id} className="pb-4 border-b border-line font-mono text-[10px] uppercase text-muted text-center px-2">
                                   {col.text}
                               </th>
                           ))}
@@ -464,8 +464,8 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                   </thead>
                   <tbody>
                       {rows.map((row: any) => (
-                          <tr key={row.id} className="group hover:bg-zinc-900/30 transition-colors">
-                              <td className="py-4 pr-4 font-sans text-sm text-zinc-300 border-b border-zinc-800/50">{row.text}</td>
+                          <tr key={row.id} className="group hover:bg-panel-2 transition-colors">
+                              <td className="py-4 pr-4 font-sans text-sm text-muted border-b border-line-soft">{row.text}</td>
                               {columns.map(col => {
                                   const isSelected = answersMap[row.id] === col.id;
                                   const isCorrectCell = isSubmitted && correctMap[row.id] === col.id;
@@ -473,32 +473,32 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
 
                                   // Anillo bien visible incluso sin marcar: un gris demasiado
                                   // oscuro dejaba la casilla marcada y la vacía indistinguibles.
-                                  let ringClass = "border-zinc-600";
+                                  let ringClass = "border-faint";
                                   let dotClass = "bg-transparent scale-0";
                                   let cellClass = "";
 
                                   if (isSubmitted) {
                                       if (isCorrectCell) {
-                                          ringClass = "border-green-500 bg-green-500/20";
-                                          dotClass = "bg-green-500 scale-100";
+                                          ringClass = "border-accent bg-accent/15";
+                                          dotClass = "bg-accent scale-100";
                                       } else if (isWrongSelection) {
-                                          ringClass = "border-red-500 bg-red-500/20";
-                                          dotClass = "bg-red-500 scale-100";
+                                          ringClass = "border-faint bg-accent/[0.06]";
+                                          dotClass = "bg-faint scale-100";
                                       } else if (isSelected) {
-                                          ringClass = "border-zinc-700 opacity-50";
+                                          ringClass = "border-line opacity-50";
                                       }
                                   } else if (isSelected) {
                                       // Marca fuerte: el círculo se rellena de blanco (no solo el
                                       // borde) y además se tiñe toda la celda, para que la opción
                                       // marcada no dependa de distinguir un anillo de 20px.
-                                      ringClass = "border-white bg-white border-2";
-                                      dotClass = "bg-black scale-100";
-                                      cellClass = "bg-white/[0.06]";
+                                      ringClass = "border-accent bg-accent border-2";
+                                      dotClass = "bg-panel scale-100";
+                                      cellClass = "bg-accent/[0.06]";
                                   }
 
                                   return (
-                                      <td key={col.id} className={`py-4 px-2 text-center border-b border-zinc-800/50 cursor-pointer transition-colors duration-200 ${cellClass}`} onClick={() => !isSubmitted && setAnswersMap(prev => ({...prev, [row.id]: col.id}))}>
-                                          <div className={`w-6 h-6 mx-auto border rounded-full flex items-center justify-center transition-all duration-200 ${ringClass} ${!isSubmitted && !isSelected && 'group-hover:border-zinc-400'}`}>
+                                      <td key={col.id} className={`py-4 px-2 text-center border-b border-line-soft cursor-pointer transition-colors duration-200 ${cellClass}`} onClick={() => !isSubmitted && setAnswersMap(prev => ({...prev, [row.id]: col.id}))}>
+                                          <div className={`w-6 h-6 mx-auto border rounded-full flex items-center justify-center transition-all duration-200 ${ringClass} ${!isSubmitted && !isSelected && 'group-hover:border-muted'}`}>
                                               <div className={`w-2.5 h-2.5 rounded-full transition-transform duration-200 ${dotClass}`}></div>
                                           </div>
                                       </td>
@@ -525,9 +525,9 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
       // because the header might just be an instruction ("Answer True/False").
       return (
         <div className="flex flex-col gap-6 p-6">
-            <div className="p-6 bg-zinc-900/50 border border-zinc-800 rounded-lg">
-                <span className="text-[10px] font-mono text-zinc-500 uppercase block mb-2">Afirmación a evaluar:</span>
-                <p className="font-sans text-lg md:text-xl text-white font-medium leading-relaxed">
+            <div className="p-6 bg-panel-2 border border-line rounded-lg">
+                <span className="text-[10px] font-mono text-muted uppercase block mb-2">Afirmación a evaluar:</span>
+                <p className="font-sans text-lg md:text-xl text-fg font-medium leading-relaxed">
                     {safeExercise.question || "Error: Falta el enunciado."}
                 </p>
             </div>
@@ -539,20 +539,20 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                     const isCorrectBtn = isSubmitted && correctStr.toLowerCase() === opt.id;
                     const isWrongSelection = isSubmitted && isSelected && !isCorrectBtn;
 
-                    let btnClass = "h-32 border flex flex-col items-center justify-center gap-2 transition-all duration-200";
+                    let btnClass = "h-32 rounded-2xl border flex flex-col items-center justify-center gap-2 transition-all duration-200";
                     
                     if (isSubmitted) {
                         if (isCorrectBtn) {
-                            btnClass += " bg-green-500/10 border-green-500 text-green-500";
+                            btnClass += " bg-accent/10 border-accent text-fg";
                         } else if (isWrongSelection) {
-                            btnClass += " bg-red-500/10 border-red-500 text-red-500";
+                            btnClass += " bg-accent/[0.04] border-faint text-faint";
                         } else {
-                            btnClass += " bg-zinc-950 border-zinc-800 opacity-30";
+                            btnClass += " bg-panel border-line opacity-30";
                         }
                     } else if (isSelected) {
-                        btnClass += " bg-white border-white text-black scale-[1.02] shadow-xl shadow-white/10";
+                        btnClass += " bg-accent border-accent text-ink scale-[1.02] shadow-xl shadow-white/10";
                     } else {
-                        btnClass += " bg-zinc-900/50 border-zinc-800 text-zinc-400 hover:bg-zinc-800 hover:border-zinc-600";
+                        btnClass += " bg-panel-2 border-line text-muted hover:bg-panel-3 hover:border-faint";
                     }
 
                     return (
@@ -571,7 +571,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
   const renderOrdering = () => {
     if (!orderedList || orderedList.length === 0) {
         return (
-            <div className="p-8 flex flex-col items-center justify-center text-zinc-500 border-b border-zinc-800">
+            <div className="p-8 flex flex-col items-center justify-center text-muted border-b border-line">
                 <AlertCircle size={32} className="mb-2" />
                 <p className="font-mono text-xs uppercase">Error de datos: No hay elementos para ordenar</p>
             </div>
@@ -588,7 +588,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
     };
 
     return (
-        <div className="flex flex-col gap-3 p-6 bg-zinc-950/50">
+        <div className="flex flex-col gap-3 p-6 bg-panel">
             {orderedList.map((itemId, idx) => {
                 const item = safeExercise.options?.find((o: any) => o.id === itemId);
                 if (!item) return null;
@@ -596,29 +596,29 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                 const isCorrectPosition = isSubmitted && correctOrder && correctOrder[idx] === itemId;
                 
                 // Style calculation
-                let borderClass = "border-zinc-800";
-                let bgClass = "bg-black";
-                let textClass = "text-zinc-300";
+                let borderClass = "border-line";
+                let bgClass = "bg-panel";
+                let textClass = "text-muted";
 
                 if (isSubmitted) {
                     if (isCorrectPosition) {
-                        borderClass = "border-green-500";
-                        bgClass = "bg-green-500/5";
-                        textClass = "text-green-500";
+                        borderClass = "border-accent";
+                        bgClass = "bg-accent/5";
+                        textClass = "text-fg";
                     } else {
-                        borderClass = "border-red-500";
-                        bgClass = "bg-red-500/5";
-                        textClass = "text-red-500";
+                        borderClass = "border-faint";
+                        bgClass = "bg-accent/[0.02]";
+                        textClass = "text-faint";
                     }
                 } else {
                     // Hover effect only when not submitted
-                    bgClass = "bg-black hover:bg-zinc-900";
+                    bgClass = "bg-panel hover:bg-panel-2";
                 }
 
                 return (
-                    <div key={itemId} className={`relative flex items-center gap-4 p-4 border ${borderClass} ${bgClass} transition-all duration-200 group`}>
+                    <div key={itemId} className={`relative flex items-center gap-4 p-3.5 rounded-xl border ${borderClass} ${bgClass} transition-all duration-200 group`}>
                         {/* Index */}
-                        <div className="flex-shrink-0 w-8 h-8 flex items-center justify-center bg-zinc-900 border border-zinc-800 font-mono text-xs text-zinc-500">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-panel-2 border border-line font-mono text-xs text-muted">
                             {idx + 1}
                         </div>
 
@@ -633,14 +633,14 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                                 <button 
                                     onClick={() => moveItem(idx, 'up')} 
                                     disabled={idx === 0} 
-                                    className="p-1 hover:bg-zinc-800 text-zinc-500 hover:text-white disabled:opacity-0 transition-colors rounded"
+                                    className="p-1 hover:bg-panel-3 text-muted hover:text-fg disabled:opacity-0 transition-colors rounded"
                                 >
                                     <ArrowUp size={16} />
                                 </button>
                                 <button 
                                     onClick={() => moveItem(idx, 'down')} 
                                     disabled={idx === orderedList.length - 1} 
-                                    className="p-1 hover:bg-zinc-800 text-zinc-500 hover:text-white disabled:opacity-0 transition-colors rounded"
+                                    className="p-1 hover:bg-panel-3 text-muted hover:text-fg disabled:opacity-0 transition-colors rounded"
                                 >
                                     <ArrowDown size={16} />
                                 </button>
@@ -649,7 +649,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                         {/* Result Icon */}
                         {isSubmitted && (
                             <div className="flex-shrink-0">
-                                {isCorrectPosition ? <Check className="text-green-500" size={18} /> : <X className="text-red-500" size={18} />}
+                                {isCorrectPosition ? <Check className="text-fg" size={18} /> : <X className="text-faint" size={18} />}
                             </div>
                         )}
                     </div>
@@ -665,7 +665,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
     const correctMap = (safeExercise.correctAnswer as Record<string, string>) || {};
 
     return (
-        <div className="p-8 bg-zinc-950 font-serif text-lg leading-loose text-zinc-300 text-justify">
+        <div className="p-8 bg-panel font-serif text-lg leading-loose text-muted text-justify">
             {parts.map((part: string, i: number) => {
                 const match = part.match(/\{\{([\w\d]+)\}\}/);
                 if (match) {
@@ -678,15 +678,15 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                     
                     if (isSubmitted) {
                         if (isCorrect) {
-                            selectClass += " border-green-500 text-green-500 bg-green-500/10";
+                            selectClass += " border-accent text-fg bg-accent/10";
                         } else {
-                            selectClass += " border-red-500 text-red-500 bg-red-500/10";
+                            selectClass += " border-faint text-faint bg-accent/[0.04]";
                         }
                     } else {
                         if (selected) {
-                            selectClass += " border-white text-white bg-zinc-900";
+                            selectClass += " border-accent text-fg bg-panel-2";
                         } else {
-                            selectClass += " border-zinc-600 text-zinc-500 hover:border-zinc-400 hover:text-zinc-300";
+                            selectClass += " border-faint text-muted hover:border-muted hover:text-muted";
                         }
                     }
 
@@ -698,9 +698,9 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                                 disabled={isSubmitted}
                                 className={selectClass}
                             >
-                                <option value="" disabled className="text-zinc-700">___</option>
+                                <option value="" disabled className="text-faint">___</option>
                                 {options.map((o: any) => (
-                                    <option key={o.id} value={o.id} className="bg-black text-white py-2">{o.text}</option>
+                                    <option key={o.id} value={o.id} className="bg-panel text-fg py-2">{o.text}</option>
                                 ))}
                             </select>
                         </span>
@@ -724,7 +724,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
 
     if (fields.length === 0) {
         return (
-            <div className="p-8 flex flex-col items-center justify-center text-zinc-500">
+            <div className="p-8 flex flex-col items-center justify-center text-muted">
                 <AlertCircle size={32} className="mb-2" />
                 <p className="font-mono text-xs uppercase">Error de datos: no hay campos</p>
             </div>
@@ -738,23 +738,23 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                 const correctId = correctMap[field.id];
                 const isFieldCorrect = isSubmitted && selected === correctId;
 
-                let frameClass = 'border-zinc-800 bg-zinc-900/40';
+                let frameClass = 'border-line bg-panel-2';
                 if (isSubmitted) {
                     frameClass = isFieldCorrect
-                        ? 'border-green-500 bg-green-500/5'
-                        : 'border-red-500 bg-red-500/5';
+                        ? 'border-accent bg-accent/5'
+                        : 'border-faint bg-accent/[0.02]';
                 }
 
                 return (
-                    <div key={field.id} className={`border ${frameClass} p-4 transition-colors duration-300`}>
+                    <div key={field.id} className={`rounded-xl border ${frameClass} p-4 transition-colors duration-300`}>
                         <div className="flex items-center justify-between mb-3">
-                            <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+                            <span className="font-mono text-[10px] uppercase tracking-widest text-muted">
                                 {field.label}
                             </span>
                             {isSubmitted && (
                                 isFieldCorrect
-                                    ? <Check size={14} className="text-green-500" />
-                                    : <X size={14} className="text-red-500" />
+                                    ? <Check size={14} className="text-fg" />
+                                    : <X size={14} className="text-faint" />
                             )}
                         </div>
 
@@ -764,26 +764,26 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                                     value={selected}
                                     onChange={(e) => setAnswersMap(prev => ({ ...prev, [field.id]: e.target.value }))}
                                     disabled={isSubmitted}
-                                    className="w-full bg-black border border-zinc-700 text-white font-mono text-base px-3 py-2 outline-none focus:border-white disabled:opacity-70"
+                                    className="w-full bg-panel border border-line rounded-lg text-fg font-mono text-base px-3 py-2.5 outline-none focus:border-accent focus:ring-2 focus:ring-white/10 disabled:opacity-70"
                                 >
                                     <option value="" disabled>— elegí —</option>
                                     {field.options.map((o: any) => (
-                                        <option key={o.id} value={o.id} className="bg-black">{o.text}</option>
+                                        <option key={o.id} value={o.id} className="bg-panel">{o.text}</option>
                                     ))}
                                 </select>
                             ) : (
                                 field.options.map((o: any) => {
                                     const isSelected = selected === o.id;
                                     const isKey = isSubmitted && correctId === o.id;
-                                    let btnClass = 'py-3 px-2 border font-sans text-sm transition-all duration-200';
+                                    let btnClass = 'py-3 px-2 rounded-lg border font-sans text-sm transition-all duration-200';
                                     if (isSubmitted) {
-                                        if (isKey) btnClass += ' border-green-500 bg-green-500/10 text-green-400';
-                                        else if (isSelected) btnClass += ' border-red-500 bg-red-500/10 text-red-400';
-                                        else btnClass += ' border-zinc-800 text-zinc-600 opacity-50';
+                                        if (isKey) btnClass += ' border-accent bg-accent/10 text-fg';
+                                        else if (isSelected) btnClass += ' border-faint bg-accent/[0.04] text-faint';
+                                        else btnClass += ' border-line text-faint opacity-50';
                                     } else if (isSelected) {
-                                        btnClass += ' border-white bg-white text-black font-medium';
+                                        btnClass += ' border-accent bg-accent text-ink font-medium';
                                     } else {
-                                        btnClass += ' border-zinc-700 text-zinc-300 hover:border-zinc-400';
+                                        btnClass += ' border-line text-muted hover:border-muted';
                                     }
                                     return (
                                         <button
@@ -820,7 +820,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
 
     if (!expected) {
         return (
-            <div className="p-8 flex flex-col items-center justify-center text-zinc-500">
+            <div className="p-8 flex flex-col items-center justify-center text-muted">
                 <AlertCircle size={32} className="mb-2" />
                 <p className="font-mono text-xs uppercase">Error de datos: no hay dato que anotar</p>
             </div>
@@ -833,17 +833,17 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
     const numeric = kind === 'phone' || kind === 'price' || kind === 'quantity' || kind === 'time';
     const solved = isSubmitted && isDictationCorrect();
 
-    let boxClass = 'border-zinc-700 bg-black text-white focus:border-white';
+    let boxClass = 'border-line bg-panel text-fg focus:border-accent';
     if (isSubmitted) {
         boxClass = solved
-            ? 'border-green-500 bg-green-500/10 text-green-400'
-            : 'border-red-500 bg-red-500/10 text-red-400';
+            ? 'border-accent bg-accent/10 text-fg'
+            : 'border-faint bg-accent/[0.04] text-faint';
     }
 
     return (
         <div className="p-6">
             <label className="block" htmlFor={`dictation_${index}`}>
-                <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 flex items-center gap-2 mb-2">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-muted flex items-center gap-2 mb-2">
                     <Pencil size={12} />
                     {dictationLabel()}
                 </span>
@@ -862,20 +862,20 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                     autoCorrect="off"
                     spellCheck={false}
                     placeholder="Escribí lo que oíste"
-                    className={`w-full border ${boxClass} font-mono text-lg md:text-2xl px-4 py-3 outline-none disabled:opacity-90 transition-colors duration-300 placeholder:text-zinc-700 placeholder:text-base`}
+                    className={`w-full rounded-xl border ${boxClass} font-mono text-lg md:text-2xl px-4 py-3.5 outline-none focus:ring-2 focus:ring-white/10 disabled:opacity-90 transition-colors duration-300 placeholder:text-faint placeholder:text-base`}
                 />
             </label>
 
-            <p className="mt-2 font-mono text-[10px] text-zinc-600">
+            <p className="mt-2 font-mono text-[10px] text-faint">
                 Con cifras o con palabras, como prefieras: se corrige lo que oíste.
             </p>
 
             {isSubmitted && (
-                <div className="mt-6 border-t border-zinc-800 pt-4">
-                    <p className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 mb-1">
+                <div className="mt-6 border-t border-line pt-4">
+                    <p className="font-mono text-[10px] uppercase tracking-widest text-muted mb-1">
                         Se dijo
                     </p>
-                    <p className="font-mono text-lg text-white break-words">{expected}</p>
+                    <p className="font-mono text-lg text-fg break-words">{expected}</p>
                 </div>
             )}
         </div>
@@ -902,20 +902,20 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                 const selected = answersMap[row.id] || '';
                 const isRowCorrect = isSubmitted && selected === correctMap[row.id];
 
-                let frameClass = 'border-zinc-800';
-                if (isSubmitted) frameClass = isRowCorrect ? 'border-green-500' : 'border-red-500';
+                let frameClass = 'border-line';
+                if (isSubmitted) frameClass = isRowCorrect ? 'border-accent' : 'border-faint';
 
                 return (
-                    <div key={row.id} className={`border ${frameClass} bg-zinc-900/30 p-4 flex flex-col md:flex-row md:items-center gap-3 transition-colors duration-300`}>
-                        <p className="flex-1 font-sans text-sm text-zinc-200 leading-relaxed">{row.text}</p>
+                    <div key={row.id} className={`rounded-xl border ${frameClass} bg-panel-2 p-4 flex flex-col md:flex-row md:items-center gap-3 transition-colors duration-300`}>
+                        <p className="flex-1 font-sans text-sm text-fg leading-relaxed">{row.text}</p>
 
                         <div className="flex items-center gap-2 md:w-1/2">
-                            <span className="font-mono text-zinc-600 hidden md:inline">→</span>
+                            <span className="font-mono text-faint hidden md:inline">→</span>
                             <select
                                 value={selected}
                                 onChange={(e) => setAnswersMap(prev => ({ ...prev, [row.id]: e.target.value }))}
                                 disabled={isSubmitted}
-                                className="flex-1 bg-black border border-zinc-700 text-white font-sans text-sm px-3 py-2 outline-none focus:border-white disabled:opacity-70"
+                                className="flex-1 bg-panel border border-line rounded-lg text-fg font-sans text-sm px-3 py-2.5 outline-none focus:border-accent focus:ring-2 focus:ring-white/10 disabled:opacity-70"
                             >
                                 <option value="" disabled>— emparejá —</option>
                                 {columns.map((col: any) => {
@@ -925,7 +925,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                                             key={col.id}
                                             value={col.id}
                                             disabled={!!owner && owner !== row.id}
-                                            className="bg-black"
+                                            className="bg-panel"
                                         >
                                             {col.text}
                                         </option>
@@ -934,13 +934,13 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                             </select>
                             {isSubmitted && (
                                 isRowCorrect
-                                    ? <Check size={16} className="text-green-500 flex-shrink-0" />
-                                    : <X size={16} className="text-red-500 flex-shrink-0" />
+                                    ? <Check size={16} className="text-fg flex-shrink-0" />
+                                    : <X size={16} className="text-faint flex-shrink-0" />
                             )}
                         </div>
 
                         {isSubmitted && !isRowCorrect && (
-                            <span className="font-mono text-[10px] uppercase text-zinc-500 md:w-40">
+                            <span className="font-mono text-[10px] uppercase text-muted md:w-40">
                                 era: {columns.find((c: any) => c.id === correctMap[row.id])?.text}
                             </span>
                         )}
@@ -962,9 +962,9 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
 
     return (
         <div className="p-6 flex flex-col gap-6">
-            <div className="flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
+            <div className="flex items-center justify-between gap-2 font-mono text-[10px] uppercase tracking-widest text-muted">
                 <span>{points[0]?.text}</span>
-                <div className="flex-1 h-px bg-gradient-to-r from-zinc-700 via-zinc-600 to-zinc-700 mx-2" />
+                <div className="flex-1 h-px bg-gradient-to-r from-line via-faint to-line mx-2" />
                 <span className="text-right">{points[points.length - 1]?.text}</span>
             </div>
 
@@ -978,20 +978,20 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
 
                 return (
                     <div key={row.id} className="flex flex-col gap-2">
-                        <p className="font-serif text-base text-zinc-200 italic">“{row.text}”</p>
+                        <p className="font-serif text-base text-fg italic">“{row.text}”</p>
                         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${points.length}, minmax(0, 1fr))` }}>
                             {points.map((point: any) => {
                                 const isSelected = selected === point.id;
                                 const isKey = isSubmitted && correctId === point.id;
-                                let cellClass = 'py-3 px-1 border text-center font-sans text-[11px] leading-tight transition-all duration-200';
+                                let cellClass = 'py-3 px-1 rounded-lg border text-center font-sans text-[11px] leading-tight transition-all duration-200';
                                 if (isSubmitted) {
-                                    if (isKey) cellClass += ' border-green-500 bg-green-500/15 text-green-400';
-                                    else if (isSelected) cellClass += ' border-red-500 bg-red-500/10 text-red-400';
-                                    else cellClass += ' border-zinc-800 text-zinc-600';
+                                    if (isKey) cellClass += ' border-accent bg-accent/12 text-fg';
+                                    else if (isSelected) cellClass += ' border-faint bg-accent/[0.04] text-faint';
+                                    else cellClass += ' border-line text-faint';
                                 } else if (isSelected) {
-                                    cellClass += ' border-white bg-white text-black font-medium';
+                                    cellClass += ' border-accent bg-accent text-ink font-medium';
                                 } else {
-                                    cellClass += ' border-zinc-800 text-zinc-400 hover:border-zinc-500';
+                                    cellClass += ' border-line text-muted hover:border-faint';
                                 }
                                 return (
                                     <button
@@ -1006,7 +1006,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                             })}
                         </div>
                         {isSubmitted && !isRowCorrect && distance === 1 && (
-                            <span className="font-mono text-[10px] uppercase text-amber-500">
+                            <span className="font-mono text-[10px] uppercase text-muted">
                                 casi: te quedaste a un punto del matiz exacto
                             </span>
                         )}
@@ -1029,7 +1029,7 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
 
     if (tokens.length === 0) {
         return (
-            <div className="p-8 flex flex-col items-center justify-center text-zinc-500">
+            <div className="p-8 flex flex-col items-center justify-center text-muted">
                 <AlertCircle size={32} className="mb-2" />
                 <p className="font-mono text-xs uppercase">Error de datos: no hay fragmento</p>
             </div>
@@ -1037,13 +1037,13 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
     }
 
     return (
-        <div className="p-8 bg-zinc-950">
+        <div className="p-8 bg-panel">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 mb-4 font-mono text-[10px] uppercase tracking-widest">
-                <span className="flex items-center gap-2 text-zinc-500">
+                <span className="flex items-center gap-2 text-muted">
                     <MousePointerClick size={12} className="flex-shrink-0" />
                     Tocá las palabras que no se dicen · tocá otra vez para desmarcar
                 </span>
-                <span className={selectedOptions.length > 0 ? 'text-white' : 'text-zinc-600'}>
+                <span className={selectedOptions.length > 0 ? 'text-fg' : 'text-faint'}>
                     {selectedOptions.length} marcada{selectedOptions.length === 1 ? '' : 's'}
                 </span>
             </div>
@@ -1052,18 +1052,18 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                     const isSelected = selectedOptions.includes(token.id);
                     const isAltered = altered.includes(token.id);
 
-                    let tokenClass = 'px-1 py-0.5 border-b-2 transition-all duration-150 cursor-pointer';
+                    let tokenClass = 'px-1.5 py-0.5 rounded border-b-2 transition-all duration-150 cursor-pointer';
                     if (isSubmitted) {
-                        if (isAltered && isSelected) tokenClass += ' border-green-500 text-green-400 bg-green-500/10';
-                        else if (isAltered) tokenClass += ' border-amber-500 text-amber-400 bg-amber-500/10';
-                        else if (isSelected) tokenClass += ' border-red-500 text-red-400 bg-red-500/10 line-through';
-                        else tokenClass += ' border-transparent text-zinc-500';
+                        if (isAltered && isSelected) tokenClass += ' border-accent text-fg bg-accent/10';
+                        else if (isAltered) tokenClass += ' border-muted text-muted bg-accent/[0.05]';
+                        else if (isSelected) tokenClass += ' border-faint text-faint bg-accent/[0.04] line-through';
+                        else tokenClass += ' border-transparent text-muted';
                     } else if (isSelected) {
                         // Inversión completa: en un párrafo corrido, un fondo al 10%
                         // no se distinguía de una palabra sin marcar.
-                        tokenClass += ' border-white bg-white text-black font-medium';
+                        tokenClass += ' border-accent bg-accent text-ink font-medium';
                     } else {
-                        tokenClass += ' border-transparent text-zinc-300 hover:border-zinc-600 hover:bg-zinc-800/60';
+                        tokenClass += ' border-transparent text-muted hover:border-faint hover:bg-panel-3';
                     }
 
                     return (
@@ -1086,10 +1086,10 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
                 })}
             </div>
             {isSubmitted && (
-                <p className="mt-5 font-mono text-[10px] uppercase tracking-widest text-zinc-500">
-                    <span className="text-green-500">verde</span> = la cazaste ·{' '}
-                    <span className="text-amber-500">ámbar</span> = cambiada y se te pasó ·{' '}
-                    <span className="text-red-500">roja</span> = sí se dice
+                <p className="mt-5 font-mono text-[10px] uppercase tracking-widest text-muted">
+                    <span className="text-fg font-bold">✓</span> la cazaste ·{' '}
+                    <span className="text-muted font-bold">○</span> cambiada y se te pasó ·{' '}
+                    <span className="text-faint font-bold">✕</span> sí se dice
                 </p>
             )}
         </div>
@@ -1113,92 +1113,81 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
           case 'minimal_pairs': return renderFields();
           case 'dictation': return renderDictation();
           case 'spot_the_difference': return renderSpotTheDifference();
-          default: return <div className="p-4 text-red-500 border border-red-900 bg-red-950/10 font-mono text-xs">ERR_UNKNOWN_TYPE: {safeExercise.type}</div>;
+          default: return <div className="p-4 text-faint border border-line bg-panel-2 font-mono text-xs">ERR_UNKNOWN_TYPE: {safeExercise.type}</div>;
       }
   };
 
   return (
-    <div className={`mb-16 relative pl-6 md:pl-0`}>
-      {/* Decorative timeline line */}
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${getStatusColor()} transition-colors duration-500 hidden md:block`}></div>
-      <div className={`absolute left-0 top-0 bottom-0 w-1 ${getStatusColor()} transition-colors duration-500 md:hidden`}></div>
-
+    <div className="rounded-2xl border border-line-soft bg-panel-2 overflow-hidden">
       {/* Header */}
-      <div className="mb-6 md:ml-8">
-        <div className="flex items-center gap-3 mb-2 flex-wrap">
-            <span className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest px-2 py-0.5 border border-zinc-800 bg-zinc-900/50">
-                0{index + 1}
-            </span>
+      <div className="px-4 sm:px-5 pt-4 sm:pt-5">
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
             {/* Se nombra la habilidad que se entrena, no el widget: es lo que le
                 permite al alumno saber qué está practicando. */}
             {safeExercise.skill && SKILL_LABELS[safeExercise.skill] && (
-                <span className="font-mono text-[10px] text-white uppercase tracking-widest px-2 py-0.5 border border-zinc-700">
+                <span className="inline-flex items-center rounded-md border border-accent/25 bg-white/[0.05] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-fg">
                     {SKILL_LABELS[safeExercise.skill]}
                 </span>
             )}
-            <span className="font-mono text-[10px] text-zinc-600 uppercase">
-                // {FORMAT_LABELS[safeExercise.type] || safeExercise.type.replace(/_/g, ' ')}
+            <span className="inline-flex items-center rounded-md border border-line bg-panel-3 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.08em] text-muted">
+                {FORMAT_LABELS[safeExercise.type] || safeExercise.type.replace(/_/g, ' ')}
             </span>
         </div>
-        <h3 className="font-display font-medium text-xl md:text-2xl uppercase leading-tight text-white max-w-4xl">
+        <h3 className="font-display font-semibold text-lg md:text-xl leading-snug text-fg">
             {safeExercise.question}
         </h3>
       </div>
 
       {/* Body */}
-      <div className="border border-zinc-800 bg-black md:ml-8 transition-shadow duration-300 hover:shadow-[0_0_30px_-5px_rgba(255,255,255,0.05)]">
-        {renderContent()}
-        
-        {/* Footer / Actions */}
-        <div className="border-t border-zinc-800">
-            {!isSubmitted ? (
-                <button
-                    onClick={handleSubmit}
-                    disabled={!canSubmit()}
-                    className="w-full py-4 bg-zinc-900 hover:bg-white text-zinc-400 hover:text-black font-mono text-xs uppercase tracking-widest transition-all disabled:opacity-50 disabled:hover:bg-zinc-900 disabled:hover:text-zinc-400 disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
-                >
-                    Confirmar Respuesta
-                    <ArrowDown size={14} className="group-hover:translate-y-1 transition-transform" />
-                </button>
-            ) : (
-                <div className="bg-zinc-950/80 p-6 animate-in fade-in slide-in-from-top-2 duration-300">
-                     {safeExercise.explanation ? (
-                         <div className="flex gap-5 items-start">
-                            <div className={`mt-1 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isCorrect() ? 'bg-green-500 text-black' : 'bg-red-500 text-white'}`}>
-                                {isCorrect() ? <Check size={16} strokeWidth={3} /> : <X size={16} strokeWidth={3} />}
-                            </div>
-                            <div className="space-y-2 flex-1">
-                                <div className="flex items-baseline justify-between">
-                                    <span className={`text-[10px] font-mono uppercase tracking-widest font-bold ${isCorrect() ? 'text-green-500' : 'text-red-500'}`}>
-                                        {isCorrect() ? 'Correcto' : 'Incorrecto'}
-                                    </span>
-                                </div>
-                                <p className="text-zinc-300 text-sm font-sans leading-relaxed border-l-2 border-zinc-800 pl-4">
-                                    {safeExercise.explanation}
-                                </p>
-                                {sourceLines.length > 0 && (
-                                    <div className="pt-3 space-y-2">
-                                        <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500 flex items-center gap-2">
-                                            <Quote size={11} /> En el audio
-                                        </span>
-                                        {sourceLines.map((line, i) => (
-                                            <p key={i} className="font-serif text-sm text-zinc-400 italic border-l-2 border-zinc-700 pl-4">
-                                                <span className="not-italic font-mono text-[10px] uppercase text-zinc-600 mr-2">
-                                                    {line.speaker}
-                                                </span>
-                                                {line.text}
-                                            </p>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-                    ) : (
-                        <div className="text-center font-mono text-xs text-zinc-500">Evaluación registrada.</div>
-                    )}
-                </div>
-            )}
-        </div>
+      {renderContent()}
+
+      {/* Footer / Actions */}
+      <div className="border-t border-line-soft">
+          {!isSubmitted ? (
+              <button
+                  onClick={handleSubmit}
+                  disabled={!canSubmit()}
+                  className="w-full py-3.5 bg-white/[0.03] hover:bg-accent text-fg hover:text-ink font-medium text-sm transition-all disabled:opacity-40 disabled:hover:bg-white/[0.03] disabled:hover:text-fg disabled:cursor-not-allowed flex items-center justify-center gap-2 group"
+              >
+                  Comprobar
+                  <ArrowDown size={15} className="group-hover:translate-y-0.5 transition-transform" />
+              </button>
+          ) : (
+              <div className="bg-panel p-5 animate-in fade-in slide-in-from-top-2 duration-300">
+                   {safeExercise.explanation ? (
+                       <div className="flex gap-4 items-start">
+                          <div className={`mt-0.5 flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${isCorrect() ? 'bg-accent text-ink' : 'bg-panel-3 text-fg border border-faint'}`}>
+                              {isCorrect() ? <Check size={16} strokeWidth={3} /> : <X size={16} strokeWidth={3} />}
+                          </div>
+                          <div className="space-y-2 flex-1 min-w-0">
+                              <span className={`block text-xs font-mono uppercase tracking-[0.12em] font-bold ${isCorrect() ? 'text-fg' : 'text-muted'}`}>
+                                  {isCorrect() ? 'Correcto' : 'Incorrecto'}
+                              </span>
+                              <p className="text-muted text-sm leading-relaxed border-l-2 border-line pl-4">
+                                  {safeExercise.explanation}
+                              </p>
+                              {sourceLines.length > 0 && (
+                                  <div className="pt-2 space-y-2">
+                                      <span className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted flex items-center gap-2">
+                                          <Quote size={11} /> En el audio
+                                      </span>
+                                      {sourceLines.map((line, i) => (
+                                          <p key={i} className="text-sm text-muted italic border-l-2 border-line pl-4">
+                                              <span className="not-italic font-mono text-[10px] uppercase text-faint mr-2">
+                                                  {line.speaker}
+                                              </span>
+                                              {line.text}
+                                          </p>
+                                      ))}
+                                  </div>
+                              )}
+                          </div>
+                      </div>
+                  ) : (
+                      <div className="text-center font-mono text-xs text-muted">Evaluación registrada.</div>
+                  )}
+              </div>
+          )}
       </div>
     </div>
   );
