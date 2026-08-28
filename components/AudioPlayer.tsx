@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX, Download } from 'lucide-react';
+import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX, Download, SlidersHorizontal } from 'lucide-react';
 import { resolveAmbienceScene, type ResolvedAmbience } from '../services/ambiencePresets';
 import {
   AmbienceEngine,
@@ -126,6 +126,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   scenarioActionLabel,
   textType,
   sceneHint,
+  hideTrackInfo,
   downloadName,
 }) => {
   const speechRef = useRef<HTMLAudioElement | null>(null);
@@ -149,6 +150,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [speechUrl, setSpeechUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState(recommendedSpeed);
+  const [showMixer, setShowMixer] = useState(false);
+
+  // Decorative static waveform for the seek bar (stable across renders).
+  const waveform = useMemo(
+    () => Array.from({ length: 56 }, (_, i) => 24 + Math.round(60 * Math.abs(Math.sin(i * 0.7)) * (0.55 + 0.45 * ((i * 37) % 13) / 13))),
+    []
+  );
 
   const [prefs, setPrefs] = useState<AmbiencePrefs>(loadPrefs);
   const prefsRef = useRef(prefs);
@@ -473,8 +481,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
   if (error) {
     return (
-      <div className="w-full h-24 border border-red-900 bg-red-950/10 flex items-center justify-center font-mono text-red-500 text-xs uppercase">
-        Falló Sistema // {error}
+      <div className="w-full h-20 bg-panel-2 flex items-center justify-center gap-2 font-mono text-muted text-xs px-4 text-center">
+        <Activity size={14} className="text-faint" /> Falló el reproductor · {error}
       </div>
     );
   }
@@ -490,7 +498,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const setPref = (patch: Partial<AmbiencePrefs>) => setPrefs((p) => ({ ...p, ...patch }));
 
   return (
-    <div className="border border-zinc-800 bg-black relative">
+    <div className="bg-panel">
       {speechUrl && (
         <audio
           ref={speechRef}
@@ -503,128 +511,142 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         />
       )}
 
-      <div className="grid grid-cols-[1fr_auto] border-b border-zinc-800">
-        <div className="flex flex-col">
-          <div
-            className="h-12 bg-zinc-950 relative cursor-pointer group border-b border-zinc-800 overflow-hidden"
-            onClick={handleSeek}
-          >
-            <div
-              className="h-full bg-white absolute top-0 left-0 pointer-events-none transition-all duration-75 linear mix-blend-difference"
-              style={{ width: `${(currentTime / duration) * 100}%` }}
-            />
-            <div className="absolute inset-0 flex items-center justify-between px-4 pointer-events-none">
-              <span className="font-mono text-xs text-zinc-500 group-hover:text-white transition-colors">{formatTime(currentTime)}</span>
-              <span className="font-mono text-xs text-zinc-500 group-hover:text-white transition-colors">{formatTime(duration)}</span>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between px-4 py-3 bg-black">
-            <div className="flex items-center gap-2">
-              {isPlaying ? <Sparkles size={14} className="text-zinc-300 animate-pulse" /> : <Activity size={14} className="text-zinc-500" />}
-              <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-300">
-                Ambiente: {scene.recipe.label}
-                {/* Shown even at 0: a silent bed used to be indistinguishable from a
-                    quiet one, which is how "no stem ever loads" went unnoticed. */}
-                {isPlaying ? ` · ${stemsLoaded}/${totalStems} capas` : ''}
-              </span>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2 group">
-                <button
-                  onClick={() => setPref({ muted: !prefs.muted })}
-                  className="text-zinc-300 hover:text-white transition-colors"
-                  title={prefs.muted ? 'Activar ambiente' : 'Silenciar ambiente'}
-                  aria-label={prefs.muted ? 'Activar ambiente' : 'Silenciar ambiente'}
-                >
-                  {prefs.muted ? <VolumeX size={12} className="text-zinc-600" /> : <Radio size={12} />}
-                </button>
-                <input
-                  type="range"
-                  min="0"
-                  max="1.0"
-                  step="0.05"
-                  value={prefs.volume}
-                  onChange={(e) => setPref({ volume: parseFloat(e.target.value), muted: false })}
-                  className="w-16 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer disabled:opacity-40"
-                  disabled={prefs.muted}
-                  title="Volumen Ambiente"
+      {/* Seek / waveform */}
+      <div className="px-4 pt-3.5">
+        <div onClick={handleSeek} className="relative h-9 cursor-pointer group" role="slider" aria-label="Barra de reproducción" aria-valuenow={Math.round(currentTime)} aria-valuemax={Math.round(duration) || 0}>
+          <div className="absolute inset-0 flex items-center gap-[2px]">
+            {waveform.map((h, i) => {
+              const ratio = duration ? currentTime / duration : 0;
+              const played = (i + 0.5) / waveform.length <= ratio;
+              return (
+                <span
+                  key={i}
+                  className={`flex-1 rounded-full transition-colors ${played ? 'bg-fg' : 'bg-line group-hover:bg-faint'}`}
+                  style={{ height: `${h}%` }}
                 />
-              </div>
-              <div className="flex items-center gap-2 group">
-                <span className="font-mono text-[9px] uppercase tracking-widest text-zinc-600">Int</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="1.0"
-                  step="0.05"
-                  value={prefs.intensity}
-                  onChange={(e) => setPref({ intensity: parseFloat(e.target.value) })}
-                  className="w-16 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
-                  title="Intensidad Ambiente (frecuencia y nivel de los eventos)"
-                />
-              </div>
-              <div className="flex items-center gap-2 group">
-                <span className="font-mono text-[9px] uppercase tracking-widest text-zinc-600">Duck</span>
-                <input
-                  type="range"
-                  min="0"
-                  max="1.0"
-                  step="0.05"
-                  value={prefs.ducking}
-                  onChange={(e) => setPref({ ducking: parseFloat(e.target.value) })}
-                  className="w-16 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
-                  title="Ducking (reduce ambiente cuando hay voz)"
-                />
-              </div>
-              <div className="w-[1px] h-3 bg-zinc-800" />
-              <span className="font-mono text-[10px] text-white font-bold">{playbackRate}x</span>
-            </div>
+              );
+            })}
           </div>
         </div>
-        <div className="flex flex-col border-l border-zinc-800 w-16">
-          <button
-            onClick={() => {
-              const ci = SPEEDS.indexOf(playbackRate);
-              const ni = (ci + 1) % SPEEDS.length;
-              setPlaybackRate(SPEEDS[ni]);
-            }}
-            className="flex-1 border-b border-zinc-800 flex flex-col items-center justify-center hover:bg-white hover:text-black transition-colors group"
-          >
-            <span className="font-mono text-[10px] font-bold block">{playbackRate}x</span>
-            <span className="text-[8px] uppercase text-zinc-600 group-hover:text-black">Vel</span>
-          </button>
-          <button
-            onClick={handleDownload}
-            disabled={!speechUrl}
-            title="Descargar audio (WAV, solo voz)"
-            aria-label="Descargar audio"
-            className="flex-1 flex flex-col items-center justify-center hover:bg-white hover:text-black transition-colors disabled:opacity-40 group"
-          >
-            <Download size={14} className="mb-0.5" />
-            <span className="text-[8px] uppercase text-zinc-600 group-hover:text-black">WAV</span>
-          </button>
+        <div className="flex justify-between mt-1.5 font-mono text-[11px] text-muted tabular-nums">
+          <span>{formatTime(currentTime)}</span>
+          <span>{formatTime(duration)}</span>
         </div>
       </div>
 
-      <div className="grid grid-cols-2">
+      {/* Controls */}
+      <div className="flex items-center gap-2.5 px-4 pb-3.5 pt-1">
         <button
           onClick={togglePlay}
           disabled={!speechUrl}
-          className="h-16 flex items-center justify-center gap-2 border-r border-zinc-800 hover:bg-white hover:text-black transition-colors disabled:opacity-50 group"
+          aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
+          className="flex-none w-12 h-12 rounded-full bg-accent text-ink grid place-items-center hover:brightness-105 active:brightness-95 disabled:opacity-50 transition"
         >
-          {isPlaying ? <Pause size={20} className="fill-current" /> : <Play size={20} className="fill-current" />}
-          <span className="font-display font-bold uppercase tracking-wider text-sm">{isPlaying ? 'Parar' : 'Repr.'}</span>
+          {isPlaying ? <Pause size={20} className="fill-current" /> : <Play size={20} className="fill-current translate-x-[1px]" />}
         </button>
+
+        {!hideTrackInfo ? (
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 text-[13px] font-medium text-fg">
+              {isPlaying ? <Sparkles size={13} className="text-muted flex-none animate-pulse" /> : <Activity size={13} className="text-faint flex-none" />}
+              <span className="truncate">{scene.recipe.label}</span>
+            </div>
+            {/* Shown even at 0: a silent bed used to be indistinguishable from a
+                quiet one, which is how "no stem ever loads" went unnoticed. */}
+            <div className="font-mono text-[11px] text-faint mt-0.5 tabular-nums">
+              Ambiente · {stemsLoaded}/{totalStems} capas
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1" />
+        )}
+
         <button
           onClick={reset}
           disabled={!speechUrl}
-          className="h-16 flex items-center justify-center gap-2 hover:bg-white hover:text-black transition-colors disabled:opacity-50 group"
+          title="Reiniciar"
+          aria-label="Reiniciar"
+          className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition group"
         >
-          <RotateCcw size={20} className="group-hover:rotate-[-45deg] transition-transform" />
-          <span className="font-display font-bold uppercase tracking-wider text-sm">Reset</span>
+          <RotateCcw size={17} className="group-hover:-rotate-45 transition-transform" />
+        </button>
+        <button
+          onClick={() => {
+            const ci = SPEEDS.indexOf(playbackRate);
+            const ni = (ci + 1) % SPEEDS.length;
+            setPlaybackRate(SPEEDS[ni]);
+          }}
+          title="Velocidad de reproducción"
+          className="flex-none h-9 px-2.5 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 transition font-mono text-[12px] font-bold tabular-nums"
+        >
+          {playbackRate}x
+        </button>
+        <button
+          onClick={() => setShowMixer((v) => !v)}
+          aria-expanded={showMixer}
+          title="Ajustes de ambiente"
+          aria-label="Ajustes de ambiente"
+          className={`flex-none w-9 h-9 rounded-lg grid place-items-center transition ${showMixer ? 'text-fg bg-panel-2' : 'text-muted hover:text-fg hover:bg-panel-2'}`}
+        >
+          <SlidersHorizontal size={17} />
+        </button>
+        <button
+          onClick={handleDownload}
+          disabled={!speechUrl}
+          title="Descargar audio (WAV, solo voz)"
+          aria-label="Descargar audio"
+          className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition"
+        >
+          <Download size={16} />
         </button>
       </div>
+
+      {/* Ambience mixer (collapsible) */}
+      {showMixer && (
+        <div className="border-t border-line-soft px-4 py-3.5 grid gap-3.5">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setPref({ muted: !prefs.muted })}
+              className="flex-none text-muted hover:text-fg transition-colors"
+              title={prefs.muted ? 'Activar ambiente' : 'Silenciar ambiente'}
+              aria-label={prefs.muted ? 'Activar ambiente' : 'Silenciar ambiente'}
+            >
+              {prefs.muted ? <VolumeX size={16} className="text-faint" /> : <Volume2 size={16} />}
+            </button>
+            <span className="flex-none w-12 font-mono text-[10px] uppercase tracking-[0.1em] text-faint">Vol</span>
+            <input
+              type="range" min="0" max="1.0" step="0.05"
+              value={prefs.volume}
+              onChange={(e) => setPref({ volume: parseFloat(e.target.value), muted: false })}
+              className="flex-1 min-w-0"
+              disabled={prefs.muted}
+              title="Volumen del ambiente"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <Radio size={16} className="flex-none text-muted" />
+            <span className="flex-none w-12 font-mono text-[10px] uppercase tracking-[0.1em] text-faint">Int</span>
+            <input
+              type="range" min="0" max="1.0" step="0.05"
+              value={prefs.intensity}
+              onChange={(e) => setPref({ intensity: parseFloat(e.target.value) })}
+              className="flex-1 min-w-0"
+              title="Intensidad del ambiente (frecuencia y nivel de los eventos)"
+            />
+          </div>
+          <div className="flex items-center gap-3">
+            <Activity size={16} className="flex-none text-muted" />
+            <span className="flex-none w-12 font-mono text-[10px] uppercase tracking-[0.1em] text-faint">Duck</span>
+            <input
+              type="range" min="0" max="1.0" step="0.05"
+              value={prefs.ducking}
+              onChange={(e) => setPref({ ducking: parseFloat(e.target.value) })}
+              className="flex-1 min-w-0"
+              title="Ducking (reduce el ambiente cuando hay voz)"
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 };
