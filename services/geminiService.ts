@@ -941,14 +941,15 @@ PRINCIPIOS INNEGOCIABLES:
 - Cada ejercicio incluye "sourceTurns": el array de índices (base 0) de los turnos del diálogo en los que se apoya.
 - Todas las opciones, filas, columnas y campos llevan "id" único, y "correctAnswer" SIEMPRE referencia esos ids, nunca textos. Excepción: en "dictation" no hay ids y "correctAnswer" es el texto del dato.
 - Redacta enunciados y opciones en español, adaptados a la variante regional indicada.
+- La "explanation" es una sola frase breve. No repitas el enunciado ni cites el diálogo entero.
 
 FORMATOS QUE DEBES USAR:
 ${formatBlock}
 
-GENERA EXACTAMENTE ESTOS ${slots.length} EJERCICIOS, EN ESTE ORDEN, cada uno con su "slotId", "stage" y "skill" copiados tal cual:
+GENERA EXACTAMENTE ESTOS ${slots.length} EJERCICIOS, EN ESTE ORDEN, cada uno con su "slotId" copiado tal cual (la etapa y la habilidad las fija el sistema por la posición; NO las incluyas en el JSON):
 ${slotBlock}
 
-Devuélvelos en el array "exercises" en ese mismo orden.`;
+Devuélvelos en el array "exercises" en ese mismo orden y sólo con los campos del formato indicado.`;
 };
 
 /**
@@ -1259,21 +1260,19 @@ export const generateLessonPlan = async (
       - Léxico cotidiano, instituciones, comidas, transporte y realia coherentes con la región (p. ej. auto/coche/carro, departamento/piso, celular/móvil, documento de identidad local).
       - Nombres propios, topónimos y referencias verosímiles para la región.`;
 
-  const jsonStructure = `
-  {
-    "title": "String",
-    "situationDescription": "String",
-    "communicativeFunction": "String",
-    "ambientKeywords": "String",
-    "ambientScene": "String",
-    "characters": [{ "name": "String", "gender": "Male" | "Female", "tone": "String" }],
-    "dialogue": [{ "speaker": "String", "text": "String", "emotion": "String" }],
-    "exercises": [
-      { "id": "ex1", "slotId": "...", "stage": "...", "skill": "...", "type": "...", "question": "...", "explanation": "...", "sourceTurns": [0], "correctAnswer": "..." }
-    ]
-  }
+  // El JSON se pide COMPACTO (sin sangría ni saltos de línea): en una lección
+  // Largo el 24% de la salida eran espacios de formato, y la salida es lo que
+  // marca el tiempo de generación (el modelo decodifica ~400 car/s). Minificar
+  // recorta ~40% de los tokens de salida sin tocar el contenido.
+  //
+  // Los ejercicios NO llevan "stage", "skill" ni "id": el ensamblado
+  // (`fillMissingSlots`) los reescribe desde el blueprint por su posición, así
+  // que pedírselos al modelo era salida desperdiciada (y una copia más que
+  // podía salir mal). Se conserva "slotId" porque es lo que empareja cada
+  // ejercicio con su hueco cuando dos slots comparten formato.
+  const jsonStructure = `{"title":"String","situationDescription":"String","communicativeFunction":"String","ambientKeywords":"String","ambientScene":"String","characters":[{"name":"String","gender":"Male"|"Female","tone":"String"}],"dialogue":[{"speaker":"String","text":"String","emotion":"String"}],"exercises":[{"slotId":"...","type":"...","question":"...","explanation":"...","sourceTurns":[0],"correctAnswer":"..."}]}
   La forma concreta de cada ejercicio depende de su "type": usa exactamente el JSON indicado para ese formato en EXERCISES.
-  `;
+  IMPORTANTE: devuelve el JSON COMPACTO, en una sola línea, sin sangría ni saltos de línea innecesarios. No pongas espacios entre tokens del JSON; conserva intactos los espacios DENTRO de los valores de texto (frases, opciones, diálogo).`;
 
   // El ambiente sonoro se elige de una lista cerrada de escenas, no con palabras
   // libres. Antes se pedían "3 keywords" sin restricción y el reproductor sólo las
@@ -1388,7 +1387,7 @@ export const generateLessonPlan = async (
             model,
             contents: prompt,
             config: {
-              systemInstruction: "Expert Spanish Linguist. Minimalist JSON response only.",
+              systemInstruction: "Expert Spanish Linguist. Respond with ONLY compact minified JSON: a single line, no indentation, no line breaks, no spaces between JSON tokens. Preserve spaces inside string values (sentences, options, dialogue) exactly.",
               responseMimeType: "application/json",
               temperature: parseRetryBump ? 0.4 : 0.0,
               // Sin esto el modelo pensante razona con presupuesto dinámico y
