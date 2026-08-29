@@ -131,13 +131,35 @@ export function repairJson(input: string): string {
         continue;
       }
       if (ch === '"') {
-        // ¿Cierra de verdad? Lo siguiente significativo debe ser , : } ] o fin.
+        // ¿Cierra de verdad? Lo siguiente significativo debe ser : } ] o fin —
+        // o una coma que de verdad separa valores.
         let j = i + 1;
         while (j < input.length && /\s/.test(input[j])) j++;
         const next = input[j];
-        if (j >= input.length || next === "," || next === ":" || next === "}" || next === "]") {
+        if (j >= input.length || next === ":" || next === "}" || next === "]") {
           out.push('"');
           inString = false;
+        } else if (next === ",") {
+          // Una coma es ambigua: puede separar dos valores ("a","b") o estar
+          // DENTRO del texto ("dijo "sí", claro"). El desempate: tras una coma
+          // que separa valores, lo que sigue en JSON válido es una clave o un
+          // valor (", { [ - dígito true/false/null) o el fin (respuesta cortada).
+          // Si en cambio sigue una palabra, la comilla era del texto —este es el
+          // «Expected ',' or '}'» que el minificado del modelo provocaba.
+          let m = j + 1;
+          while (m < input.length && /\s/.test(input[m])) m++;
+          const after = input[m];
+          const separatesValues =
+            m >= input.length ||
+            after === '"' || after === "{" || after === "[" || after === "-" ||
+            (after >= "0" && after <= "9") ||
+            after === "t" || after === "f" || after === "n";
+          if (separatesValues) {
+            out.push('"');
+            inString = false;
+          } else {
+            out.push('\\"');
+          }
         } else {
           // Comilla incrustada en el texto: se escapa y seguimos dentro.
           out.push('\\"');

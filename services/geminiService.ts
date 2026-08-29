@@ -1260,10 +1260,18 @@ export const generateLessonPlan = async (
       - Léxico cotidiano, instituciones, comidas, transporte y realia coherentes con la región (p. ej. auto/coche/carro, departamento/piso, celular/móvil, documento de identidad local).
       - Nombres propios, topónimos y referencias verosímiles para la región.`;
 
-  // El JSON se pide COMPACTO (sin sangría ni saltos de línea): en una lección
-  // Largo el 24% de la salida eran espacios de formato, y la salida es lo que
-  // marca el tiempo de generación (el modelo decodifica ~400 car/s). Minificar
-  // recorta ~40% de los tokens de salida sin tocar el contenido.
+  // El JSON se pide sin sangría (no pretty-print): en una lección Largo la
+  // sangría y los saltos de línea eran ~1/4 de la salida, y la salida es lo que
+  // marca el tiempo de generación (el modelo decodifica ~400 car/s). Eso es todo
+  // lo que se le pide de compacidad y nada más.
+  //
+  // Lo que NO se le pide es que "minifique" quitando los espacios entre tokens:
+  // esa instrucción (la del PR anterior) sacaba al modelo del patrón de JSON que
+  // sabe generar bien y le hacía perder la cuenta de comas y comillas, sobre todo
+  // a los modelos de reserva más flojos. El resultado era JSON inválido → la
+  // lección se regeneraba entera (2/3, 3/3): lento Y con error. El ahorro de esos
+  // espacios (uno por coma/dos-puntos) es marginal; el coste de un JSON roto es
+  // una generación completa. La VALIDEZ manda sobre la compacidad.
   //
   // Los ejercicios NO llevan "stage", "skill" ni "id": el ensamblado
   // (`fillMissingSlots`) los reescribe desde el blueprint por su posición, así
@@ -1272,7 +1280,7 @@ export const generateLessonPlan = async (
   // ejercicio con su hueco cuando dos slots comparten formato.
   const jsonStructure = `{"title":"String","situationDescription":"String","communicativeFunction":"String","ambientKeywords":"String","ambientScene":"String","characters":[{"name":"String","gender":"Male"|"Female","tone":"String"}],"dialogue":[{"speaker":"String","text":"String","emotion":"String"}],"exercises":[{"slotId":"...","type":"...","question":"...","explanation":"...","sourceTurns":[0],"correctAnswer":"..."}]}
   La forma concreta de cada ejercicio depende de su "type": usa exactamente el JSON indicado para ese formato en EXERCISES.
-  IMPORTANTE: devuelve el JSON COMPACTO, en una sola línea, sin sangría ni saltos de línea innecesarios. No pongas espacios entre tokens del JSON; conserva intactos los espacios DENTRO de los valores de texto (frases, opciones, diálogo).`;
+  IMPORTANTE: la prioridad ABSOLUTA es que el JSON sea VÁLIDO y parseable — comillas dobles bien cerradas y escapadas (\\" dentro del texto), comas correctas, sin comas de más. Para ahorrar espacio, no uses sangría ni saltos de línea decorativos (JSON sin pretty-print); pero mantén el JSON normal y correcto, sin sacrificar la validez por compactarlo.`;
 
   // El ambiente sonoro se elige de una lista cerrada de escenas, no con palabras
   // libres. Antes se pedían "3 keywords" sin restricción y el reproductor sólo las
@@ -1387,7 +1395,7 @@ export const generateLessonPlan = async (
             model,
             contents: prompt,
             config: {
-              systemInstruction: "Expert Spanish Linguist. Respond with ONLY compact minified JSON: a single line, no indentation, no line breaks, no spaces between JSON tokens. Preserve spaces inside string values (sentences, options, dialogue) exactly.",
+              systemInstruction: "Expert Spanish Linguist. Respond with ONLY a single valid JSON object. Valid, parseable JSON is the top priority: escape every double quote inside string values as \\\", never leave a string unterminated, use correct commas. To save space, do not pretty-print (no indentation, no decorative line breaks) — but keep it well-formed JSON; never sacrifice validity for compactness.",
               responseMimeType: "application/json",
               temperature: parseRetryBump ? 0.4 : 0.0,
               // Sin esto el modelo pensante razona con presupuesto dinámico y
