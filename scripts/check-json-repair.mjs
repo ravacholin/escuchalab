@@ -75,6 +75,41 @@ const eq = (label, actual, expected) =>
   eq('comilla incrustada: resto intacto', r.value.n, 2);
 }
 
+// --- Comilla incrustada SEGUIDA DE COMA (el fallo real de producción). ---
+// «Expected ',' or '}' after property value»: el modelo escribía una cita dentro
+// del texto y el heurístico ingenuo cerraba la cadena en la coma que venía
+// después. Tras una coma que separa valores, en JSON válido sigue una clave/valor
+// (", { [ dígito…) o el fin; una palabra delata que la comilla era del texto.
+{
+  const raw = '{"a":"dijo "sí", claro","b":1}';
+  const r = parseLenientJson(raw);
+  check('comilla + coma incrustadas se reparan', r.repaired === true);
+  eq('comilla + coma: texto recuperado', r.value.a, 'dijo "sí", claro');
+  eq('comilla + coma: resto intacto', r.value.b, 1);
+}
+
+// --- Cita al final del valor, seguida de coma y siguiente clave. ---
+{
+  const raw = '{"question":"¿Qué significa "vale"?","type":"mc"}';
+  const r = parseLenientJson(raw);
+  eq('cita antes de coma+clave: pregunta', r.value.question, '¿Qué significa "vale"?');
+  eq('cita antes de coma+clave: type', r.value.type, 'mc');
+}
+
+// --- Coma legítima entre dos strings de un array no se toca. ---
+{
+  const r = parseLenientJson('{"xs":["uno","dos","tres"]}');
+  eq('array de strings intacto', r.value, { xs: ['uno', 'dos', 'tres'] });
+}
+
+// --- Truncamiento justo tras una coma de valor. ---
+{
+  const raw = '{"a":"foo",';
+  const r = parseLenientJson(raw);
+  check('truncada tras coma se cierra', r.repaired === true);
+  eq('truncada tras coma: valor recuperado', r.value.a, 'foo');
+}
+
 // --- Salto de línea crudo dentro de una cadena. ---
 {
   const raw = '{"text":"línea uno\nlínea dos"}';
