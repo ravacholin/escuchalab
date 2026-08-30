@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode } from './types';
+import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode, LessonPlan } from './types';
 import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
 import { generateLessonPlan, generateAudio } from './services/geminiService';
 import { ProgressSnapshot } from './services/generationProgress';
@@ -41,6 +41,13 @@ const getSpeedForLevel = (level: Level): number => {
     // User requested natural speed for all levels, no "slow motion"
     return 1.0;
 };
+
+// ¿El diálogo con el que se lanzó el TTS pronto sigue siendo el de la lección
+// final? Solo turno a turno (hablante + texto): si un reintento cambió el guion,
+// hay que descartar ese audio y regenerar sobre el diálogo definitivo.
+const dialoguesEqual = (a: LessonPlan['dialogue'], b: LessonPlan['dialogue']): boolean =>
+    a.length === b.length &&
+    a.every((line, i) => line.speaker === b[i].speaker && line.text === b[i].text);
 
 // Recuerda el último nivel elegido por el usuario para que sea el default la próxima vez.
 const DEFAULT_LEVEL_KEY = 'escuchalab_default_level';
@@ -347,6 +354,13 @@ const App: React.FC = () => {
                 }
             }
 
+            // El TTS solo necesita diálogo + personajes, no los ejercicios. En
+            // cuanto el diálogo termina de llegar por el stream, se arranca el
+            // audio en paralelo con la cola del plan (ejercicios + verificación),
+            // en vez de esperar a toda la lección. Mismo completion, mismo
+            // contenido: solo se solapan las dos fases.
+            let earlyAudio: { dialogue: LessonPlan['dialogue']; promise: Promise<string> } | null = null;
+
             const plan = await generateLessonPlan(
                 state.config.level,
                 finalTopic,
@@ -355,7 +369,19 @@ const App: React.FC = () => {
                 state.config.accent,
                 state.config.mode,
                 trackProgress,
-                { audio: trimmedAudioPrompt, exercises: trimmedExercisePrompt }
+                { audio: trimmedAudioPrompt, exercises: trimmedExercisePrompt },
+                {
+                    onDialogueReady: (dialogue, characters) => {
+                        const promise = generateAudio(dialogue, characters, state.config.accent, trackProgress);
+                        // Si el plan acaba lanzando (p. ej. reintentos por JSON agotados)
+                        // tras haber arrancado el audio, esta promesa queda huérfana: el
+                        // .catch evita un "unhandled rejection". Aun así, `await promise`
+                        // más abajo sigue propagando el fallo al camino de audioError.
+                        promise.catch(() => {});
+                        earlyAudio = { dialogue, promise };
+                        setState(prev => ({ ...prev, status: 'generating_audio' }));
+                    }
+                }
             );
 
             setState(prev => ({
@@ -366,12 +392,24 @@ const App: React.FC = () => {
             }));
 
             try {
-                const audioUrl = await generateAudio(
-                    plan.dialogue,
-                    plan.characters,
-                    state.config.accent,
-                    trackProgress
-                );
+                let audioUrl: string;
+                // Si el audio ya venía corriendo y el diálogo final coincide con el
+                // que lo lanzó, se aprovecha esa promesa. Si no arrancó pronto, o el
+                // diálogo cambió en un reintento (raro con temperature 0), se genera
+                // en secuencia — nunca se envía audio de un diálogo obsoleto.
+                const pending = earlyAudio as { dialogue: LessonPlan['dialogue']; promise: Promise<string> } | null;
+                if (pending && dialoguesEqual(pending.dialogue, plan.dialogue)) {
+                    audioUrl = await pending.promise;
+                } else {
+                    // El audio no arrancó pronto, o el diálogo cambió en un reintento:
+                    // la promesa temprana (si la hay) ya tiene su .catch y se descarta.
+                    audioUrl = await generateAudio(
+                        plan.dialogue,
+                        plan.characters,
+                        state.config.accent,
+                        trackProgress
+                    );
+                }
                 setState(prev => ({
                     ...prev,
                     audioBlob: audioUrl,
