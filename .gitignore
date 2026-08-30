@@ -24,6 +24,7 @@ dist-ssr
 *.sw?
 .env
 .check-audio-*/
+.check-early-audio-*/
 
 # Offline ambience auditions (npm run ambience:preview)
 .ambience-preview/

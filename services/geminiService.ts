@@ -1133,6 +1133,39 @@ const plural = (n: number, singular: string, pluralForm: string) =>
 
 // --- MAIN GENERATOR ---
 
+/**
+ * En el límite diálogo→ejercicios del stream (el JSON ya trae title+characters+
+ * dialogue y acaba de abrir "exercises"), intenta extraer un diálogo YA
+ * despachable para arrancar el TTS en paralelo con la cola del plan. Parsea solo
+ * el prefijo cerrado (todo lo anterior a "exercises"). Devuelve `null` —y el audio
+ * sale luego en secuencia, como siempre— si:
+ *   - el prefijo aún no parsea (llegó cortado a mitad de un valor),
+ *   - no hay turnos de diálogo, o
+ *   - el diálogo excede el tope de hablantes (será rechazado y regenerado por el
+ *     reintento de número de hablantes, así que no hay que gastar TTS todavía).
+ * Es una función pura para poder fijarla offline sin tocar la red.
+ */
+export function extractDispatchableDialogue(
+  full: string,
+  speakerCap: number
+): { dialogue: LessonPlan['dialogue']; characters: Character[] } | null {
+  const cut = full.lastIndexOf('"exercises"');
+  if (cut <= 0) return null;
+  const prefix = full.slice(0, cut).replace(/,\s*$/, '') + '}';
+  try {
+    const { value: partial } = parseLenientJson<LessonPlan>(prefix);
+    const dialogue = Array.isArray(partial?.dialogue) ? partial.dialogue : [];
+    const characters = Array.isArray(partial?.characters) ? partial.characters : [];
+    const speakers = new Set(dialogue.map(d => d.speaker?.trim()).filter(Boolean));
+    if (dialogue.length > 0 && speakers.size > 0 && speakers.size <= speakerCap) {
+      return { dialogue, characters };
+    }
+  } catch {
+    // Prefijo aún no parseable: se ignora.
+  }
+  return null;
+}
+
 export const generateLessonPlan = async (
   level: Level,
   topic: string,
@@ -1151,7 +1184,15 @@ export const generateLessonPlan = async (
    * tope duro solo se levanta hasta `MAX_SPEAKERS` cuando hay un prompt de audio,
    * y el modelo solo lo supera si el propio usuario lo pide (ver SPEAKERS).
    */
-  customPrompts?: { audio?: string; exercises?: string }
+  customPrompts?: { audio?: string; exercises?: string },
+  /**
+   * Enganches de orquestación. `onDialogueReady` se dispara UNA sola vez, en cuanto
+   * el diálogo termina de llegar por el stream (antes de que se emitan/verifiquen los
+   * ejercicios), para que quien llama pueda arrancar el TTS en paralelo con la cola
+   * del plan. Sólo se dispara sobre un diálogo ya bien formado y dentro del tope de
+   * hablantes, así que nunca coincide con el reintento por exceso de hablantes.
+   */
+  hooks?: { onDialogueReady?: (dialogue: LessonPlan['dialogue'], characters: Character[]) => void }
 ): Promise<LessonPlan> => {
 
   const reporter = new ProgressReporter('plan', PLAN_STEPS, onProgress);
@@ -1314,6 +1355,12 @@ export const generateLessonPlan = async (
   // a 0.0 el modelo es casi determinista y repetiría el mismo carácter roto.
   let parseRetryBump = false;
 
+  // El diálogo se despacha como muy pronto una sola vez POR GENERACIÓN (no por
+  // intento): así un reintento por JSON inválido tras un despacho válido no arranca
+  // un segundo TTS en paralelo. En cuanto el stream cruza a "exercises" ya tenemos
+  // title+characters+dialogue completos.
+  let dialogueDispatched = false;
+
   // Auto-retry loop for multi-speaker validation
   const MAX_SPEAKER_RETRIES = 3;
   for (let attempt = 1; attempt <= MAX_SPEAKER_RETRIES; attempt++) {
@@ -1417,6 +1464,15 @@ export const generateLessonPlan = async (
                 exercisesStarted = true;
                 reporter.finish('dialogue', plural(turnsSeen, 'turno recibido', 'turnos recibidos'));
                 reporter.start('exercises');
+
+                // El diálogo ya llegó entero: se intenta arrancar el TTS en paralelo.
+                if (!dialogueDispatched && hooks?.onDialogueReady) {
+                  const ready = extractDispatchableDialogue(full, speakerCap);
+                  if (ready) {
+                    dialogueDispatched = true;
+                    hooks.onDialogueReady(ready.dialogue, ready.characters);
+                  }
+                }
               }
 
               if (!exercisesStarted) {
