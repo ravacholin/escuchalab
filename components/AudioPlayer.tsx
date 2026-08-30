@@ -373,9 +373,28 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     if (ctx) setupSpeechProcessing(speechRef.current);
     const p = speechRef.current.play();
     if (p && typeof p.catch === 'function') p.catch(() => {});
-    startAmbience();
-    startDuckingLoop();
-  }, [ensureAudioContext, setupSpeechProcessing, startAmbience, startDuckingLoop]);
+    // Ambience is NOT started here: on the first play the fresh AudioContext, the
+    // one-shot createMediaElementSource and the context resume all delay the moment
+    // the voice actually begins by a second or two, while the ambience — fired
+    // synchronously right after play() — came in immediately, so the bed started
+    // ahead of the voice and the illusion broke. (On replay everything is warm and
+    // they lined up, which is why the second press sounded right.) Instead the
+    // ambience is started from the <audio> element's `playing` event, i.e. the
+    // instant the voice is really producing sound. See handleSpeechPlaying.
+  }, [ensureAudioContext, setupSpeechProcessing]);
+
+  // Fired by the <audio> element when playback is actually producing sound (after
+  // any first-play buffering/resume latency), so the ambience bed enters in step
+  // with the voice rather than seconds before it. The `!engineRef.current` guard
+  // keeps a mid-playback `playing` (e.g. after a seek) from restarting the bed;
+  // pause/resume clears the engine, so resuming re-syncs the bed to the voice too.
+  const handleSpeechPlaying = useCallback(() => {
+    setIsPlaying(true);
+    if (!engineRef.current) {
+      startAmbience();
+      startDuckingLoop();
+    }
+  }, [startAmbience, startDuckingLoop]);
 
   const togglePlay = () => {
     if (!speechRef.current) return;
@@ -507,6 +526,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           onLoadedMetadata={onLoadedMetadata}
           onEnded={onEnded}
           onPlay={() => setIsPlaying(true)}
+          onPlaying={handleSpeechPlaying}
           onPause={() => setIsPlaying(false)}
         />
       )}
