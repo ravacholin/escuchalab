@@ -61,6 +61,8 @@ const {
 } = await loadModule('services/geminiService.ts');
 const { checkTwoVoices, segmentPitches } = await loadModule('services/ttsVoiceCheck.ts');
 const { splitIntoTurns } = await loadModule('services/ttsTurnSplit.ts');
+const { AUDIO_MODELS, isModelError, isNetworkError, runWithModelFallback } =
+  await loadModule('services/modelFallback.ts');
 const { Accent } = await loadModule('types.ts');
 
 const failures = [];
@@ -463,6 +465,66 @@ for (const accent of Object.values(Accent)) {
   check('una respuesta vacía no se confunde con cuota', !isQuotaError(new Error('la API devolvió una respuesta vacía')));
 }
 
+// --- 10b. Cadena de modelos de voz (fallback) ----------------------------
+// El audio tenía un solo modelo a propósito; cuando se caía (503) no había
+// alternativa y no se generaba nada. Ahora hay cadena, consistente dentro de
+// una lección (un solo modelo resuelto para todas sus peticiones).
+{
+  check('el modelo de voz primario es gemini-3.1-flash-tts-preview',
+    AUDIO_MODELS[0] === 'gemini-3.1-flash-tts-preview', AUDIO_MODELS.join(', '));
+  check('la cadena de voz incluye el alternativo comprobado gemini-2.5-flash-preview-tts',
+    AUDIO_MODELS.includes('gemini-2.5-flash-preview-tts'));
+  // El pro-tts da limit:0 en el nivel gratuito (siempre 429): no debe estar en
+  // la cadena de una app pensada para el nivel gratuito.
+  check('la cadena de voz no incluye ningún modelo pro (limit:0 en free tier)',
+    !AUDIO_MODELS.some(m => m.includes('pro')), AUDIO_MODELS.join(', '));
+
+  // Un 503/500/404/429 es error del modelo: sube tal cual desde
+  // `synthesizeWithProgress` para que la lección baje de escalón.
+  check('un 503 de saturación es error del modelo (cambia de modelo)',
+    isModelError(new Error('503 The model is overloaded')));
+  check('un 429 de cuota es error del modelo (cambia de modelo)',
+    isModelError({ status: 429, message: 'RESOURCE_EXHAUSTED' }));
+  // Un fallo de red no baja de escalón por sí solo (mismo host en toda la
+  // cadena): lo reintenta la escalera interna, no un cambio de modelo.
+  check('un fallo de red no es, por sí solo, error del modelo',
+    isNetworkError(new Error('Failed to fetch')) && !isModelError(new Error('Failed to fetch')));
+
+  // La lección resuelve un solo modelo para todas sus peticiones.
+  const calls = [];
+  const primaryDown = await runWithModelFallback(
+    AUDIO_MODELS,
+    async (model) => {
+      calls.push(model);
+      if (model === AUDIO_MODELS[0]) throw new Error('503 The model is overloaded');
+      return `audio-de-${model}`;
+    }
+  );
+  check('un 503 en el primario cae al segundo modelo con un solo cambio',
+    primaryDown.model === AUDIO_MODELS[1] && calls.length === 2 &&
+      calls[0] === AUDIO_MODELS[0] && calls[1] === AUDIO_MODELS[1],
+    calls.join(' → '));
+
+  let cheapCalls = 0;
+  const cheap = await runWithModelFallback(AUDIO_MODELS, async (model) => {
+    cheapCalls++;
+    return `audio-de-${model}`;
+  });
+  check('la ruta normal cuesta una sola resolución de modelo, sin cambios',
+    cheapCalls === 1 && cheap.model === AUDIO_MODELS[0], `${cheapCalls} llamadas`);
+
+  // Cadena agotada: relanza el último error (no se traga el fallo).
+  let threw = false;
+  try {
+    await runWithModelFallback(AUDIO_MODELS, async () => {
+      throw new Error('503 unavailable');
+    });
+  } catch (e) {
+    threw = /503|unavailable/.test(e.message);
+  }
+  check('con toda la cadena de voz caída se relanza el error', threw);
+}
+
 // --- 11. Recuperar los turnos del bloque de cada voz ---------------------
 // Lo que se paga por no medir-y-repetir: cada voz vuelve en un bloque continuo
 // y hay que partirlo. Nunca puede costar otra petición, así que la salida de
@@ -597,5 +659,6 @@ console.log(
     'verificador de voces que distingue un audio a dos voces de uno a una sola, ' +
     'coste fijo de 2 peticiones por diálogo en los 8 acentos sin reintentos, ' +
     'errores de cuota distinguidos de los de red, ' +
+    'cadena de modelos de voz con fallback (503/429 cambian de modelo, red no; un solo modelo por lección), ' +
     'y recuperación de los turnos del bloque de cada voz (por silencio medido y, sin silencios, por reparto)'
 );

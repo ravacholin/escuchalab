@@ -616,11 +616,36 @@ verifier and the deterministic engines guard the output, not the depth of the re
 `check:fallback` asserts every model in the chain receives a bounded (never dynamic/`-1`,
 never `high`) config. The TTS path is untouched — `AUDIO_MODEL` does not think.
 
-**`AUDIO_MODEL` deliberately has no chain**: `"gemini-3.1-flash-tts-preview"`, one model, the
-fixed 2-request cost intact (fallback if unstable: `"gemini-2.5-flash-preview-tts"`, which is
-also what `scripts/measure-tts-voices.mjs` defaults to). Adding a chain there would mean two
-speakers of one lesson possibly synthesised by different models, and the `TTS_VOICES` pitch
-table is measured against one model.
+**`AUDIO_MODELS` is now a short chain, not a single model** (`services/modelFallback.ts`):
+`"gemini-3.1-flash-tts-preview"` → `"gemini-2.5-flash-preview-tts"`. For a long time the TTS
+was deliberately one model — the fixed 2-request cost, and the fear that two speakers of one
+lesson might be synthesised by different models — but when the primary went down (`503`) there
+was **no alternative and no audio at all**, the same hole the text chain already closed.
+Availability wins: audio with voices a hair less separated beats no audio. The chain answers
+that while keeping the old worry moot — **the model is resolved once per lesson**, so both of a
+lesson's requests (one per speaker) always use the same one; there are never two voices of a
+dialogue on two models. The only thing a switch can leave slightly stale is the `pitchHz` table
+(measured against the primary), which affects the `checkTwoVoices` diagnostic and the
+voice-separation margin, never correctness. `AUDIO_MODEL` in `geminiService.ts` is just the
+chain's first rung — the one always tried first and named on the loading screen.
+- **Only *model* errors switch.** `synthesizeWithProgress()` now rethrows a 503/500/404 as well
+  as a 429 immediately (before, only the 429 bubbled and a 503 burned the two streaming
+  attempts plus the non-streaming fallback against the dead model), so `runWithModelFallback`
+  drops to the next TTS model. A raw network error or timeout does **not** switch — the internal
+  ladder retries it against the same model, and since the whole chain shares one host, another
+  model would not fix a dead connection, only redo two requests per rung for nothing.
+- **A 429 switches but is still never retried**, same as the text chain: free-tier limits are
+  per model, so the next rung arrives with its own daily quota intact.
+- **`gemini-2.5-pro-preview-tts` is deliberately *not* in the chain.** Measured against the API
+  (August 2026, free-tier key) it returns `429` with `limit: 0` on
+  `GenerateRequestsPerDayPerProjectPerModel-FreeTier` for `gemini-2.5-pro-tts` — i.e. zero
+  free-tier requests, always. Since the whole app is built for the free tier, adding it would
+  only cost a wasted round trip; a maintainer with billing enabled can append it as a last rung.
+- `check:audio` pins the chain: the primary is first, the checked fallback is present, no `pro`
+  model is included, a 503/429 is a model error (switches) while a network error is not, a 503
+  on the primary lands on the second model with one switch, the normal path costs one model
+  resolution and zero switches, and an exhausted chain rethrows.
+- `scripts/measure-tts-voices.mjs` still defaults to `"gemini-2.5-flash-preview-tts"`.
 
 ## Important Notes
 

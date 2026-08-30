@@ -38,6 +38,44 @@ export const GENERATION_MODELS = [
 export type GenerationModel = (typeof GENERATION_MODELS)[number];
 
 /**
+ * Cadena de modelos de **voz** (TTS), por disponibilidad esperada.
+ *
+ * Durante mucho tiempo el audio no tuvo cadena a propósito: un solo modelo
+ * mantenía el coste fijo de dos peticiones y evitaba que los dos hablantes de
+ * una misma lección se sintetizaran con modelos distintos (la tabla de tonos
+ * `TTS_VOICES` está medida contra un modelo). Pero cuando el modelo primario se
+ * cayó (`503`) no había ningún alternativo y la app se quedaba **sin poder
+ * generar audio en absoluto** —el mismo agujero que la cadena de texto ya
+ * había tapado—. La disponibilidad pesa más que la pureza de la medida: un
+ * audio con las voces un pelo menos separadas es infinitamente mejor que
+ * ningún audio.
+ *
+ * El escalón sigue siendo consistente **dentro** de una lección: el modelo se
+ * resuelve una sola vez y las dos peticiones (una por hablante) usan el mismo,
+ * así que nunca hay dos voces de un diálogo sintetizadas por modelos distintos.
+ * Lo único que puede quedar algo desfasado tras un cambio es la tabla `pitchHz`
+ * (medida contra el primario), y eso solo afecta al diagnóstico `checkTwoVoices`
+ * y al margen de separación de voces, no a la corrección del audio.
+ *
+ * Comprobado contra la API (agosto de 2026) con una clave del nivel gratuito:
+ *  - `gemini-3.1-flash-tts-preview` — primario, responde con audio.
+ *  - `gemini-2.5-flash-preview-tts` — responde con audio; buen alternativo
+ *    (es también el que usa por defecto `scripts/measure-tts-voices.mjs`).
+ *  - `gemini-2.5-pro-preview-tts` — **fuera de la cadena a propósito**: en el
+ *    nivel gratuito da `limit: 0` (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`
+ *    para `gemini-2.5-pro-tts`), es decir cero peticiones; siempre devuelve 429.
+ *    Como toda la app está pensada para el nivel gratuito, incluirlo solo
+ *    añadiría una ida y vuelta perdida. Quien tenga facturación activada puede
+ *    añadirlo aquí como último escalón: la ruta de audio ya lo trataría bien.
+ */
+export const AUDIO_MODELS = [
+  'gemini-3.1-flash-tts-preview',
+  'gemini-2.5-flash-preview-tts'
+] as const;
+
+export type AudioModel = (typeof AUDIO_MODELS)[number];
+
+/**
  * Cómo limitar el "pensamiento" previo al primer token, por familia de modelo.
  *
  * El síntoma que arregla: el guion de la lección se pedía **sin ninguna
