@@ -357,7 +357,7 @@ function sanitizeForTTS(text: string): string {
 // IMPORTANTE: Cada perfil debe ser EXHAUSTIVO para garantizar pronunciación correcta
 const TTS_PHONETIC_PROFILES: Record<Accent, string> = {
   [Accent.Madrid]: `[TTS VOICE DIRECTIVE: CASTILIAN SPANISH - MADRID, CENTRAL SPAIN]
-MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+Native pronunciation guide — apply it naturally, the way a local really talks, without over-articulating.
 
 ═══════════════════════════════════════════════════════════════════════════════
 CRITICAL CONSONANT RULE #1: DISTINCIÓN (THETA SOUND θ)
@@ -406,13 +406,13 @@ PROSODY & INTONATION
 ═══════════════════════════════════════════════════════════════════════════════
 • TEMPO: Moderate, 4.5-5 syllables/second
 • RHYTHM: Syllable-timed, each syllable roughly equal duration
-• PITCH: Wide range, assertive rising-falling patterns
+• PITCH: Moderate range, natural rising-falling patterns
 • STATEMENTS: Start mid, rise slightly, fall at end
-• QUESTIONS: Sharp rise at final syllable
-• ATTITUDE: Direct, confident, authoritative`,
+• QUESTIONS: Gentle rise at final syllable
+• ATTITUDE: Plain and matter-of-fact, like ordinary everyday conversation`,
 
   [Accent.Andalusia]: `[TTS VOICE DIRECTIVE: ANDALUSIAN SPANISH - SEVILLE/CÁDIZ, WESTERN ANDALUSIA]
-MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+Native pronunciation guide — apply it naturally, the way a local really talks, without over-articulating.
 
 ═══════════════════════════════════════════════════════════════════════════════
 CRITICAL CONSONANT RULE #1: SESEO (NO THETA)
@@ -452,14 +452,14 @@ CRITICAL CONSONANT RULE #3: CONSONANT WEAKENING
 ═══════════════════════════════════════════════════════════════════════════════
 PROSODY & INTONATION
 ═══════════════════════════════════════════════════════════════════════════════
-• TEMPO: FAST, 6-7 syllables/second, flowing
+• TEMPO: Fairly quick, 6-7 syllables/second, flowing
 • RHYTHM: Stress-timed, words blend together
-• PITCH: Musical, sing-song quality
+• PITCH: Gently musical, natural sing-song lilt — not exaggerated
 • VOWELS: May lengthen to compensate for lost consonants
-• ATTITUDE: Warm, friendly, expressive, animated`,
+• ATTITUDE: Warm and friendly, in a relaxed everyday way`,
 
   [Accent.MexicoCity]: `[TTS VOICE DIRECTIVE: MEXICAN SPANISH - MEXICO CITY (CDMX/CHILANGO)]
-MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+Native pronunciation guide — apply it naturally, the way a local really talks, without over-articulating.
 
 ═══════════════════════════════════════════════════════════════════════════════
 CRITICAL CONSONANT RULE #1: FULL S-RETENTION [s]
@@ -515,7 +515,7 @@ PROSODY & INTONATION
 • ATTITUDE: Polite, courteous, indirect, warm`,
 
   [Accent.Bogota]: `[TTS VOICE DIRECTIVE: COLOMBIAN SPANISH - BOGOTÁ (ROLO/CACHACO)]
-MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+Native pronunciation guide — apply it naturally, the way a local really talks, without over-articulating.
 
 ═══════════════════════════════════════════════════════════════════════════════
 CRITICAL CONSONANT RULE #1: PRISTINE S-PRONUNCIATION [s]
@@ -550,23 +550,23 @@ Unlike other dialects, NOTHING is dropped or weakened.
 PROSODY & INTONATION - THE "ROLO" MELODY
 ═══════════════════════════════════════════════════════════════════════════════
 • TEMPO: SLOW TO MODERATE, 3.5-4.5 syllables/second
-• RHYTHM: DISTINCTIVE SING-SONG (cantadito)
+• RHYTHM: Gentle sing-song (cantadito), natural and understated
   - Rises and falls like gentle hills
-  - Each phrase has melodic arc
-• PITCH: Wide range, musical quality
-• ARTICULATION: Extremely clear, deliberate, careful
+  - Each phrase has a soft melodic arc
+• PITCH: Moderate range, softly musical
+• ARTICULATION: Clear but relaxed, never clipped or over-enunciated
 • VOWELS: Pure, clear, no reduction
 
 ═══════════════════════════════════════════════════════════════════════════════
 ATTITUDE & REGISTER
 ═══════════════════════════════════════════════════════════════════════════════
-• EXTREMELY polite and formal
+• Polite and courteous
 • Soft-spoken, never aggressive
 • Frequent use of "usted" even informally
 • Characteristic phrases: "con mucho gusto", "a la orden", "qué pena"`,
 
   [Accent.Caribbean]: `[TTS VOICE DIRECTIVE: CARIBBEAN SPANISH - PUERTO RICO/CUBA]
-MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+Native pronunciation guide — apply it naturally, the way a local really talks, without over-articulating.
 
 ═══════════════════════════════════════════════════════════════════════════════
 CRITICAL CONSONANT RULE #1: S-ASPIRATION TO [h]
@@ -613,28 +613,26 @@ OTHER CONSONANTS
 ═══════════════════════════════════════════════════════════════════════════════
 PROSODY & INTONATION
 ═══════════════════════════════════════════════════════════════════════════════
-• TEMPO: FAST, 6+ syllables/second
-• RHYTHM: HIGHLY MUSICAL with African-influenced percussion-like cadence
+• TEMPO: Quick, 6+ syllables/second
+• RHYTHM: Musical, with a natural percussion-like cadence
 • Words flow together rapidly
-• Animated, expressive pitch changes
-• Strong rises in questions
-• ATTITUDE: Lively, warm, enthusiastic, expressive`,
+• Natural, lively pitch changes — not overplayed
+• Gentle rises in questions
+• ATTITUDE: Warm and easygoing, like relaxed everyday talk`,
 
   [Accent.BuenosAires]: `[TTS VOICE DIRECTIVE: ARGENTINE SPANISH - BUENOS AIRES (RIOPLATENSE/PORTEÑO)]
-MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+Native pronunciation guide — apply it naturally, the way a local really talks, without over-articulating.
 
 ═══════════════════════════════════════════════════════════════════════════════
-██████████████████████████████████████████████████████████████████████████████
 CRITICAL CONSONANT RULE #1: SHEÍSMO - THE [ʃ] SOUND
-THIS IS THE SINGLE MOST IMPORTANT RULE. FAILURE = COMPLETE REJECTION.
-██████████████████████████████████████████████████████████████████████████████
 ═══════════════════════════════════════════════════════════════════════════════
 
-The letters "ll" and "y" (when not vowel) MUST be pronounced as [ʃ] -
-the VOICELESS POSTALVEOLAR FRICATIVE, exactly like English "SH" in "ship/show".
+The letters "ll" and "y" (when not vowel) are pronounced as [ʃ] -
+the voiceless postalveolar fricative, like English "sh" in "ship/show".
 
-THIS IS NON-NEGOTIABLE. This is the #1 defining feature of Buenos Aires Spanish.
-Younger speakers use [ʃ] (voiceless). Older speakers may use [ʒ] (voiced, like "measure").
+This is the #1 defining feature of Buenos Aires Spanish, and it should sound
+effortless and native, not forced. Younger speakers use [ʃ] (voiceless);
+older speakers may use [ʒ] (voiced, like "measure").
 
 ════════════════════════════════════════════════════════════════════════════
 EVERY "LL" AND "Y" = "SH" SOUND. MEMORIZE THESE:
@@ -656,8 +654,7 @@ EVERY "LL" AND "Y" = "SH" SOUND. MEMORIZE THESE:
 • "hoy" = [oʃ] → "OSH" ❌ WRONG: "oy"
 • "hay" = [aʃ] → "ASH" ❌ WRONG: "ay"
 
-IF YOU PRONOUNCE "Y" AS IN ENGLISH "YES", YOU HAVE FAILED COMPLETELY.
-THE SOUND IS "SH" LIKE "SHIP", "SHOW", "SHOUT".
+Do not pronounce "y" as in English "yes"; the sound is "sh" as in "ship/show".
 
 ═══════════════════════════════════════════════════════════════════════════════
 CRITICAL CONSONANT RULE #2: S-ASPIRATION
@@ -678,11 +675,11 @@ OTHER CONSONANTS
 ═══════════════════════════════════════════════════════════════════════════════
 PROSODY & INTONATION - ITALIAN INFLUENCE
 ═══════════════════════════════════════════════════════════════════════════════
-• TEMPO: Moderate, expressive
-• INTONATION: DRAMATIC RISES AND FALLS like Italian
-  - Almost singing quality
-  - Wide pitch range, theatrical
-  - Questions rise EXAGGERATEDLY at end
+• TEMPO: Moderate, naturally expressive
+• INTONATION: Gentle rises and falls with a slight Italian lilt
+  - A soft melodic quality, kept understated
+  - Moderate pitch range, natural not theatrical
+  - Questions rise at the end, without overdoing it
 • VOWELS: Final vowels may be slightly elongated
 • OPEN "e": [ɛ] in stressed syllables
 
@@ -693,7 +690,7 @@ Use "VOS" not "tú": "vos tenés", "vos querés", "vos sabés"
 Characteristic: "che", "dale", "viste", "boludo"`,
 
   [Accent.Santiago]: `[TTS VOICE DIRECTIVE: CHILEAN SPANISH - SANTIAGO]
-MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+Native pronunciation guide — apply it naturally, the way a local really talks, without over-articulating.
 
 ═══════════════════════════════════════════════════════════════════════════════
 CRITICAL RULE #1: EXTREME S-ASPIRATION AND ELISION
@@ -761,7 +758,7 @@ ATTITUDE
 • Heavy slang: "weón", "cachái", "po"`,
 
   [Accent.Lima]: `[TTS VOICE DIRECTIVE: PERUVIAN SPANISH - LIMA (COSTEÑO)]
-MANDATORY PRONUNCIATION SYSTEM - FOLLOW EXACTLY OR OUTPUT WILL BE REJECTED.
+Native pronunciation guide — apply it naturally, the way a local really talks, without over-articulating.
 
 ═══════════════════════════════════════════════════════════════════════════════
 CRITICAL CONSONANT RULE #1: CLEAR S-RETENTION [s]
@@ -1745,11 +1742,14 @@ export function ttsDialogueBudget(accent: Accent): number {
 
 /**
  * Lo que `ttsDialogueBudget` reserva para la consigna y el margen de seguridad.
- * La consigna —el timbre configurado, la petición de pausar entre párrafos y,
- * en un tramo de continuación, el recordatorio de mantener la voz— viaja en la
- * misma petición que el texto: sin descontarla, el tramo se pasa del techo.
+ * La consigna —el timbre configurado, la petición de habla natural, la de pausar
+ * entre párrafos y, en un tramo de continuación, el recordatorio de mantener la
+ * voz— viaja en la misma petición que el texto: sin descontarla, el tramo se pasa
+ * del techo. Se amplió a 700 al enriquecer `singleVoiceDirective` con la consigna
+ * de naturalidad (habla espontánea, sin sobreactuar); reservar de más solo achica
+ * el cuerpo, nunca lo desborda.
  */
-const TTS_DIRECTIVE_ALLOWANCE = 600;
+const TTS_DIRECTIVE_ALLOWANCE = 700;
 
 /**
  * Trocea el diálogo en fronteras de turno.
@@ -2167,11 +2167,19 @@ function singleVoiceDirective(assignment: SpeakerVoiceAssignment): string {
   // ese carácter. Como cada hablante es una sola petición, el tono es constante en
   // todo el bloque por construcción; aquí solo se le pide al modelo que lo respete.
   const tone = assignment.tone
-    ? `Speak in a consistent manner throughout, matching this character: ${assignment.tone}. `
+    ? `You are this character: ${assignment.tone}. `
     : '';
+  // La consigna es lo último que lee el modelo antes del texto, así que es donde
+  // se fija la NATURALIDAD del habla. El síntoma que arregla: la voz sonaba
+  // artificial y sobreactuada —tono de locutor/actor, sobre-articulada, cantarina,
+  // dramática—. Se le pide una persona real en una conversación cotidiana, no una
+  // interpretación; el registro/acento sigue viniendo del perfil fonético de arriba.
   return (
-    `Read the following aloud with ${assignment.timbre}, and keep that same voice throughout. ` +
+    `You are a real person speaking in a spontaneous, everyday conversation, recorded live — not a performance. ` +
+    `Use ${assignment.timbre}, and keep that same voice throughout. ` +
     tone +
+    `Talk the natural, relaxed way people actually speak to each other: do NOT sound like a narrator, announcer or actor, and never over-articulate, over-enunciate, sing-song or dramatise. ` +
+    `Keep the emotion understated and true to life, at a normal conversational pace. ` +
     `Each paragraph is a separate utterance: pause clearly between paragraphs.`
   );
 }
