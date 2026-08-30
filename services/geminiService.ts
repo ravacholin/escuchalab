@@ -10,6 +10,7 @@ import { checkTwoVoices } from "./ttsVoiceCheck";
 import { splitIntoTurns } from "./ttsTurnSplit";
 import { parseLenientJson } from "./jsonRepair";
 import {
+  AUDIO_MODELS,
   GENERATION_MODELS,
   describeModelChainFailure,
   isModelError,
@@ -38,7 +39,10 @@ const getApiKey = (): string => {
 // es una cadena y `GENERATION_MODEL` es solo su primer escalón, el que se
 // intenta siempre primero y el que se nombra en la pantalla de carga.
 const GENERATION_MODEL = GENERATION_MODELS[0];
-const AUDIO_MODEL = "gemini-3.1-flash-tts-preview";
+// El audio ya no es un modelo suelto: `AUDIO_MODELS` (services/modelFallback.ts)
+// es una cadena y `AUDIO_MODEL` es solo su primer escalón —el que se intenta
+// siempre primero y el que se nombra en la pantalla de carga—.
+const AUDIO_MODEL = AUDIO_MODELS[0];
 
 // `isQuotaError` vivía aquí y ahora vive con el resto de la clasificación de
 // errores; se re-exporta porque `scripts/check-audio.mjs` lo importa de aquí.
@@ -1899,12 +1903,15 @@ async function synthesizeWithProgress(
       return concatBytes(chunks, total);
     } catch (error) {
       const actual = guard.reason() ?? error;
-      // Quedarse sin cuota no se arregla repitiendo: cada reintento es otra
-      // petición contra el mismo límite. Con los dos intentos de streaming más
-      // el fallback sin streaming, un solo 429 gastaba tres llamadas de las
-      // diez que da el nivel gratuito al día. Los errores de red y los timeouts
-      // sí se reintentan.
-      if (isQuotaError(actual)) throw actual;
+      // Los errores del *modelo* (cuota 429, saturación 503/500, id retirado
+      // 404) no se arreglan repitiendo contra el mismo modelo: la cuota es por
+      // modelo y cada reintento la vuelve a contar, y un pico de saturación
+      // dura minutos, no los 1,5 s de la escalera. Suben tal cual para que
+      // `generateAudio` baje al siguiente modelo de `AUDIO_MODELS`. Antes solo
+      // subía el 429 y un 503 se comía los tres intentos (dos de streaming más
+      // el fallback) contra el modelo caído. Los errores de red y los timeouts
+      // sí se reintentan aquí, contra el mismo modelo, como siempre.
+      if (isModelError(actual)) throw actual;
       lastError = actual;
       hooks.onRetry(attempt, total, errorMessage(actual));
       await sleep(500 * attempt);
@@ -2417,42 +2424,23 @@ export const generateAudio = async (
     console.log(`[TTS] Generating audio: ${totalChunks} single-voice request(s), one per speaker...`);
     reporter.start('synthesis');
 
-    // Los tramos llegan en paralelo: se acumula lo recibido por tramo y se
-    // reporta la suma. Las peticiones se saben de antemano y no hay reintentos,
-    // así que el denominador es real desde el primer momento.
-    const bytesPerChunk = new Array<number>(totalChunks).fill(0);
-    const streamPartsPerChunk = new Array<number>(totalChunks).fill(0);
-    let doneChunks = 0;
-
-    const publish = () => {
-      const totalBytes = bytesPerChunk.reduce((n, b) => n + b, 0);
-      const streamParts = streamPartsPerChunk.reduce((n, c) => n + c, 0);
-      const seconds = totalBytes / TTS_BYTES_PER_SECOND;
-      const counters = [
-        { label: 'Audio recibido', value: formatSeconds(seconds) },
-        { label: 'Datos', value: formatBytes(totalBytes) },
-        { label: 'Fragmentos', value: formatCount(streamParts) }
-      ];
-      counters.push({ label: 'Peticiones', value: `${formatCount(doneChunks)}/${formatCount(totalChunks)}` });
-      reporter.update('synthesis', {
-        // El plan de peticiones es determinista, así que aquí sí hay un
-        // denominador de verdad: no es una barra inventada sobre un reloj.
-        ratio: doneChunks / totalChunks,
-        detail:
-          `${formatSeconds(seconds)} de audio recibidos · ` +
-          `petición ${Math.min(doneChunks + 1, totalChunks)} de ${totalChunks}`,
-        counters,
-        metrics: {
-          audioBytes: totalBytes,
-          audioSeconds: seconds,
-          chunks: streamParts,
-          ttsRequests: totalChunks,
-          ttsRequestsDone: doneChunks
-        }
-      });
-    };
+    // Toda la síntesis va dentro de `runWithModelFallback`: si el modelo de voz
+    // primario está caído (503) o sin cuota (429), se baja al siguiente escalón
+    // de `AUDIO_MODELS` y se rehace la lección entera con él. El modelo se
+    // resuelve **una sola vez por lección**, así que las dos peticiones (una por
+    // hablante) usan siempre el mismo —nunca hay dos voces de un diálogo
+    // sintetizadas por modelos distintos—. En la ruta normal no hay cambio: un
+    // modelo, sus peticiones, y el coste sigue siendo el de siempre.
+    //
+    // Solo cambian de modelo los errores del *modelo* (`synthesizeWithProgress`
+    // ya sube el 503/500/404/429 tal cual). Un fallo de red o un timeout no
+    // baja de escalón: lo reintenta antes la escalera interna contra el mismo
+    // modelo, y como el host es el mismo para toda la cadena, probar otro modelo
+    // no arreglaría una red caída —solo reharía dos peticiones por escalón para
+    // nada—.
 
     const ask = async (
+      model: string,
       text: string,
       owner: SpeakerVoiceAssignment,
       index: number,
@@ -2461,7 +2449,7 @@ export const generateAudio = async (
       synthesizeWithProgress(
         ai,
         {
-          model: AUDIO_MODEL,
+          model,
           contents: [{ parts: [{ text }] }],
           config: {
             responseModalities: [Modality.AUDIO],
@@ -2489,31 +2477,81 @@ export const generateAudio = async (
         }
       );
 
-    const rendered = await mapWithConcurrency(requests, TTS_CONCURRENCY, async (request, index) => {
-      const body = request.lines.join(TURN_JOINER);
-      const continuation = request.part > 0
-        ? ' This is the continuation of the same speaker: keep exactly the same voice, pace and accent.'
-        : '';
+    const { value: rendered, model: usedAudioModel } = await runWithModelFallback(
+      AUDIO_MODELS,
+      (model) => {
+        // Contadores nuevos por intento: si se cambia de modelo, una petición
+        // colgada del intento anterior escribiría en estos arrays ya
+        // descartados, no en los del intento en curso.
+        const bytesPerChunk = new Array<number>(totalChunks).fill(0);
+        const streamPartsPerChunk = new Array<number>(totalChunks).fill(0);
+        let doneChunks = 0;
 
-      const bytes = await ask(
-        `${header}${singleVoiceDirective(request.owner)}${continuation}\n\n${body}`,
-        request.owner,
-        index,
-        (totalBytes, chunkCount) => {
-          bytesPerChunk[index] = totalBytes;
-          streamPartsPerChunk[index] = chunkCount;
+        const publish = () => {
+          const totalBytes = bytesPerChunk.reduce((n, b) => n + b, 0);
+          const streamParts = streamPartsPerChunk.reduce((n, c) => n + c, 0);
+          const seconds = totalBytes / TTS_BYTES_PER_SECOND;
+          const counters = [
+            { label: 'Audio recibido', value: formatSeconds(seconds) },
+            { label: 'Datos', value: formatBytes(totalBytes) },
+            { label: 'Fragmentos', value: formatCount(streamParts) }
+          ];
+          counters.push({ label: 'Peticiones', value: `${formatCount(doneChunks)}/${formatCount(totalChunks)}` });
+          reporter.update('synthesis', {
+            // El plan de peticiones es determinista, así que aquí sí hay un
+            // denominador de verdad: no es una barra inventada sobre un reloj.
+            ratio: doneChunks / totalChunks,
+            detail:
+              `${formatSeconds(seconds)} de audio recibidos · ` +
+              `petición ${Math.min(doneChunks + 1, totalChunks)} de ${totalChunks}`,
+            counters,
+            metrics: {
+              audioBytes: totalBytes,
+              audioSeconds: seconds,
+              chunks: streamParts,
+              ttsRequests: totalChunks,
+              ttsRequestsDone: doneChunks
+            }
+          });
+        };
+
+        return mapWithConcurrency(requests, TTS_CONCURRENCY, async (request, index) => {
+          const body = request.lines.join(TURN_JOINER);
+          const continuation = request.part > 0
+            ? ' This is the continuation of the same speaker: keep exactly the same voice, pace and accent.'
+            : '';
+
+          const bytes = await ask(
+            model,
+            `${header}${singleVoiceDirective(request.owner)}${continuation}\n\n${body}`,
+            request.owner,
+            index,
+            (totalBytes, chunkCount) => {
+              bytesPerChunk[index] = totalBytes;
+              streamPartsPerChunk[index] = chunkCount;
+              publish();
+            }
+          );
+
+          // El bloque vuelve con todos los turnos de esta voz seguidos: se parte
+          // por los silencios, con los caracteres de cada turno como reparto
+          // esperado.
+          const split = splitIntoTurns(bytes, request.lines.map(l => l.length));
+
+          doneChunks++;
           publish();
+          return { request, split };
+        });
+      },
+      {
+        onSwitch: (from, to, reason) => {
+          reporter.log(
+            `El modelo de voz «${from}» no está disponible (${reason}); se cambia a «${to}»`,
+            'warn'
+          );
         }
-      );
-
-      // El bloque vuelve con todos los turnos de esta voz seguidos: se parte por
-      // los silencios, con los caracteres de cada turno como reparto esperado.
-      const split = splitIntoTurns(bytes, request.lines.map(l => l.length));
-
-      doneChunks++;
-      publish();
-      return { request, split };
-    });
+      }
+    );
 
     console.log('[TTS] Response received, checking for audio data...');
 
@@ -2553,6 +2591,12 @@ export const generateAudio = async (
       `${formatSeconds(totalSeconds)} de audio · ${formatBytes(audioBytes.length)} · ` +
         `${plural(totalChunks, 'petición', 'peticiones')}, sin reintentos`
     );
+    if (usedAudioModel !== AUDIO_MODEL) {
+      reporter.log(
+        `Audio generado con «${usedAudioModel}» (el primario «${AUDIO_MODEL}» no estaba disponible)`,
+        'info'
+      );
+    }
 
     if (isMultiSpeaker) {
       const totalCuts = measuredCuts + interpolatedCuts;
