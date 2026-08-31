@@ -121,25 +121,43 @@ const R = (label: string, beds: BedLayer[], extra: Omit<SceneRecipe, 'label' | '
   ({ label, beds, ...extra });
 
 // ---------------------------------------------------------------------------
-// The scenes. Every SceneId maps to one (occasionally two) real beds plus, where a
-// quiet room needs it, a few subtle events. The label chooses the recording, never the
-// topic — a bulletin about traffic is still heard from a studio, not a road.
+// The scenes. Every SceneId maps to one or two real beds plus, where a quiet room needs
+// it, a few subtle events. The label chooses the recording, never the topic — a bulletin
+// about traffic is still heard from a studio, not a road.
+//
+// Some scenes layer a second real bed to place the room in a fuller world: a café by the
+// window hears a thread of street through the glass, a covered market has the enclosed
+// body of a hall under the stalls, a garage opens onto the road. The second layer is
+// always the quieter, heavily-filtered one — muffled the way a sound coming through a
+// window or a service door actually is — so it adds depth without ever competing with the
+// primary bed or the voice. Nothing new is bundled; these reuse existing beds.
 // ---------------------------------------------------------------------------
 
 export const SCENE_RECIPES = {
   // --- eating and drinking -------------------------------------------------
-  cafe:          R('Café',            [B('cafe', 1.0, { width: 0.8 })],
+  // A café by the window: the room, plus a thin thread of street muffled through glass
+  // (heavily low-passed and ~14 dB down, so it reads as "outside" and never fights the voice).
+  cafe:          R('Café',            [B('cafe', 1.0, { width: 0.8 }),
+                                       B('street', 0.20, { width: 1.0, lowpass: 1600 })],
                     { events: [E('cup', 9, 0.16, 'near'), E('chair', 22, 0.12)] }),
-  restaurant:    R('Restaurante',     [B('restaurant', 1.0, { width: 0.8 })],
+  // A dining room with the kitchen going on behind the service doors (muffled, low).
+  restaurant:    R('Restaurante',     [B('restaurant', 1.0, { width: 0.8 }),
+                                       B('kitchen', 0.18, { width: 0.6, lowpass: 1900 })],
                     { events: [E('cup', 11, 0.14), E('chair', 26, 0.1)] }),
-  bar_night:     R('Bar',             [B('pub', 1.0, { width: 0.85 })],
+  // A bar with the door open onto the nightlife street.
+  bar_night:     R('Bar',             [B('pub', 1.0, { width: 0.85 }),
+                                       B('street', 0.16, { width: 0.9, lowpass: 1500 })],
                     { level: 1.0, events: [E('cup', 10, 0.15, 'near')] }),
   wine_tasting:  R('Cata de vinos',   [B('restaurant', 0.6, { width: 0.7 })],
                     { level: 0.75, tone: { tiltDb: -2 }, events: [E('cup', 14, 0.12, 'near')] }),
 
   // --- shops and markets ---------------------------------------------------
-  market:        R('Mercado',         [B('market', 1.0, { width: 0.9 })]),
-  shop_small:    R('Tienda',          [B('shop', 0.9, { width: 0.6 })],
+  // A covered market: the stalls, plus the enclosed reverberant body of a hall underneath.
+  market:        R('Mercado',         [B('market', 1.0, { width: 0.9 }),
+                                       B('hall', 0.28, { width: 0.7, lowpass: 2600 })]),
+  // A street-facing shop, its door letting a little of the street in.
+  shop_small:    R('Tienda',          [B('shop', 0.9, { width: 0.6 }),
+                                       B('street', 0.20, { width: 0.8, lowpass: 1700 })],
                     { events: [E('door', 30, 0.14, 'far'), E('till', 24, 0.1)] }),
   shop_checkout: R('Caja',            [B('shop', 0.95, { width: 0.6 })],
                     { events: [E('till', 12, 0.14), E('paper', 18, 0.1)] }),
@@ -168,7 +186,9 @@ export const SCENE_RECIPES = {
                     { events: [E('keyboard', 4, 0.1), E('chair', 28, 0.08)] }),
   newsroom:      R('Redacción',       [B('office', 0.95, { width: 0.7 })],
                     { events: [E('keyboard', 3.5, 0.11), E('paper', 12, 0.1), E('door', 44, 0.08, 'far')] }),
-  workshop_garage:R('Taller',         [B('workshop', 1.0, { width: 0.7 })]),
+  // A garage with the roller door up onto the street.
+  workshop_garage:R('Taller',         [B('workshop', 1.0, { width: 0.7 }),
+                                       B('street', 0.30, { width: 0.8, lowpass: 2400 })]),
 
   // --- fitness / leisure ---------------------------------------------------
   gym:           R('Gimnasio',        [B('pool', 0.85, { width: 0.8 })],
@@ -206,14 +226,18 @@ export const SCENE_RECIPES = {
                     { level: 0.85, events: [E('page', 14, 0.1), E('chair', 30, 0.07), E('steps', 26, 0.07, 'far')] }),
   gallery:       R('Galería',         [B('hall', 0.5, { width: 0.75 })],
                     { level: 0.8, tone: { tiltDb: -1 }, events: [E('steps', 20, 0.08, 'far')] }),
-  foyer:         R('Vestíbulo',       [B('hall', 0.7, { width: 0.75 })],
+  // A foyer near the entrance doors, a little of the street leaking in.
+  foyer:         R('Vestíbulo',       [B('hall', 0.7, { width: 0.75 }),
+                                       B('street', 0.18, { width: 0.8, lowpass: 1700 })],
                     { level: 0.9, events: [E('door', 26, 0.12, 'far'), E('steps', 18, 0.09)] }),
 
   // --- transit -------------------------------------------------------------
   station:       R('Estación',        [B('station', 1.0, { width: 0.95 })]),
   airport:       R('Aeropuerto',      [B('airport', 1.0, { width: 0.95 })]),
   vehicle_interior:R('Vehículo',      [B('train_interior', 1.0, { width: 0.6 })]),
-  hotel_lobby:   R('Recepción de hotel',[B('hall', 0.7, { width: 0.75 })],
+  // A hotel lobby with glass doors onto the street (muffled, low).
+  hotel_lobby:   R('Recepción de hotel',[B('hall', 0.7, { width: 0.75 }),
+                                       B('street', 0.20, { width: 0.8, lowpass: 1700 })],
                     { level: 0.9, events: [E('door', 24, 0.12, 'far'), E('till', 26, 0.08)] }),
 
   // --- home ----------------------------------------------------------------
