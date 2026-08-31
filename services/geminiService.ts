@@ -965,24 +965,48 @@ Devuélvelos en el array "exercises" en ese mismo orden y sólo con los campos d
  * conjuga, no en las muletillas: así la variante se mantiene sin romper el tono.
  */
 const REGISTER_CONSISTENCY =
-  'CONSISTENCIA DE REGISTRO: el tono lo fija la SITUACIÓN, no el acento. Lo regional se oye en la ' +
-  'PRONUNCIACIÓN, la gramática (voseo/tuteo/ustedeo), el léxico cotidiano y la realia — NO en la jerga. ' +
-  'Los apelativos y muletillas coloquiales ("che", "boludo", "weón", "güey", "tío", "po", "pana"…) y el ' +
-  'lunfardo/argot solo caben entre pares en contextos distendidos; en trato de servicio, jerárquico, ' +
-  'profesional, sanitario, administrativo o institucional se usa trato de respeto (usted donde corresponda) ' +
-  'y se omiten. Que suene natural y coherente con la escena, nunca forzado ni caricaturesco.';
+  'REGISTRO Y VARIANTE: el tono lo fija la SITUACIÓN. Lo regional se oye en la PRONUNCIACIÓN, la gramática ' +
+  '(voseo/tuteo/ustedeo), el léxico cotidiano y la realia. En escenas DISTENDIDAS entre pares (amigos, familia, ' +
+  'confianza, gente joven) el registro natural ES el coloquial: usa CON SOLTURA las muletillas, los apelativos ' +
+  'y el argot propios de la variante que describe CONTEXT ("che", "boludo/a", "weón", "cachái", "güey", "tío/a", ' +
+  '"po", "pana", "chido", "guay", "bacán", "chévere"…) — así habla la gente de verdad, y sin eso el diálogo suena ' +
+  'a manual. Solo cuídate de no amontonarlos ni volverlos caricatura. En trato de SERVICIO, jerárquico, ' +
+  'profesional, sanitario, administrativo o institucional se mantiene el trato de respeto (usted donde corresponda) ' +
+  'y se dejan fuera el argot y las muletillas fuertes. Las groserías fuertes, solo si el tema lo pide explícitamente. ' +
+  'Siempre natural y coherente con la escena.';
+
+/**
+ * La naturalidad del HABLA, no del registro: cómo se escribe lengua hablada real
+ * en vez de lengua escrita leída en voz alta. El síntoma que arregla es el que
+ * motiva todo este cambio —"suenan raras, no naturales"—: los diálogos salían
+ * gramaticalmente perfectos, con frases completas y equilibradas, sin una
+ * muletilla ni una reacción, y eso no es como habla nadie. Va en TODOS los modos
+ * (pegado a REGISTER) porque la naturalidad no depende del escenario. El nivel y
+ * REGISTER siguen mandando: en A0/A1 la naturalidad está en el ritmo y las
+ * fórmulas cotidianas, no en jerga oscura; en trato de respeto no hay argot.
+ */
+const SPOKEN_NATURALNESS =
+  'HABLA REAL (naturalidad, IMPORTANTE): esto es lengua HABLADA y espontánea, no lengua escrita leída en voz alta. ' +
+  'Escribe como habla de verdad la gente de esa región, con el ritmo y las pequeñas imperfecciones de la conversación viva: ' +
+  '(a) Muletillas y marcadores del discurso propios de la variante, con medida ("o sea", "bueno", "pues", "mira/mirá", ' +
+  '"es que", "la verdad", "digamos", "a ver", "¿viste?/¿sabés?/¿sabes?/¿cachái?/¿no?", "dale/vale/órale"). ' +
+  '(b) Reacciones y respuestas breves de escucha ("claro", "ajá", "ya", "sí, sí", "totalmente", "uf", "qué va"). ' +
+  '(c) Frases a veces incompletas, reformulaciones, arranques en falso y elipsis: no todas las réplicas cerradas y perfectas. ' +
+  '(d) Contracciones y habla ligada naturales de la región donde no estorben la comprensión del nivel. ' +
+  '(e) Interjecciones, énfasis y algo de calidez emocional. ' +
+  'Que suene a personas concretas hablando entre ellas, con la informalidad que pida la escena, nunca a un texto recitado.';
 
 const getRegisterInstruction = (textType: TextType): string => {
   switch (textType) {
     case TextType.RadioNews:
       return `REGISTRO NOTICIERO: Formal, neutro, objetivo e impersonal. Frases completas y tono informativo. PROHIBIDO: lunfardo, jerga, coloquialismos, muletillas, chistes, ironías, insultos o palabras como "weón", "güey", "boludo".`;
     case TextType.PodcastInterview:
-      return `REGISTRO PODCAST-ENTREVISTA: Semi-formal y conversacional. Entrevistador con cortesía estándar; entrevistado puede ser cercano pero sin vulgaridades. PERMITIDO: coloquialismos leves y 1–2 expresiones dialectales suaves. PROHIBIDO: lunfardo fuerte, insultos, groserías o exceso de muletillas.`;
+      return `REGISTRO PODCAST-ENTREVISTA: Conversacional y cercano, como una charla de verdad. Entrevistador con cortesía relajada; entrevistado espontáneo y natural, que se explaya con soltura. PERMITIDO: coloquialismos y expresiones dialectales propias de la variante, muletillas y marcadores de charla con medida. PROHIBIDO: insultos y groserías fuertes; que no suene a comunicado leído.`;
     case TextType.Monologue:
       return `REGISTRO MONÓLOGO/STORYTELLING: Narrativo cuidado y coherente. Puede ser cercano si es personal, pero con dicción clara. PERMITIDO: coloquialidad moderada y rasgos dialectales suaves si el contexto lo justifica. PROHIBIDO: jerga fuerte o insultos; no saturar con muletillas.`;
     case TextType.Dialogue:
     default:
-      return `REGISTRO DIÁLOGO: Conversación natural entre nativos, con la formalidad que pida la situación: trato de respeto en jerarquía/servicio/trámite/consulta profesional, informal respetuoso entre pares. Los rasgos del acento (pronunciación, gramática, léxico y realia) son siempre bienvenidos; las groserías y el argot fuerte, solo si el tema lo exige explícitamente.`;
+      return `REGISTRO DIÁLOGO: Conversación natural entre nativos, con la formalidad que pida la situación: trato de respeto en jerarquía/servicio/trámite/consulta profesional; entre pares, informal y coloquial DE VERDAD —con las muletillas, expresiones y el argot suave de la región, con calidez y espontaneidad—, no un intercambio de frases de manual. Los rasgos del acento (pronunciación, gramática, léxico y realia) son siempre bienvenidos; las groserías fuertes, solo si el tema lo exige explícitamente.`;
   }
 };
 
@@ -1016,7 +1040,7 @@ const composeRegisterInstruction = (textType: TextType, scenarioRegister: string
   const scene = scenarioRegister
     ? ` REGISTRO DE ESTA SITUACIÓN (manda sobre lo anterior): ${scenarioRegister}`
     : '';
-  return `${base}${scene} ${REGISTER_CONSISTENCY}`;
+  return `${base}${scene} ${REGISTER_CONSISTENCY} ${SPOKEN_NATURALNESS}`;
 };
 
 /**
@@ -1805,11 +1829,14 @@ export function ttsDialogueBudget(accent: Accent): number {
  * La consigna —el timbre configurado, la petición de habla natural, la de pausar
  * entre párrafos y, en un tramo de continuación, el recordatorio de mantener la
  * voz— viaja en la misma petición que el texto: sin descontarla, el tramo se pasa
- * del techo. Se amplió a 700 al enriquecer `singleVoiceDirective` con la consigna
- * de naturalidad (habla espontánea, sin sobreactuar); reservar de más solo achica
- * el cuerpo, nunca lo desborda.
+ * del techo. Se amplió a 900 al reforzar `singleVoiceDirective` con la consigna
+ * de habla informal y ligada (entrega casual, sin dicción de estudio): el peor
+ * caso medido —directiva + tono declarado + recordatorio de continuación— ronda
+ * los 866 caracteres. Reservar de más solo achica el cuerpo, nunca lo desborda:
+ * incluso con el perfil más largo (Buenos Aires, 3407) queda cuerpo por encima
+ * del suelo de 600.
  */
-const TTS_DIRECTIVE_ALLOWANCE = 700;
+const TTS_DIRECTIVE_ALLOWANCE = 900;
 
 /**
  * Trocea el diálogo en fronteras de turno.
@@ -2238,11 +2265,12 @@ function singleVoiceDirective(assignment: SpeakerVoiceAssignment): string {
   // dramática—. Se le pide una persona real en una conversación cotidiana, no una
   // interpretación; el registro/acento sigue viniendo del perfil fonético de arriba.
   return (
-    `You are a real person speaking in a spontaneous, everyday conversation, recorded live — not a performance. ` +
-    `Use ${assignment.timbre}, and keep that same voice throughout. ` +
+    `You are a real person in a spontaneous, everyday conversation caught on a live recording — not a performance, not a reading. ` +
+    `Use ${assignment.timbre} throughout. ` +
     tone +
-    `Talk the natural, relaxed way people actually speak to each other: do NOT sound like a narrator, announcer or actor, and never over-articulate, over-enunciate, sing-song or dramatise. ` +
-    `Keep the emotion understated and true to life, at a normal conversational pace. ` +
+    `Talk the loose, casual, connected way people really speak in this accent: relaxed rhythm, natural everyday intonation, letting words and syllables run together — not clean, over-enunciated studio diction. ` +
+    `Never sound like a narrator, announcer, actor or teacher; do not over-articulate, sing-song or dramatise. ` +
+    `Stay warm, informal and understated, true to life, at an easy conversational pace, with the small hesitations of real talk. ` +
     `Each paragraph is a separate utterance: pause clearly between paragraphs.`
   );
 }
