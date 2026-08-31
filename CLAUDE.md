@@ -304,14 +304,24 @@ no CORS/key/rate-limit risk in production.
   pretending to be a place: it is the near-silent air a close-miked voice sits in, which
   no field recording gives you cleanly.
 
-- `services/ambiencePresets.ts` — the **50 `SceneRecipe`s** and the mapping from all
-  **148** `ScenarioContext.label`s (layered by `TextType`). A recipe is one (occasionally
-  two) `BedLayer`s (bed + gain + optional filtering + stereo width), an optional
+- `services/ambiencePresets.ts` — the **`SceneRecipe`s** and the mapping from all
+  **148** `ScenarioContext.label`s (layered by `TextType`). A recipe is one or two
+  `BedLayer`s (bed + gain + optional filtering + stereo width), an optional
   `SceneTone` (shelves / tilt, or a `bandpass` for the telephone-line setups), and an
   optional short list of `EventSpec`s. **The `SceneId` vocabulary and the four label maps
   are unchanged from the previous system** — only what each scene *sounds like* changed —
   so the label→scene routing, `RECORDING_PRESENCE`, studio handling and free-text
-  inference are as before.
+  inference are as before. **A handful of scenes layer a second real bed** to place the
+  room in a fuller world — a café by the window (`cafe` + a low-passed thread of `street`),
+  a covered market (`market` + the enclosed body of `hall`), a restaurant with the kitchen
+  behind the service doors, a garage / shop / hotel lobby / foyer with the street leaking
+  in. The second layer is always the quieter, heavily-filtered one, muffled the way a sound
+  coming through a window or a service door actually is (~9-14 dB down, low-passed), so it
+  adds depth without competing with the primary bed or the voice, and it reuses existing
+  beds — no new audio is bundled. The engine already mixes every layer of `beds[]` (two
+  detuned playheads each) and the `N/M capas` counter counts them, so nothing else changed;
+  `check:ambience` still measures monopoly on `beds[0]` (the primary), so a subtle second
+  layer never trips it.
 - `services/ambienceEngine.ts` — framework-free runtime engine. For each bed it runs
   **two lightly-detuned playheads, panned apart**, so a mono loop reads as a wide,
   non-repeating space rather than an obvious loop; colours the bed per scene; and
