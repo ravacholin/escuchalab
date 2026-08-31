@@ -153,6 +153,9 @@ export const SCENE_RECIPES = {
   street_rain:   R('Calle con lluvia',[B('rain', 1.0, { width: 1.0 })]),
   park_rain:     R('Parque con lluvia',[B('rain', 0.9, { width: 1.0 })],
                     { tone: { highShelfDb: -1 } }),
+  // Reuses the `forest` bed (otherwise heard only in radio_field) so nature stories on
+  // location don't all collapse onto `park`.
+  trail:         R('Sendero',         [B('forest', 0.9, { width: 1.0 })]),
 
   // --- work ----------------------------------------------------------------
   office:        R('Oficina',         [B('office', 0.9, { width: 0.5 })],
@@ -233,6 +236,12 @@ export const SCENE_RECIPES = {
                       { events: [E('paper', 16, 0.08)] }),
   radio_street:    R('Corresponsal en calle',[B('street', 0.85, { width: 0.9 })], { level: 0.9 }),
   radio_field:     R('Grabación de campo',  [B('forest', 0.9, { width: 1.0 })]),
+  // On-location correspondent variants that put otherwise single-use real beds to work,
+  // so a market / transport / sports report is heard from the place it is about rather
+  // than from a generic street.
+  radio_market:    R('Mercado (directo)',   [B('market', 0.85, { width: 0.9 })], { level: 0.9 }),
+  radio_station:   R('Estación (directo)',  [B('station', 0.85, { width: 0.9 })], { level: 0.9 }),
+  radio_plaza:     R('Plaza (directo)',     [B('plaza', 0.85, { width: 0.95 })], { level: 0.9 }),
   radio_phone:     R('Línea telefónica',    [B('studio_air', 1.0)],
                       { tone: { bandpass: [300, 3400] } }),
 } as const;
@@ -309,18 +318,18 @@ const RADIO_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Política Municipal': 'studio_newsroom',
   'Tribunales y Justicia': 'studio_newsroom',
   'Tráfico': 'radio_street',
-  'Transporte Público': 'radio_street',
-  'Transporte y Movilidad': 'radio_street',
+  'Transporte Público': 'radio_station',
+  'Transporte y Movilidad': 'radio_station',
   'Seguridad Vial': 'radio_street',
   'Infraestructura Urbana': 'radio_street',
-  'Ferias y Mercados': 'radio_street',
+  'Ferias y Mercados': 'radio_market',
   'Servicios de la Ciudad': 'radio_street',
   'El Tiempo': 'radio_field',
   'Clima y Estaciones': 'radio_field',
   'Medio Ambiente': 'radio_field',
   'Medio Ambiente Local': 'radio_field',
   'Turismo de la Región': 'radio_field',
-  'Deportes Locales': 'radio_field',
+  'Deportes Locales': 'radio_plaza',
   'Geopolítica': 'radio_phone',
   'Economía y Mercados': 'radio_phone',
   'Economía Nacional': 'radio_phone',
@@ -403,7 +412,7 @@ const MONOLOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Crónica de mi Barrio': 'street',
   'Mi Primer Viaje': 'station',
   'El Día que Perdí Algo': 'station',
-  'Un Viaje en Solitario': 'park',
+  'Un Viaje en Solitario': 'trail',
   'Mi Fin de Semana': 'park',
   'Una Mascota Especial': 'park',
   'Reencuentro Inesperado': 'plaza',
