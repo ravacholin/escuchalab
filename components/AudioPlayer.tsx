@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX, Download, SlidersHorizontal } from 'lucide-react';
 import { resolveAmbienceScene, type ResolvedAmbience } from '../services/ambiencePresets';
-import { loadBed } from '../services/ambienceLibrary';
+import { loadBed, bedAssetUrl } from '../services/ambienceLibrary';
 import {
   AmbienceEngine,
   DEFAULT_AMBIENCE_DUCKING,
@@ -183,6 +183,23 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   useEffect(() => {
     setPlaybackRate(recommendedSpeed);
   }, [recommendedSpeed]);
+
+  // Warm the browser's HTTP cache for this scene's beds as soon as the scene is known —
+  // seconds before the user reaches the play button. On a cold cache the bed's ~1 MB
+  // fetch is the multi-second cost that made the ambience burst in several seconds after
+  // the voice on the first play (on replay the fetch was already cached, so it lined up).
+  // Paying it up-front lets the decode-on-play resolve quickly so the bed can enter in
+  // step with the voice from the very first turn. Same-origin static assets — the only
+  // failure mode is "didn't load", which the player already degrades past silently.
+  useEffect(() => {
+    scene.recipe.beds.forEach((l) => {
+      try {
+        void fetch(bedAssetUrl(l.bed)).catch(() => {});
+      } catch {
+        /* fetch unavailable (SSR/old env) — the on-play decode still works */
+      }
+    });
+  }, [scene.id]);
 
   // Load Speech Blob
   useEffect(() => {
@@ -370,26 +387,43 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   // --- TRANSPORT ----------------------------------------------------------
   const startPlayback = useCallback(() => {
     if (!speechRef.current) return;
+    const el = speechRef.current;
+
+    const startVoice = () => {
+      const p = el.play();
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    };
+
     const ctx = ensureAudioContext();
-    if (ctx) {
-      setupSpeechProcessing(speechRef.current);
-      // Warm the scene's bed cache now, on the same gesture that created the context, so
-      // the fetch+decode overlaps the speech's own start-up latency. `loadBed` caches the
-      // decode promise per context, so by the time `playing` fires and `startAmbience`
-      // runs, `startLayer` hits a warm buffer and the bed is present from the first turn
-      // instead of bursting in several seconds late on a cold cache.
-      scene.recipe.beds.forEach((l) => { void loadBed(ctx, l.bed); });
+    if (!ctx) {
+      // Web Audio unavailable — the element plays natively, there is no ambience to
+      // sync to, so start the voice straight away.
+      startVoice();
+      return;
     }
-    const p = speechRef.current.play();
-    if (p && typeof p.catch === 'function') p.catch(() => {});
-    // Ambience is NOT started here: on the first play the fresh AudioContext, the
-    // one-shot createMediaElementSource and the context resume all delay the moment
-    // the voice actually begins by a second or two, while the ambience — fired
-    // synchronously right after play() — came in immediately, so the bed started
-    // ahead of the voice and the illusion broke. (On replay everything is warm and
-    // they lined up, which is why the second press sounded right.) Instead the
-    // ambience is started from the <audio> element's `playing` event, i.e. the
-    // instant the voice is really producing sound. See handleSpeechPlaying.
+
+    setupSpeechProcessing(el);
+
+    // Start the voice only once the scene's beds are decoded, so on the FIRST play the
+    // bed is present from the very first turn instead of bursting in several seconds
+    // late once its cold-cache fetch+decode finally lands — the exact behaviour a replay
+    // already had, because there the decode promise was cached and resolved. `loadBed`
+    // caches the decode per context, and the mount-time byte prefetch warms the fetch,
+    // so in the common case these promises resolve almost immediately and the voice is
+    // not perceptibly held. A short safety timeout guarantees a slow or dead network can
+    // never stall playback: the voice starts anyway and the bed eases in over its own
+    // ramp when it lands. Ambience itself is still started from the <audio> element's
+    // `playing` event (see handleSpeechPlaying) — by which point the bed buffer is warm
+    // and enters in step with the voice, instead of ahead of it (the fresh context /
+    // one-shot createMediaElementSource / resume all delay the voice on the first play).
+    let voiceStarted = false;
+    const startVoiceOnce = () => {
+      if (voiceStarted) return;
+      voiceStarted = true;
+      startVoice();
+    };
+    Promise.all(scene.recipe.beds.map((l) => loadBed(ctx, l.bed))).then(startVoiceOnce, startVoiceOnce);
+    window.setTimeout(startVoiceOnce, 1200);
   }, [ensureAudioContext, setupSpeechProcessing, scene]);
 
   // Fired by the <audio> element when playback is actually producing sound (after
