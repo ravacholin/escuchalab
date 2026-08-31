@@ -138,9 +138,10 @@ The first answer to that was to **measure the returned PCM and re-request when a
 missing**. It worked, and it was unaffordable. The free tier is **10 TTS requests per day**,
 and the repair ladder cost 1 request in the best case, 2 with the insistent retry and
 **8 for a six-turn lesson** once it fell through to one request per turn — and each logical
-request could become three HTTP calls, because `synthesizeWithProgress()` retried twice in
-streaming and then fell back to non-streaming. A learner ran out of generations before
-finishing one lesson.
+request could once become three HTTP calls, because `synthesizeWithProgress()` used to retry
+twice in streaming and then fall back to non-streaming. A learner ran out of generations
+before finishing one lesson. (The TTS request is **non-streaming** now — see below — so a
+piece is one HTTP call again.)
 
 So the guarantee moved out of the retry loop and into **the shape of the request**:
 **one single-speaker request per speaker, and the turns interleaved locally.**
@@ -155,6 +156,22 @@ that is local arithmetic, which cannot run out of quota.
 
 - Model: `gemini-3.1-flash-tts-preview`, PCM 24 kHz / 16-bit mono. Free tier is
   **10 requests per day per model**, which is the constraint the whole design answers to.
+- **The TTS request is non-streaming** (`synthesizeWithProgress` → `generateContent`, not
+  `generateContentStream`). Streaming the audio bought nothing: the speaker's block is needed
+  *whole* to be cut into turns (`splitIntoTurns`) and is only concatenated at the end, so
+  there was no latency to overlap — only a live byte counter on the loading screen. What
+  streaming *did* cost was the error `"Incomplete JSON segment at the end"`, thrown by the
+  SDK's incremental JSON parser whenever the audio stream was cut mid-object; the recovery
+  ladder (two streaming attempts + a non-streaming fallback) could then spend **three HTTP
+  calls** for one piece and discard the bytes already received — and a *persistent* one, being
+  neither a model nor a network error, killed the lesson's audio without ever falling to the
+  second TTS model. A plain `generateContent` reads the whole body and parses once, so that
+  error class is gone, the **exactly 2 requests, no retries** guarantee is restored, and
+  synthesis progress is reported by **requests completed** (`doneChunks/totalChunks`, a real
+  denominator) rather than streamed bytes. Model errors (429/503/500/404) still rethrow at
+  once so `runWithModelFallback` switches TTS models; a network/timeout error retries a couple
+  of times against the same model and, if exhausted, is `markSwitchable`d so a dead endpoint
+  falls to the second model instead of failing the audio.
 - **`planAudioRequests()` is the plan, and it is deterministic.** It groups the turns by
   speaker, splits any turn that overflows the accent's budget, packs each speaker's pieces
   into as few requests as fit, and records which dialogue position every piece came from.
@@ -209,11 +226,12 @@ that is local arithmetic, which cannot run out of quota.
   it is not) — and it still declares itself `conclusive: false` on too little audio or two
   references too close to separate. But nothing is ever retried on its verdict. If it warns,
   the thing that is stale is the `TTS_VOICES` pitch table, not the audio.
-- **A quota error is never retried.** `synthesizeWithProgress()` retried twice in streaming
-  and then fell back to non-streaming without looking at *what* had failed, so one 429 spent
-  three of the day's ten calls. `isQuotaError()` (429 / `RESOURCE_EXHAUSTED` / "quota" /
-  "rate limit") now rethrows immediately, in both the audio and the JSON paths; network
-  errors still retry as before.
+- **A quota error is never retried.** `synthesizeWithProgress()` once retried twice in
+  streaming and then fell back to non-streaming without looking at *what* had failed, so one
+  429 spent three of the day's ten calls. `isQuotaError()` (429 / `RESOURCE_EXHAUSTED` /
+  "quota" / "rate limit") rethrows immediately, in both the audio and the JSON paths (now that
+  the audio path is a single non-streaming call, a quota error there is at most one call);
+  network errors still retry as before.
 - Returns base64-encoded audio data. Error handling for "non-audio response" rejections, and
   a quota failure says so plainly — including that the lesson plan itself did generate.
 - **Still chunked at turn boundaries** (`chunkDialogueLines`), now *within* a speaker: the
@@ -426,19 +444,23 @@ measurement.
 - `services/generationProgress.ts`: `ProgressReporter` + `ProgressSnapshot`. Services
   report **facts** (`start`/`update`/`finish`/`fail`/`log`) and the UI renders them.
   Emissions are throttled to ~90 ms with a trailing flush, so no measurement is lost.
-- **Both Gemini calls are streamed** (`generateContentStream`), which is what makes
-  measurement possible at all: a single opaque request has nothing to report between
+- **The lesson-plan (JSON) call is streamed** (`generateContentStream`), which is what makes
+  fine-grained measurement possible: a single opaque request has nothing to report between
   send and response. Two streaming attempts with exponential backoff, then a
   non-streaming attempt as a fail-safe — if the model or the network can't stream,
-  generation still succeeds and the log says so.
+  generation still succeeds and the log says so. **The TTS call is non-streaming** (see Audio
+  Generation): streaming it gave no latency to overlap and was the sole source of the
+  `"Incomplete JSON segment at the end"` error, so its progress is measured by requests
+  completed, not streamed bytes.
 - **Phase 1 (`generateLessonPlan`)**: blueprint (slots planned) → prompt (chars sent) →
   dialogue (turns counted in the incoming JSON) → exercises (received / expected, a real
   denominator from the blueprint) → parse (turns, speakers) → verify (kept vs. discarded,
   with the verifier's reason per item) → assemble (slots covered by the model, by a
   deterministic engine, or left empty).
 - **Phase 2 (`generateAudio`)**: prepare (turns, chars, voice assignment, and how many TTS
-  requests the chunking is going to make) → synthesis (bytes → seconds of PCM at
-  24 kHz/16-bit as chunks arrive) → encode (final length/size).
+  requests the chunking is going to make) → synthesis (each non-streaming request lands its
+  whole block at once; the step counts `completed/total` requests and the PCM seconds
+  received) → encode (final length/size).
 - **A step only has a percentage if a real denominator exists.** Where none does — the
   TTS never announces total duration, and A0 explicitly tells the model to ignore the
   turn count — the step is flagged `atomic: false` + no `ratio`, the UI shows `≥ N%` with
@@ -628,12 +650,16 @@ dialogue on two models. The only thing a switch can leave slightly stale is the 
 (measured against the primary), which affects the `checkTwoVoices` diagnostic and the
 voice-separation margin, never correctness. `AUDIO_MODEL` in `geminiService.ts` is just the
 chain's first rung — the one always tried first and named on the loading screen.
-- **Only *model* errors switch.** `synthesizeWithProgress()` now rethrows a 503/500/404 as well
-  as a 429 immediately (before, only the 429 bubbled and a 503 burned the two streaming
-  attempts plus the non-streaming fallback against the dead model), so `runWithModelFallback`
-  drops to the next TTS model. A raw network error or timeout does **not** switch — the internal
-  ladder retries it against the same model, and since the whole chain shares one host, another
-  model would not fix a dead connection, only redo two requests per rung for nothing.
+- **Model errors switch immediately; a network error switches only once the ladder is spent.**
+  `synthesizeWithProgress()` rethrows a 503/500/404 as well as a 429 at once (before, only the
+  429 bubbled and a 503 burned the streaming attempts plus the non-streaming fallback against
+  the dead model), so `runWithModelFallback` drops to the next TTS model. A **raw** network
+  error or timeout does not switch on its own — the request is retried a couple of times
+  against the same model (a single dropped connection must not burn the chain), and only when
+  that internal ladder is exhausted is the error `markSwitchable`d so the chain falls to the
+  next model, exactly as the text path does. That last part is new: it is what keeps a dead
+  endpoint — or a persistent stream cut, back when the audio was streamed — from failing the
+  lesson's audio without ever trying the second model.
 - **A 429 switches but is still never retried**, same as the text chain: free-tier limits are
   per model, so the next rung arrives with its own daily quota intact.
 - **`gemini-2.5-pro-preview-tts` is deliberately *not* in the chain.** Measured against the API
