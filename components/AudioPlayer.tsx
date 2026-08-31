@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX, Download, SlidersHorizontal } from 'lucide-react';
+import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX, Download, SlidersHorizontal, Info } from 'lucide-react';
 import { resolveAmbienceScene, type ResolvedAmbience } from '../services/ambiencePresets';
 import { loadBed, bedAssetUrl } from '../services/ambienceLibrary';
 import {
@@ -8,10 +8,17 @@ import {
   DEFAULT_AMBIENCE_INTENSITY,
   DEFAULT_AMBIENCE_VOLUME,
 } from '../services/ambienceEngine';
-import { TextType } from '../types';
+import { TextType, WebSpeechPlan } from '../types';
+import { ACCENT_LOCALE, pickWebSpeechVoices, type VoiceLike } from '../services/webSpeechTts';
 
 interface AudioPlayerProps {
-  speechSrc: string; // Base64 raw PCM
+  speechSrc: string; // Base64 raw PCM. Cadena vacía en modo respaldo (no hay PCM).
+  /**
+   * Plan de respaldo con la voz del navegador (Web Speech API), presente solo
+   * cuando el TTS de Gemini falló y no hay `speechSrc`. Excluyente con el PCM: o
+   * suena la pista PCM, o la voz del navegador. Ver `services/webSpeechTts.ts`.
+   */
+  webSpeech?: WebSpeechPlan | null;
   recommendedSpeed?: number;
   topic?: string;
   ambientKeywords?: string; // AI-generated English keywords
@@ -119,6 +126,7 @@ function savePrefs(prefs: AmbiencePrefs) {
 
 const AudioPlayer: React.FC<AudioPlayerProps> = ({
   speechSrc,
+  webSpeech,
   recommendedSpeed = 1.0,
   topic,
   ambientKeywords,
@@ -152,6 +160,23 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState(recommendedSpeed);
   const [showMixer, setShowMixer] = useState(false);
+
+  // --- MODO RESPALDO (voz del navegador) ---------------------------------
+  // Activo cuando no hay PCM de Gemini pero sí un plan Web Speech. La reproducción
+  // no pasa por el <audio>/Web Audio de la pista: se habla el diálogo con
+  // `speechSynthesis`, intervención por intervención, y el ambiente se mezcla igual
+  // pero su ducking se dispara en las fronteras de cada intervención (no hay
+  // analyser que leer). Sin bytes: no hay descarga WAV ni barra de búsqueda.
+  const isFallback = !speechSrc && !!webSpeech && webSpeech.lines.length > 0;
+  const playRateRef = useRef(playbackRate);
+  useEffect(() => { playRateRef.current = playbackRate; }, [playbackRate]);
+  // Voces del navegador ya resueltas por hablante (mismo objeto que devuelve
+  // getVoices, compatible con VoiceLike). Se rellena de forma perezosa porque
+  // getVoices() puede llegar vacío en el primer tick (ver onvoiceschanged).
+  const speakerVoicesRef = useRef<Map<string, VoiceLike | null> | null>(null);
+  const fallbackLineRef = useRef(0);
+  const [fallbackLine, setFallbackLine] = useState(0);
+  const fallbackTotal = isFallback ? webSpeech!.lines.length : 0;
 
   // Decorative static waveform for the seek bar (stable across renders).
   const waveform = useMemo(
@@ -439,7 +464,99 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     }
   }, [startAmbience, startDuckingLoop]);
 
+  // --- REPRODUCCIÓN EN MODO RESPALDO (Web Speech) ------------------------
+  // Resuelve, una vez, una voz del navegador por hablante del plan. Puede
+  // devolver un mapa vacío si getVoices() aún no cargó (se reintenta; ver el
+  // efecto de `voiceschanged`). Los objetos devueltos son los mismos que
+  // getVoices(), así que valen como `utterance.voice`.
+  const resolveSpeakerVoices = useCallback((): Map<string, VoiceLike | null> => {
+    if (speakerVoicesRef.current) return speakerVoicesRef.current;
+    if (!isFallback || typeof window === 'undefined' || !('speechSynthesis' in window)) return new Map();
+    const voices = window.speechSynthesis.getVoices() as unknown as VoiceLike[];
+    if (!voices || voices.length === 0) return new Map();
+    const order: string[] = [];
+    const genderOf = new Map<string, 'Male' | 'Female' | undefined>();
+    for (const l of webSpeech!.lines) {
+      if (!order.includes(l.speaker)) { order.push(l.speaker); genderOf.set(l.speaker, l.gender); }
+    }
+    const picked = pickWebSpeechVoices(voices, webSpeech!.accent, order.map(s => genderOf.get(s)));
+    const map = new Map<string, VoiceLike | null>();
+    order.forEach((s, i) => map.set(s, picked[i] ?? null));
+    speakerVoicesRef.current = map;
+    return map;
+  }, [isFallback, webSpeech]);
+
+  // Encola todas las intervenciones desde `startIdx`. Cada una lleva la voz de su
+  // hablante y la velocidad actual; su `onstart`/`onend` mueven el contador y
+  // disparan el ducking del ambiente (no hay analyser en este modo).
+  const speakFallbackFrom = useCallback((startIdx: number) => {
+    if (!isFallback || typeof window === 'undefined' || !window.speechSynthesis) return;
+    const synth = window.speechSynthesis;
+    const voices = resolveSpeakerVoices();
+    synth.cancel();
+    const lines = webSpeech!.lines;
+    const from = Math.max(0, Math.min(startIdx, lines.length - 1));
+    fallbackLineRef.current = from;
+    setFallbackLine(from);
+    for (let i = from; i < lines.length; i++) {
+      const line = lines[i];
+      const u = new SpeechSynthesisUtterance(line.text);
+      const v = voices.get(line.speaker) as SpeechSynthesisVoice | null | undefined;
+      if (v) u.voice = v;
+      u.lang = v?.lang || ACCENT_LOCALE[webSpeech!.accent] || 'es-ES';
+      u.rate = playRateRef.current;
+      u.onstart = () => {
+        fallbackLineRef.current = i;
+        setFallbackLine(i);
+        engineRef.current?.applySpeechLevel(0.85);
+      };
+      u.onend = () => {
+        engineRef.current?.applySpeechLevel(0);
+        if (i >= lines.length - 1) {
+          setIsPlaying(false);
+          fallbackLineRef.current = 0;
+          setFallbackLine(0);
+          stopAmbience();
+        }
+      };
+      synth.speak(u);
+    }
+  }, [isFallback, webSpeech, resolveSpeakerVoices, stopAmbience]);
+
+  const startFallbackPlayback = useCallback(() => {
+    ensureAudioContext();
+    if (!engineRef.current) startAmbience();
+    engineRef.current?.applySpeechLevel(0);
+    speakFallbackFrom(fallbackLineRef.current || 0);
+    setIsPlaying(true);
+  }, [ensureAudioContext, startAmbience, speakFallbackFrom]);
+
+  const toggleFallbackPlay = useCallback(() => {
+    const synth = typeof window !== 'undefined' ? window.speechSynthesis : null;
+    if (!synth) return;
+    if (isPlaying) {
+      try { synth.pause(); } catch { /* noop */ }
+      stopAmbience();
+      setIsPlaying(false);
+      return;
+    }
+    if (synth.paused && synth.speaking) {
+      if (!engineRef.current) startAmbience();
+      try { synth.resume(); } catch { /* noop */ }
+      setIsPlaying(true);
+    } else {
+      startFallbackPlayback();
+    }
+  }, [isPlaying, stopAmbience, startAmbience, startFallbackPlayback]);
+
+  const resetFallback = useCallback(() => {
+    fallbackLineRef.current = 0;
+    setFallbackLine(0);
+    startFallbackPlayback();
+  }, [startFallbackPlayback]);
+
   const togglePlay = () => {
+    if (isFallback) { toggleFallbackPlay(); return; }
     if (!speechRef.current) return;
     if (isPlaying) {
       speechRef.current.pause();
@@ -477,6 +594,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   };
 
   const reset = () => {
+    if (isFallback) { resetFallback(); return; }
     if (!speechRef.current) return;
     speechRef.current.currentTime = 0;
     setCurrentTime(0);
@@ -530,10 +648,25 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scene.id]);
 
-  // Tear everything down on unmount.
+  // Modo respaldo: prepara las voces del navegador en cuanto se conocen. getVoices()
+  // suele llegar vacío en el primer tick y se puebla luego, disparando `voiceschanged`;
+  // reintentar ahí deja la voz correcta lista antes del primer play.
+  useEffect(() => {
+    if (!isFallback || typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+    const synth = window.speechSynthesis;
+    const prime = () => { speakerVoicesRef.current = null; resolveSpeakerVoices(); };
+    prime();
+    synth.addEventListener?.('voiceschanged', prime);
+    return () => synth.removeEventListener?.('voiceschanged', prime);
+  }, [isFallback, resolveSpeakerVoices]);
+
+  // Tear everything down on unmount. La cola de `speechSynthesis` es global, así que
+  // hay que cancelarla explícitamente: si no, la voz del respaldo seguiría hablando
+  // tras cambiar de lección (el componente se remonta con key nueva).
   useEffect(() => {
     return () => {
       stopAmbience();
+      try { window.speechSynthesis?.cancel(); } catch { /* noop */ }
       const ctx = ctxRef.current;
       if (ctx && ctx.state !== 'closed') void ctx.close().catch(() => {});
       ctxRef.current = null;
@@ -559,6 +692,13 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const totalStems = scene.recipe.beds.length;
   const setPref = (patch: Partial<AmbiencePrefs>) => setPrefs((p) => ({ ...p, ...patch }));
 
+  // En modo respaldo no hay tiempo ni seek: se puede reproducir en cuanto hay plan,
+  // y el progreso se mide por intervención hablada. En modo PCM manda `speechUrl`.
+  const canPlay = isFallback || !!speechUrl;
+  const progressRatio = isFallback
+    ? (fallbackTotal ? Math.min(1, (fallbackLine + (isPlaying ? 1 : 0)) / fallbackTotal) : 0)
+    : (duration ? currentTime / duration : 0);
+
   return (
     <div className="bg-panel">
       {speechUrl && (
@@ -574,17 +714,34 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         />
       )}
 
+      {/* Aviso de respaldo: la voz del navegador sustituye al TTS de Gemini. */}
+      {isFallback && (
+        <div className="flex gap-2 items-start px-4 pt-3 pb-1 text-[11px] leading-snug text-faint">
+          <Info size={13} className="flex-none mt-[1px] text-muted" />
+          <span>
+            Voz del navegador (respaldo): sin cuota de Gemini disponible. La calidad y
+            el acento son más limitados, y no hay descarga de audio.
+          </span>
+        </div>
+      )}
+
       {/* Seek / waveform */}
       <div className="px-4 pt-3.5">
-        <div onClick={handleSeek} className="relative h-9 cursor-pointer group" role="slider" aria-label="Barra de reproducción" aria-valuenow={Math.round(currentTime)} aria-valuemax={Math.round(duration) || 0}>
+        <div
+          onClick={isFallback ? undefined : handleSeek}
+          className={`relative h-9 group ${isFallback ? 'cursor-default' : 'cursor-pointer'}`}
+          role="slider"
+          aria-label="Barra de reproducción"
+          aria-valuenow={isFallback ? fallbackLine : Math.round(currentTime)}
+          aria-valuemax={isFallback ? Math.max(0, fallbackTotal - 1) : (Math.round(duration) || 0)}
+        >
           <div className="absolute inset-0 flex items-center gap-[2px]">
             {waveform.map((h, i) => {
-              const ratio = duration ? currentTime / duration : 0;
-              const played = (i + 0.5) / waveform.length <= ratio;
+              const played = (i + 0.5) / waveform.length <= progressRatio;
               return (
                 <span
                   key={i}
-                  className={`flex-1 rounded-full transition-colors ${played ? 'bg-fg' : 'bg-line group-hover:bg-faint'}`}
+                  className={`flex-1 rounded-full transition-colors ${played ? 'bg-fg' : `bg-line ${isFallback ? '' : 'group-hover:bg-faint'}`}`}
                   style={{ height: `${h}%` }}
                 />
               );
@@ -592,8 +749,17 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           </div>
         </div>
         <div className="flex justify-between mt-1.5 font-mono text-[11px] text-muted tabular-nums">
-          <span>{formatTime(currentTime)}</span>
-          <span>{formatTime(duration)}</span>
+          {isFallback ? (
+            <>
+              <span>Voz navegador</span>
+              <span>{Math.min(fallbackLine + (isPlaying ? 1 : 0), fallbackTotal)}/{fallbackTotal}</span>
+            </>
+          ) : (
+            <>
+              <span>{formatTime(currentTime)}</span>
+              <span>{formatTime(duration)}</span>
+            </>
+          )}
         </div>
       </div>
 
@@ -601,7 +767,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       <div className="flex items-center gap-2.5 px-4 pb-3.5 pt-1">
         <button
           onClick={togglePlay}
-          disabled={!speechUrl}
+          disabled={!canPlay}
           aria-label={isPlaying ? 'Pausar' : 'Reproducir'}
           className="flex-none w-12 h-12 rounded-full bg-accent text-ink grid place-items-center hover:brightness-105 active:brightness-95 disabled:opacity-50 transition"
         >
@@ -626,7 +792,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
 
         <button
           onClick={reset}
-          disabled={!speechUrl}
+          disabled={!canPlay}
           title="Reiniciar"
           aria-label="Reiniciar"
           className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition group"
@@ -653,15 +819,17 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         >
           <SlidersHorizontal size={17} />
         </button>
-        <button
-          onClick={handleDownload}
-          disabled={!speechUrl}
-          title="Descargar audio (WAV, solo voz)"
-          aria-label="Descargar audio"
-          className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition"
-        >
-          <Download size={16} />
-        </button>
+        {!isFallback && (
+          <button
+            onClick={handleDownload}
+            disabled={!speechUrl}
+            title="Descargar audio (WAV, solo voz)"
+            aria-label="Descargar audio"
+            className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition"
+          >
+            <Download size={16} />
+          </button>
+        )}
       </div>
 
       {/* Ambience mixer (collapsible) */}

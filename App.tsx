@@ -1,8 +1,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode, LessonPlan } from './types';
+import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode, LessonPlan, WebSpeechPlan } from './types';
 import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
 import { generateLessonPlan, generateAudio } from './services/geminiService';
+import { isWebSpeechAvailable, planWebSpeech } from './services/webSpeechTts';
 import { ProgressSnapshot, mergeProgress } from './services/generationProgress';
 import { forgetLesson, isCacheable, lessonCacheKey, readLesson, writeLesson } from './services/lessonCache';
 import AudioPlayer from './components/AudioPlayer';
@@ -114,6 +115,7 @@ const App: React.FC = () => {
                 },
                 lessonPlan: null,
                 audioBlob: null,
+                audioFallback: null,
                 error: null,
             };
         } catch (e) {
@@ -129,6 +131,7 @@ const App: React.FC = () => {
                 },
                 lessonPlan: null,
                 audioBlob: null,
+                audioFallback: null,
                 error: null,
             };
         }
@@ -363,7 +366,7 @@ const App: React.FC = () => {
         planResolvedRef.current = false;
         lastProgressSigRef.current = '';
 
-        setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null }));
+        setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null, audioFallback: null }));
         setAudioError(null);
         setProgress(null);
 
@@ -423,6 +426,7 @@ const App: React.FC = () => {
                         config: { ...prev.config, topic: finalTopic },
                         lessonPlan: cached.plan,
                         audioBlob: cached.audio,
+                        audioFallback: null,
                         status: 'ready'
                     }));
                     return;
@@ -494,6 +498,7 @@ const App: React.FC = () => {
                 setState(prev => ({
                     ...prev,
                     audioBlob: audioUrl,
+                    audioFallback: null,
                     status: 'ready'
                 }));
                 // Solo se guarda la lección completa: una sin audio no ahorra
@@ -502,10 +507,34 @@ const App: React.FC = () => {
             } catch (audioErr: any) {
                 console.warn("Audio generation failed:", audioErr);
                 if (!isCurrent()) return;
+                // FAILSAFE: el audio de Gemini falló (cuota agotada, modelo caído,
+                // red) tras recorrer toda la cadena AUDIO_MODELS. Si el navegador
+                // ofrece Web Speech, se sintetiza el diálogo con su voz —gratis, sin
+                // clave, sin cuota— en vez de dejar la lección muda. Baja la calidad
+                // y la fidelidad del acento, pero siempre hay voz. Sin bytes: la
+                // lección no se cachea (writeLesson ya salta sin audio).
+                if (isWebSpeechAvailable()) {
+                    const fallback: WebSpeechPlan = planWebSpeech(
+                        plan.dialogue,
+                        plan.characters,
+                        state.config.accent
+                    );
+                    if (fallback.lines.length > 0) {
+                        setAudioError(null);
+                        setState(prev => ({
+                            ...prev,
+                            audioBlob: null,
+                            audioFallback: fallback,
+                            status: 'ready'
+                        }));
+                        return;
+                    }
+                }
                 setAudioError(audioErr.message || "Fallo en la generación de audio");
                 setState(prev => ({
                     ...prev,
                     audioBlob: null,
+                    audioFallback: null,
                     status: 'ready'
                 }));
             }
@@ -538,6 +567,7 @@ const App: React.FC = () => {
             status: 'idle',
             lessonPlan: null,
             audioBlob: null,
+            audioFallback: null,
             error: null
         }));
         setAudioError(null);
@@ -878,7 +908,7 @@ const App: React.FC = () => {
                     {/* Player: docked in rail on desktop, fixed to bottom on mobile */}
                     <div className="md:mt-auto md:border-t md:border-line max-md:fixed max-md:bottom-0 max-md:inset-x-0 max-md:z-40 max-md:px-2 max-md:pb-2 max-md:pointer-events-none">
                         <div className="max-md:pointer-events-auto max-md:rounded-2xl max-md:border max-md:border-line max-md:bg-panel max-md:shadow-[0_-12px_32px_-12px_rgba(0,0,0,0.8)] max-md:overflow-hidden">
-                        {audioError ? (
+                        {audioError && !state.audioFallback ? (
                             <div className="p-4 flex gap-3 items-center bg-panel-2">
                                 <AlertTriangle className="text-fg flex-shrink-0" size={20} />
                                 <div className="flex flex-col min-w-0">
@@ -886,10 +916,11 @@ const App: React.FC = () => {
                                     <span className="font-mono text-[10px] text-faint truncate">{audioError.substring(0, 60)}…</span>
                                 </div>
                             </div>
-                        ) : state.audioBlob ? (
+                        ) : (state.audioBlob || state.audioFallback) ? (
                             <AudioPlayer
                                 key={state.lessonPlan?.title || 'audio-player'}
-                                speechSrc={state.audioBlob}
+                                speechSrc={state.audioBlob || ''}
+                                webSpeech={state.audioFallback}
                                 recommendedSpeed={getSpeedForLevel(state.config.level)}
                                 topic={getAmbienceContext()}
                                 explicitQuery={state.lessonPlan?.ambientKeywords}

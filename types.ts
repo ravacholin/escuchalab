@@ -72,6 +72,25 @@ export interface DialogueLine {
   emotion?: string;
 }
 
+/**
+ * Plan de respaldo para sintetizar el diálogo con la Web Speech API del navegador
+ * (`window.speechSynthesis`) cuando el TTS de Gemini falla —cuota agotada, modelo
+ * caído, red— tras recorrer toda la cadena `AUDIO_MODELS`. Es gratis, sin clave,
+ * sin cuota y sin red: no puede «quedarse sin créditos».
+ *
+ * A diferencia de `generateAudio()`, que devuelve base64 de PCM, esto NO produce
+ * bytes: es solo datos serializables que viajan por el estado hasta el
+ * reproductor, que resuelve las voces concretas con `speechSynthesis.getVoices()`
+ * y habla el diálogo intervención por intervención. Por eso el modo respaldo no
+ * tiene descarga WAV ni caché (no hay bytes que guardar).
+ */
+export interface WebSpeechPlan {
+  kind: 'webspeech';
+  accent: Accent;
+  /** Intervenciones en orden de diálogo. `at` es el índice en `dialogue`. */
+  lines: Array<{ at: number; speaker: string; text: string; gender?: 'Male' | 'Female' }>;
+}
+
 export interface ExerciseOption {
   id: string;
   text: string;
@@ -248,5 +267,11 @@ export interface AppState {
   };
   lessonPlan: LessonPlan | null;
   audioBlob: string | null;
+  /**
+   * Plan de respaldo con la voz del navegador, activo solo cuando el audio de
+   * Gemini falló y `audioBlob` quedó en null. Excluyentes: o hay PCM, o hay
+   * respaldo, nunca ambos.
+   */
+  audioFallback: WebSpeechPlan | null;
   error: string | null;
 }

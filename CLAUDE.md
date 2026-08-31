@@ -540,6 +540,43 @@ The config screen has an **«Instrucciones personalizadas»** panel (`App.tsx`) 
 ### Audio Download
 The player (`components/AudioPlayer.tsx`) exposes a **WAV download** of the generated speech, reusing the same `pcmToWavBlob` object URL it already plays — so it costs nothing extra and needs no re-encode. It is **voice only**: the ambience is mixed live in the browser (see Ambient Sound System) and is not part of the file. The filename comes from the lesson title (`downloadName` prop), slugified (NFD-stripped, non-alphanumerics collapsed to `-`, ≤60 chars, with an `escuchalab` fallback).
 
+### Failsafe TTS (voz del navegador)
+
+**Cuando el TTS de Gemini falla, el diálogo se sintetiza con la Web Speech API del
+navegador** (`window.speechSynthesis`) en vez de dejar la lección muda. El nivel gratis de
+Gemini son 10 peticiones de TTS al día por modelo; agotada la cuota —o caído el modelo de
+voz por cualquier motivo— la lección se quedaba sin audio. `window.speechSynthesis` es
+gratis, sin clave, sin cuota y sin red: no puede «quedarse sin créditos». El disparador es
+**cualquier fallo de audio**, no solo la cuota: se activa en el `catch` de audio de
+`App.tsx` (`handleGenerate`), es decir *después* de que `generateAudio` recorra toda la
+cadena `AUDIO_MODELS`.
+
+- **No preserva el contrato PCM.** `generateAudio()` devuelve base64 de PCM (24 kHz mono) y
+  de eso dependen el `<audio>`/Web Audio, la descarga WAV y el caché IndexedDB. La Web
+  Speech **no produce bytes** —habla directa al dispositivo—, así que es un **camino de
+  reproducción paralelo** en `AudioPlayer`, no un reemplazo del PCM. Excluyentes: o hay
+  `audioBlob` (PCM), o hay `audioFallback` (`WebSpeechPlan`), nunca ambos (`types.ts`).
+- **`services/webSpeechTts.ts`** es lógica **pura y serializable**: `planWebSpeech(dialogue,
+  characters, accent)` arma una intervención por turno en orden de diálogo (reutilizando
+  `sanitizeForTTS`/`canonicalSpeakerLabel`/`findCharacter` de `geminiService.ts`), y
+  `pickWebSpeechVoices(voices, accent, genders)` —que recibe la lista de voces como
+  argumento, así se prueba sin navegador— elige la voz por `ACCENT_LOCALE` (acento → BCP-47
+  `es-XX`), degradando a cualquier `es-*` y luego a cualquier voz, y da dos voces distintas
+  a dos hablantes cuando el catálogo lo permite. La resolución de las voces concretas y el
+  habla (encolar utterances, pausa/reanudación) ocurren en `AudioPlayer.tsx`.
+- **Lo que se pierde en modo respaldo:** la fidelidad del acento baja (solo voces `es-XX`
+  del navegador, sin los perfiles fonéticos de Gemini — afecta sobre todo a *Adivina el
+  Acento*), no hay descarga WAV ni caché (no hay bytes; `writeLesson` ya salta sin audio) y
+  no hay barra de búsqueda (el progreso se mide por intervención). **El ambiente sí se
+  mezcla** (es independiente del `<audio>`): su ducking se dispara en las fronteras de cada
+  intervención (`applySpeechLevel` en `onstart`/`onend`) en vez de por RMS, porque no hay
+  analyser que leer. El reproductor muestra un aviso de que está usando la voz de respaldo.
+- **`check:webspeech`** (`scripts/check-webspeech.mjs`, sin navegador ni clave) fija el
+  contrato de la parte pura: `planWebSpeech` produce una intervención por turno en orden con
+  el texto saneado y el género del personaje; `pickWebSpeechVoices` elige el locale correcto,
+  degrada cuando falta y da dos voces distintas a dos hablantes; `ACCENT_LOCALE` cubre los
+  ocho acentos.
+
 ### Styling Approach
 - Tailwind CSS via CDN (no build-time processing)
 - Custom fonts: "Bebas Neue" (display), "Space Grotesk" (sans), "Space Mono" (mono)
@@ -734,6 +771,14 @@ Automated checks (no API key or network needed) — run all with `npm test`:
   announced switch) instead of dying on the first model — the exact case the user reported.
   Finally, that the message shown to the learner when the chain is exhausted says what happened
   (saturation, quota, connection or timeout) instead of printing the raw nested JSON.
+- `npm run check:webspeech` — pins the pure part of the **failsafe TTS** (voz del navegador;
+  see Failsafe TTS above): `planWebSpeech` produces one intervention per turn in dialogue
+  order with the sanitized text and the character's gender, dropping empty turns;
+  `pickWebSpeechVoices` (fed a simulated voice list, no browser) picks the exact locale for
+  the accent, degrades to any `es-*` and then to any voice when the variant is missing, and
+  gives two speakers two distinct voices when the catalogue allows it (reusing one only when
+  there is a single voice); `ACCENT_LOCALE` covers the eight accents; and
+  `isWebSpeechAvailable()` returns false outside a browser without throwing.
 
 Checks that need an API key, network and quota (**not** part of `npm test`):
 - `GEMINI_API_KEY=… npm run check:tts:live [repeticiones]` — the only check that hears what

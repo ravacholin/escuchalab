@@ -348,7 +348,7 @@ function concatBytes(chunks: Uint8Array[], total: number): Uint8Array {
 // que el modelo comete de verdad en respuestas largas en lugar de reventar.
 
 // Sanitize text for TTS to avoid "non-audio response" errors caused by stage directions or formatting
-function sanitizeForTTS(text: string): string {
+export function sanitizeForTTS(text: string): string {
   if (!text) return "";
   return text
     .replace(/[\*\[\]\(\)]/g, '') // Remove * [ ] ( ) characters often used for actions/emotions
@@ -2100,7 +2100,7 @@ function normalizeSpeaker(raw: string): string {
  * el modelo espera ver delante de cada turno— pero sin acotaciones ni signos
  * que puedan romper la correspondencia con el `speechConfig`.
  */
-function canonicalSpeakerLabel(raw: string): string {
+export function canonicalSpeakerLabel(raw: string): string {
   const cleaned = (raw || '')
     .replace(/\([^)]*\)/g, ' ')
     .replace(/[\*\[\]\{\}_"“”:]/g, ' ')
@@ -2109,7 +2109,7 @@ function canonicalSpeakerLabel(raw: string): string {
   return cleaned || (raw || '').trim();
 }
 
-function findCharacter(speaker: string, characters: Character[]): Character | undefined {
+export function findCharacter(speaker: string, characters: Character[]): Character | undefined {
   const target = normalizeSpeaker(speaker);
   if (!target) return undefined;
   const named = characters.filter(c => normalizeSpeaker(c.name));
