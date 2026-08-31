@@ -498,11 +498,25 @@ export interface ResolvedAmbience {
   presence?: number;
 }
 
+/**
+ * Reduce cualquier valor a un texto recortado. El tipo dice `string`, pero estos
+ * campos vienen del modelo (`ambientKeywords`, `ambientScene`, el tema…) y el TTS
+ * no siempre respeta el esquema: `ambientKeywords` llega a veces como **array**
+ * (`["hotel","lobby"]`). Un `value?.trim()` sobre un array reventaba el `useMemo`
+ * de `AudioPlayer` en pleno render y, sin ningún ErrorBoundary, dejaba la pantalla
+ * en negro. Aquí un array se une por espacios y cualquier otra cosa se descarta.
+ */
+const asSceneText = (value: unknown): string => {
+  if (typeof value === 'string') return value.trim();
+  if (Array.isArray(value)) return value.filter(v => typeof v === 'string').join(' ').trim();
+  return '';
+};
+
 export function resolveAmbienceScene(scene: AmbienceScene): ResolvedAmbience {
-  const label = scene.scenarioLabel?.trim() ?? '';
-  const action = scene.scenarioActionLabel?.trim() ?? '';
-  const topic = scene.topic?.trim() ?? '';
-  const keywords = scene.keywords?.trim() ?? '';
+  const label = asSceneText(scene.scenarioLabel);
+  const action = asSceneText(scene.scenarioActionLabel);
+  const topic = asSceneText(scene.topic);
+  const keywords = asSceneText(scene.keywords);
   const textType = scene.textType;
   const combined = [label, action, topic, keywords].filter(Boolean).join(' | ');
 

@@ -217,6 +217,36 @@ if (nearest[0].d < FLOOR) {
 notes.push(`  closest pairs: ${nearest.slice(0, 4).map((n) => `${n.bed}~${n.who}(${n.d.toFixed(2)})`).join(', ')}`);
 
 // ---------------------------------------------------------------------------
+// El TTS no siempre respeta el esquema: `ambientKeywords` (y de rebote el
+// `keywords`/`topic` que llegan a `resolveAmbienceScene`) vuelve a veces como
+// ARRAY en vez de string. Un `value?.trim()` sobre un array reventaba el render
+// de `AudioPlayer` y dejaba la pantalla en negro. `resolveAmbienceScene` tiene
+// que tolerar cualquier forma sin lanzar y seguir resolviendo una escena válida.
+{
+  const weird = [
+    { scenarioLabel: ['Café', 'Restaurante'], keywords: ['coffee', 'cups'], topic: ['hotel', 'lobby'] },
+    { keywords: ['hotel', 'lobby', 'reception'], textType: TextType.Dialogue },
+    { topic: 42, keywords: { a: 1 }, scenarioActionLabel: ['x'] },
+    { scenarioLabel: null, keywords: undefined, topic: '' },
+  ];
+  let crashed = null;
+  for (const input of weird) {
+    try {
+      const res = resolveAmbienceScene(input);
+      if (!res || !res.recipe || !Array.isArray(res.recipe.beds)) {
+        crashed = `resolveAmbienceScene(${JSON.stringify(input)}) devolvió una escena sin beds`;
+        break;
+      }
+    } catch (e) {
+      crashed = `resolveAmbienceScene lanzó con entrada no-string ${JSON.stringify(input)}: ${e.message}`;
+      break;
+    }
+  }
+  if (crashed) fail(crashed);
+  else ok('resolveAmbienceScene tolera keywords/topic/label no-string (array, número, objeto, null) sin reventar');
+}
+
+// ---------------------------------------------------------------------------
 console.log(`\ncheck:ambience — ${scenarios.length} scenario slots, ${SCENE_IDS.length} scenes, ${BED_IDS.length} beds\n`);
 for (const n of notes) console.log(`  ✓ ${n}`);
 if (failures.length) {
