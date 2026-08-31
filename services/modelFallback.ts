@@ -22,16 +22,25 @@
 /**
  * Los cuatro son GA y tienen nivel gratuito (comprobado en la página de precios
  * de la API en agosto de 2026). El orden no es por capacidad sino por
- * **disponibilidad esperada**: se baja de generación en generación porque un
- * pico de demanda golpea a los modelos recién publicados, que son justamente
- * los que más gente está estrenando. `gemini-2.5-flash` cierra la cadena por
- * veterano: es el que menos probable es que esté saturado y el más rodado
- * generando el JSON estructurado que pide la lección.
+ * **rapidez y disponibilidad esperada**.
+ *
+ * El primario es ahora un modelo «lite» a propósito: `gemini-3.6-flash` era el
+ * que abría la cadena y daba dos problemas justamente por ser el más nuevo y
+ * pensante —o estaba saturado (`503 "high demand"`, es el que más gente
+ * estrena) o tardaba ~37 s en emitir el primer token—, con lo que la espera en
+ * «recepción del guion» era larga y frecuente. Un «lite» arranca antes al
+ * primer token y está menos saturado, así que se antepone; `gemini-3.6-flash`
+ * **no se retira**, baja a un escalón posterior y sigue disponible como
+ * alternativa. `gemini-2.5-flash` cierra la cadena por veterano: es el que
+ * menos probable es que esté saturado y el más rodado generando el JSON
+ * estructurado que pide la lección. Bajar de primario a un «lite» es seguro
+ * porque la calidad del output la garantizan `verifyExercises()` y los motores
+ * deterministas, no la potencia del modelo; la cadena existe por disponibilidad.
  */
 export const GENERATION_MODELS = [
-  'gemini-3.6-flash',
   'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
+  'gemini-3.6-flash',
   'gemini-2.5-flash'
 ] as const;
 

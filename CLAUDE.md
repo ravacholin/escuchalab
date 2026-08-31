@@ -563,10 +563,16 @@ Edit `data/scenarios.ts`:
 ### Adjusting Gemini Models
 
 **The text model is a chain, not a constant.** `GENERATION_MODELS`
-(`services/modelFallback.ts`) is `gemini-3.6-flash` → `gemini-3.5-flash-lite` →
-`gemini-3.1-flash-lite` → `gemini-2.5-flash`; all four are GA and on the free tier.
+(`services/modelFallback.ts`) is `gemini-3.5-flash-lite` → `gemini-3.1-flash-lite` →
+`gemini-3.6-flash` → `gemini-2.5-flash`; all four are GA and on the free tier.
 `GENERATION_MODEL` in `geminiService.ts` is just its first rung — the one always tried
-first and the one named on the loading screen.
+first and the one named on the loading screen. The primary is a **lite** model on
+purpose: `gemini-3.6-flash` used to open the chain and, being the newest and a thinking
+model, was either saturated (`503 "high demand"`) or slow to the first token (~37 s), so
+the "recepción del guion" wait was long and frequent. A lite model reaches the first token
+sooner and is less saturated; `gemini-3.6-flash` is **not** removed — it drops to a later
+rung and stays available as a fallback. A lite primary is safe because the verifier and the
+deterministic engines guard the output, not the model's power.
 
 It exists because a `503 UNAVAILABLE — "This model is currently experiencing high demand"`
 from `gemini-3.6-flash` used to leave the app unable to generate anything at all. The
@@ -742,7 +748,7 @@ Manual checklist (needs an API key):
 4b. Same configuration in **Short and in Long** at each level: Short must bring 3-4 cards and Long 4-6, and Short's cards must be literally the first ones of Long.
 4c. A B1-B2 lesson: `spot_the_difference` must render and be answerable — this is the first release in which that format reaches a learner at all (engine, renderer and verifier existed, no slot used them).
 4d. Stage sections: only the first open, the `n/m resueltos` counter tracking submits, and the whole thing reset when a new lesson is generated.
-4e. The model chain, which cannot be triggered on demand by waiting for Google to be busy: put a bogus id (`gemini-no-existe`) temporarily at the head of `GENERATION_MODELS`. The API answers 404, and the loading log must show «"gemini-no-existe" no está disponible (…); se cambia a "gemini-3.6-flash"» followed by «Guion generado con …», with the lesson generating normally. Revert the id afterwards, and confirm a normal lesson's log mentions **no** switch at all and that the `prompt` step still names `gemini-3.6-flash`.
+4e. The model chain, which cannot be triggered on demand by waiting for Google to be busy: put a bogus id (`gemini-no-existe`) temporarily at the head of `GENERATION_MODELS`. The API answers 404, and the loading log must show «"gemini-no-existe" no está disponible (…); se cambia a "gemini-3.5-flash-lite"» followed by «Guion generado con …», with the lesson generating normally. Revert the id afterwards, and confirm a normal lesson's log mentions **no** switch at all and that the `prompt` step still names `gemini-3.5-flash-lite`.
 5. Rendering and submit/feedback for the newer formats (`dictation`, `data_capture`, `minimal_pairs`, `spot_the_difference`, `matching`, `scale`, `true_false_notgiven`, `chunk_order`), including the `sourceTurns` reveal. For `dictation`, type the datum both in digits and in words and confirm both are accepted, type it with a digit missing and confirm it is not, and check on a narrow screen that the box and the revealed datum do not overflow. Generate an A0 "dar un número de teléfono" lesson and **read the transcript before answering**: the datum revealed on submit has to be the *whole* number the audio dictates, not the part of it the harvester could parse — this is the failure the format is most exposed to, because a fragment looks perfectly well-formed on screen.
 6. Audio generation across accent/gender combinations; localStorage persistence; error handling for invalid keys. **Listen to a dialogue whose two characters share a gender** — the case with the least margin — and confirm the two speakers are told apart without reading the transcript. Then listen for the seams, which is where the current design can fail: no turn should start or end mid-word, and the gaps between réplicas should read as a conversation rather than as two monologues spliced together. The loading log names the count: «Turnos intercalados: N fronteras — X por silencio medido, Y por reparto proporcional». A lesson mostly cut by *reparto proporcional* means the model stopped pausing between paragraphs — check the directive in `singleVoiceDirective()` before touching the splitter. The log should also say «2 peticiones, sin reintentos»; anything else is a regression in the cost.
 7. Ambience: confirm the player's `N/M capas` counter reaches the total (it is the tell for a silent bed). Play a `Café / Restaurante`, a `Taxi / Transporte`, a `Taller Mecánico`, an `Aeropuerto / Aerolínea`, an `El Tiempo` (RadioNews) and a `Mi Rutina Diaria` (Podcast) — they should be recognisable blind and clearly different from one another. Check that the bed ducks under speech without pumping between syllables, that the volume/intensity/ducking/mute settings survive generating a new lesson, and that deleting `public/ambience/` degrades to a working player rather than an error.
