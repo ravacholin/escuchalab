@@ -636,6 +636,20 @@ of the *moment*:
   code was buried in a JSON nested inside another JSON. `isModelNotFoundError` exists so
   that the day Google retires one of the four ids — `gemini-2.0-flash` went in June 2026 —
   the app drops to the next one instead of breaking.
+- **A 429 switches only when switching can help** (`quotaScope`). The free tier has two
+  kinds of quota and only one is cured by another model. A **per-model** limit
+  (`…PerProjectPerModel…`, the "10 requests/day per model" bucket) means the next rung
+  arrives with its own quota intact, so the switch is immediate and worth it. A
+  **per-project/per-key** limit is shared across every model, so walking the chain would
+  only spend one round-trip per rung against a bucket already at zero — exactly the waste
+  the whole module exists to avoid. So `shouldSwitchModel` returns **false** for a
+  project-scoped quota: the error is rethrown at once, `describeModelChainFailure` says
+  switching won't help and to wait for the daily reset, and the audio path falls straight
+  to the browser-voice failsafe instead of churning. The signal is in the 429's
+  `QuotaFailure` details — `PerModel` in the `quotaId` or a `model` dimension → per-model;
+  a bare `PerProject`/`PerUser` with no model dimension → per-project. **Unknown scope
+  defaults to switching**: recovering real output from a fresh model beats the failsafe, and
+  one wasted round-trip is cheap, so only positive project-scope evidence cuts the chain.
 - **Everything else keeps the existing ladder first**: network failures, a stream cut
   halfway, an empty response, a timeout. A *single* dropped connection must not burn the
   whole chain, so a raw network/timeout error does **not** switch models on its own — it is
@@ -662,9 +676,13 @@ flow has started is short (`STREAM_STALL_MS` 30 s), under a hard total cap
 `dialogue` step's detail ("esperando la respuesta del modelo… (N s)") so the screen no longer
 looks frozen. The audio path (`synthesizeWithProgress`) carries the same guard.
 
-**A 429 switches models but is still never retried.** The two are not in tension: free-tier
-limits are *per model*, so the next rung arrives with its own quota intact, while the rule
-that actually matters — never repeat the same request against the same limit — is untouched.
+**A 429 switches models but is still never retried** — and now only when switching can help.
+The two are not in tension: a **per-model** free-tier limit means the next rung arrives with
+its own quota intact, so the switch is instant, while the rule that actually matters — never
+repeat the same request against the same limit — is untouched. A **per-project/per-key** limit
+(`quotaScope === 'project'`) is the exception: it is shared across every model, so the chain
+is not walked at all — the error is rethrown at once so the app warns and falls to the
+failsafe rather than burning a request per rung against a bucket already at zero.
 
 The order of the chain is by **expected availability**, not by capability: a demand spike
 hits the newest models, which are the ones everyone is trying out. `gemini-2.5-flash` closes
@@ -713,8 +731,12 @@ chain's first rung — the one always tried first and named on the loading scree
   next model, exactly as the text path does. That last part is new: it is what keeps a dead
   endpoint — or a persistent stream cut, back when the audio was streamed — from failing the
   lesson's audio without ever trying the second model.
-- **A 429 switches but is still never retried**, same as the text chain: free-tier limits are
-  per model, so the next rung arrives with its own daily quota intact.
+- **A 429 switches but is still never retried**, same as the text chain — and, like it, only
+  when switching helps (`quotaScope`): a **per-model** limit lets the next rung arrive with its
+  own daily quota intact, so it switches; a **per-project/per-key** limit is shared across every
+  TTS model, so `runWithModelFallback` does not walk to the second model — the 429 is rethrown
+  at once and the lesson falls straight to the browser-voice failsafe (App.tsx), which has no
+  quota, instead of spending a request on a model that would 429 the same way.
 - **`gemini-2.5-pro-preview-tts` is deliberately *not* in the chain.** Measured against the API
   (August 2026, free-tier key) it returns `429` with `limit: 0` on
   `GenerateRequestsPerDayPerProjectPerModel-FreeTier` for `gemini-2.5-pro-tts` — i.e. zero
@@ -756,7 +778,12 @@ Automated checks (no API key or network needed) — run all with `npm test`:
   verbatim (a JSON inside another JSON, `status` empty, the code only in `code` and in the
   text) as unavailable and *not* as quota; a 429 and a retired model id as switchable; and a
   *raw* `socket hang up` / `Failed to fetch` / empty response as **not** switchable on its own
-  — a single dropped connection must not burn the whole chain. It also pins the new half:
+  — a single dropped connection must not burn the whole chain. It pins **the quota scope**
+  too: a 429 whose `QuotaFailure` names `PerModel` (or a `model` dimension) is `quotaScope`
+  `'model'` and switches; a bare `PerProject` 429 is `'project'` and does **not** switch —
+  `runWithModelFallback` stops on the first model so the app falls to the failsafe instead of
+  walking the chain, and `describeModelChainFailure` says switching won't help; a 429 with no
+  detail is `'unknown'` and switches (the optimistic default). It also pins the new half:
   `Failed to fetch` and `fetch failed` and `ECONNRESET` classify as network, an `AbortError`
   and our own "no envió datos" / "superó el tiempo" messages as timeout, and the *same*
   network error **once `markSwitchable` has tagged it** (i.e. after the internal ladder gave

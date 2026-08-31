@@ -155,6 +155,79 @@ export function isQuotaError(error: unknown): boolean {
 }
 
 /**
+ * ¿Cambiar de modelo arreglaría esta falta de cuota, o no?
+ *
+ * El nivel gratuito de Gemini tiene dos clases de límite, y solo una la cura
+ * otro modelo:
+ *  - **Por modelo** (`…PerProjectPerModel…`, la de «10 peticiones al día por
+ *    modelo»): cada modelo lleva su propio cubo, así que el siguiente escalón de
+ *    la cadena llega con su cuota intacta. Cambiar tiene todo el sentido, y por
+ *    eso se hace **al instante**, sin reintentar contra el que ya se agotó.
+ *  - **Por proyecto/clave** (un límite que comparten todos los modelos): agotado
+ *    ese, los demás modelos devuelven el mismo 429. Recorrer la cadena solo
+ *    gasta idas y vueltas contra un cupo que ya está a cero —justo lo que el
+ *    resto del módulo evita—, así que **no** se cambia de modelo: se avisa y se
+ *    cae al respaldo (la voz del navegador en el audio; el mensaje claro en el
+ *    texto).
+ *
+ * La pista está en los detalles del 429 de Gemini (`QuotaFailure`): el
+ * `quotaId`/métrica lleva `PerModel` cuando el límite es por modelo, o trae una
+ * dimensión `model`. Ante la duda se devuelve `'unknown'`, que el llamador trata
+ * como «cambia igual»: recuperar la salida real de otro modelo vale más que el
+ * respaldo, y una ida y vuelta de más es barata; solo la evidencia **positiva**
+ * de un límite por proyecto corta la cadena.
+ */
+export type QuotaScope = 'model' | 'project' | 'unknown';
+
+/**
+ * El texto del error más su serialización completa, para poder mirar dentro de
+ * los `details`/`violations` del 429 y no solo en `message`. Igual que con el
+ * 503, el dato que importa puede venir anidado y no en un campo de primer nivel.
+ */
+function deepErrorText(error: unknown): string {
+  let serialized = '';
+  try {
+    serialized = JSON.stringify(error, Object.getOwnPropertyNames((error as object) ?? {}));
+  } catch {
+    /* referencias circulares: nos quedamos con el mensaje */
+  }
+  return `${errorText(error)} ${serialized}`.toLowerCase();
+}
+
+export function quotaScope(error: unknown): QuotaScope {
+  if (!isQuotaError(error)) return 'unknown';
+  const text = deepErrorText(error);
+
+  // Señal de límite **por modelo**: se comprueba primero porque el id del cupo
+  // diario (`…PerDayPerProjectPerModel…`) contiene también «PerProject», y sin
+  // este orden se clasificaría mal como de proyecto.
+  if (
+    text.includes('permodel') ||
+    text.includes('per model') ||
+    text.includes('per-model') ||
+    /"model"\s*:/.test(text)
+  ) {
+    return 'model';
+  }
+
+  // Señal de límite **por proyecto/clave/usuario** sin dimensión de modelo: lo
+  // comparten todos los modelos, así que cambiar no cura. (Aquí ya se sabe que
+  // no había marca «PerModel», por el return de arriba.)
+  if (
+    text.includes('perproject') ||
+    text.includes('per project') ||
+    text.includes('project-level') ||
+    text.includes('project quota') ||
+    text.includes('peruser') ||
+    text.includes('per user')
+  ) {
+    return 'project';
+  }
+
+  return 'unknown';
+}
+
+/**
  * El modelo existe pero ahora mismo no atiende: saturación (503) o fallo
  * interno (500). Es transitorio para el servicio y permanente para esta
  * generación, porque el usuario está esperando delante de la pantalla.
@@ -287,16 +360,23 @@ const isMarkedSwitchable = (error: unknown): boolean =>
 /**
  * ¿Puede otro modelo responder a esto?
  *
- * Cambian de modelo los errores del modelo (saturación, cuota, id retirado) y
- * los que la escalera interna ya ha marcado como conmutables tras agotarse
+ * Cambian de modelo los errores del modelo (saturación, id retirado), la cuota
+ * **por modelo** (cada modelo lleva su propio cupo del nivel gratuito) y los que
+ * la escalera interna ya ha marcado como conmutables tras agotarse
  * (`markSwitchable`) —red caída, timeout—. Un error de red **suelto**, que aún
  * no ha pasado por la escalera, no cambia de modelo: lo reintenta antes esa
  * escalera contra el mismo modelo, y solo si se agota se marca para seguir
  * bajando. Así un corte único no se come la cadena entera de golpe, pero un
  * «Failed to fetch» persistente ya no deja la app sin generar nada.
+ *
+ * La única cuota que **no** cambia de modelo es la de proyecto/clave
+ * (`quotaScope === 'project'`): la comparten todos los modelos, así que probar
+ * el siguiente solo gastaría otra ida y vuelta contra el mismo cupo a cero. Ese
+ * caso se relanza al instante para caer al respaldo (ver `quotaScope`).
  */
 export function shouldSwitchModel(error: unknown): boolean {
-  return isModelError(error) || isMarkedSwitchable(error);
+  if (isQuotaError(error)) return quotaScope(error) !== 'project';
+  return isModelUnavailableError(error) || isModelNotFoundError(error) || isMarkedSwitchable(error);
 }
 
 /**
@@ -355,6 +435,11 @@ export async function runWithModelFallback<T>(
 export function describeModelChainFailure(error: unknown, tried: number): string | null {
   const modelos = tried === 1 ? 'el modelo de texto' : `los ${tried} modelos de texto probados`;
   if (isQuotaError(error)) {
+    if (quotaScope(error) === 'project') {
+      return 'se agotó la cuota diaria de la clave de API. Es un límite del proyecto que ' +
+        'comparten todos los modelos, así que cambiar de modelo no ayuda; el nivel gratuito ' +
+        'se renueva cada día, vuelve a intentarlo más tarde.';
+    }
     return `se agotó la cuota en ${modelos}. El nivel gratuito se renueva cada día; ` +
       'vuelve a intentarlo más tarde.';
   }
