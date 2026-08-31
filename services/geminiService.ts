@@ -250,20 +250,24 @@ export async function generateJsonWithProgress(
       stallMs: STREAM_STALL_MS,
       totalMs: STREAM_TOTAL_MS
     });
-    // Latido mientras se espera el primer chunk: el modelo puede pensar decenas
-    // de segundos antes de emitir, y sin esto la barra se ve parada.
+    // Latido durante TODO el stream, no solo hasta el primer chunk. Mide el hueco
+    // desde el último dato recibido: antes del primero cubre la espera de
+    // «pensamiento» del modelo; ya empezado, avisa de un parón a media respuesta
+    // (la cola de ejercicios), que antes quedaba mudo hasta que la guarda de
+    // inactividad lo abortaba —hasta 30 s de pantalla congelada—.
     const waitStart = Date.now();
-    let beating = true;
+    let lastActivityAt = waitStart;
     const heartbeat = setInterval(() => {
-      if (beating) hooks.onWaiting?.(Date.now() - waitStart);
+      const idle = Date.now() - lastActivityAt;
+      if (idle >= 2500) hooks.onWaiting?.(idle);
     }, 2500);
     unref(heartbeat);
-    const stopBeat = () => { beating = false; clearInterval(heartbeat); };
+    const stopBeat = () => clearInterval(heartbeat);
     try {
       const stream = await ai.models.generateContentStream(withSignal(params, guard.signal));
       for await (const chunk of stream) {
         guard.ping(); // llegó algo: el stream no está colgado
-        stopBeat();
+        lastActivityAt = Date.now();
         const delta = chunk.text ?? '';
         if (!delta) continue;
         accumulated += delta;
@@ -1553,14 +1557,23 @@ export const generateLessonPlan = async (
             onFallback: (reason) => {
               reporter.log(`Streaming no disponible (${briefly(reason)}); se pide la respuesta completa`, 'warn');
             },
-            onWaiting: (elapsedMs) => {
-              // El modelo aún no ha emitido nada: se mueve el detalle para que no
-              // parezca congelado, sin inventar porcentaje (no hay denominador).
-              if (exercisesStarted || turnsSeen > 0) return;
-              reporter.update('dialogue', {
-                detail: `esperando la respuesta del modelo… (${Math.round(elapsedMs / 1000)} s)`,
-                counters: [{ label: 'Espera', value: `${Math.round(elapsedMs / 1000)} s` }]
-              });
+            onWaiting: (idleMs) => {
+              // `idleMs` = tiempo desde el último chunk. Antes del primero es la
+              // espera de «pensamiento»; ya empezado, un parón a media respuesta
+              // (típicamente en la cola de ejercicios). En ambos casos se mueve el
+              // detalle del paso EN CURSO para que no parezca congelado, sin tocar
+              // ratio ni métricas (nada de avance ni caudal inventados).
+              const secs = Math.round(idleMs / 1000);
+              if (exercisesStarted) {
+                reporter.update('exercises', { detail: `esperando más datos del modelo… (${secs} s)` });
+              } else if (turnsSeen > 0) {
+                reporter.update('dialogue', { detail: `esperando más datos del modelo… (${secs} s)` });
+              } else {
+                reporter.update('dialogue', {
+                  detail: `esperando la respuesta del modelo… (${secs} s)`,
+                  counters: [{ label: 'Espera', value: `${secs} s` }]
+                });
+              }
             }
           }
         ),
