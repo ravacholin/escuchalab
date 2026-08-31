@@ -180,6 +180,11 @@ export const SCENE_RECIPES = {
                     { level: 0.8, events: [E('door', 30, 0.12, 'far'), E('chair', 26, 0.08), E('paper', 22, 0.07)] }),
   clinic_room:   R('Consulta',        [B('room_air', 1.0)],
                     { level: 0.9, events: [E('paper', 16, 0.1), E('chair', 30, 0.08)] }),
+  // A vet consult is a real room with people (and animals) in it, not the near-silent
+  // close-miked air of clinic_room/therapy_room — a synthetic hiss bed there just reads
+  // as loud static. Uses the real `office` recording, low, with faint reception activity.
+  vet_clinic:    R('Veterinaria',     [B('office', 0.55, { width: 0.6 })],
+                    { level: 0.8, events: [E('door', 30, 0.12, 'far'), E('chair', 28, 0.09), E('paper', 22, 0.07)] }),
   hospital:      R('Hospital',        [B('hall', 0.55, { width: 0.7 })],
                     { level: 0.8, tone: { tiltDb: -1 }, events: [E('door', 26, 0.12, 'far'), E('steps', 18, 0.1)] }),
   therapy_room:  R('Terapia',         [B('room_air', 0.9)],
@@ -277,7 +282,7 @@ const DIALOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Entrevista de Trabajo': 'office_meeting',
   'Banco / Finanzas': 'bank',
   'Consulta Médica': 'clinic_room',
-  'Veterinaria': 'clinic_room',
+  'Veterinaria': 'vet_clinic',
   'Cena con Amigos': 'restaurant',
   'Aeropuerto / Aerolínea': 'airport',
   'Servicio al Cliente': 'call_center',
@@ -439,6 +444,7 @@ const KEYWORD_SCENES: Array<{ scene: SceneId; pattern: RegExp }> = [
   { scene: 'cafe', pattern: /(café|cafe|cafetería|cafeteria|desayuno|merienda|coffee|breakfast)/i },
   { scene: 'restaurant', pattern: /(restaurante|comida|cena|almuerzo|menú|menu|camarero|mesero|restaurant|dinner|lunch)/i },
   { scene: 'bar_night', pattern: /(bar|copas|cerveza|cóctel|coctel|pub|nightlife|fiesta)/i },
+  { scene: 'vet_clinic', pattern: /(veterinar|mascota|animal)/i },
   { scene: 'hospital', pattern: /(hospital|urgencias|clínica|clinica|enfermer|emergency)/i },
   { scene: 'clinic_room', pattern: /(médico|medico|doctor|consulta|salud|síntoma|sintoma|dentista|health)/i },
   { scene: 'shop_small', pattern: /(tienda|farmacia|comprar|ropa|zapatos|shop|store|pharmacy)/i },
