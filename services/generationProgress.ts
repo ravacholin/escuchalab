@@ -82,6 +82,36 @@ export interface ProgressSnapshot {
 
 export type ProgressListener = (snapshot: ProgressSnapshot) => void;
 
+/**
+ * Decide qué instantánea muestra la pantalla de carga cuando el plan y el audio
+ * reportan A LA VEZ. El audio arranca en paralelo (en cuanto el diálogo llega,
+ * antes de que terminen los ejercicios), así que las dos fases se solapan y sus
+ * `onProgress` se pisan. La regla:
+ *
+ *  - Misma fase: avance normal, siempre se actualiza.
+ *  - Un snapshot 'plan' cuando el plan YA resolvió: es un flush rezagado; se
+ *    ignora para no retroceder la pantalla (la intención original del filtro).
+ *  - Un snapshot 'plan' con el audio ya al 100% (`finished`) y el plan aún vivo:
+ *    ESTE es el caso que se quedaba colgado. Se muestra la Fase 1 en vivo
+ *    (verificación, reintentos, cambio de modelo) en lugar de un 100% congelado.
+ *  - Un snapshot 'plan' mientras el audio sigue en streaming: se conserva el
+ *    audio para no parpadear entre fases (sus barras se están moviendo).
+ *  - Cualquier snapshot 'audio' manda (inicio/reanudación de la Fase 2).
+ */
+export function mergeProgress(
+  prev: ProgressSnapshot | null,
+  snapshot: ProgressSnapshot,
+  planResolved: boolean
+): ProgressSnapshot {
+  if (!prev || prev.phase === snapshot.phase) return snapshot;
+  if (snapshot.phase === 'plan') {
+    if (planResolved) return prev;
+    if (prev.phase === 'audio' && prev.finished) return snapshot;
+    if (prev.phase === 'audio') return prev;
+  }
+  return snapshot;
+}
+
 /** Máxima frecuencia de emisión para actualizaciones continuas (chunks). */
 const THROTTLE_MS = 90;
 

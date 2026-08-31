@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode, LessonPlan } from './types';
 import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
 import { generateLessonPlan, generateAudio } from './services/geminiService';
-import { ProgressSnapshot } from './services/generationProgress';
+import { ProgressSnapshot, mergeProgress } from './services/generationProgress';
 import { forgetLesson, isCacheable, lessonCacheKey, readLesson, writeLesson } from './services/lessonCache';
 import AudioPlayer from './components/AudioPlayer';
 import ExerciseCard from './components/ExerciseCard';
@@ -42,12 +42,25 @@ const getSpeedForLevel = (level: Level): number => {
     return 1.0;
 };
 
+// Reloj de vigilancia de la generación: si NADA reporta progreso en este margen,
+// se asume que algo se colgó (una señal de aborto ignorada, una promesa que no
+// resuelve) y se muestra un error en vez de un spinner eterno. Es un margen de
+// INACTIVIDAD, se rearma con cada emisión, así que un reintento o un cambio de
+// modelo (que reportan) nunca lo disparan. 180 s > REQUEST_TOTAL_MS (150 s) y
+// STREAM_STALL_MS (30 s): las guardas por petición saltan siempre antes; esto
+// solo atrapa el caso «la guarda saltó pero el stream nunca terminó».
+const GENERATION_WATCHDOG_MS = 180_000;
+
 // ¿El diálogo con el que se lanzó el TTS pronto sigue siendo el de la lección
 // final? Solo turno a turno (hablante + texto): si un reintento cambió el guion,
-// hay que descartar ese audio y regenerar sobre el diálogo definitivo.
+// hay que descartar ese audio y regenerar sobre el diálogo definitivo. El texto
+// se normaliza en espacios para no disparar una segunda síntesis (2 peticiones
+// TTS de las 10/día) solo porque la reparación del JSON retocó un espacio.
+const normalizeTurnText = (text: string): string => text.replace(/\s+/g, ' ').trim();
 const dialoguesEqual = (a: LessonPlan['dialogue'], b: LessonPlan['dialogue']): boolean =>
     a.length === b.length &&
-    a.every((line, i) => line.speaker === b[i].speaker && line.text === b[i].text);
+    a.every((line, i) =>
+        line.speaker === b[i].speaker && normalizeTurnText(line.text) === normalizeTurnText(b[i].text));
 
 // Recuerda el último nivel elegido por el usuario para que sea el default la próxima vez.
 const DEFAULT_LEVEL_KEY = 'escuchalab_default_level';
@@ -187,12 +200,64 @@ const App: React.FC = () => {
     // Progreso medido de la generación (lo reportan los propios servicios).
     const [progress, setProgress] = useState<ProgressSnapshot | null>(null);
 
-    // Una instantánea rezagada de la fase anterior no debe pisar a la actual:
-    // los reportes van con un pequeño throttling y el guion termina justo
-    // cuando el audio empieza.
-    const trackProgress = useCallback((snapshot: ProgressSnapshot) => {
-        setProgress(prev => (prev?.phase === 'audio' && snapshot.phase === 'plan' ? prev : snapshot));
+    // --- Guardas de la generación en curso ---
+    // `planResolvedRef` solo es true cuando generateLessonPlan ya resolvió: hasta
+    // entonces las instantáneas del plan deben verse aunque el audio (que corre en
+    // paralelo) ya esté al 100%, o la pantalla se congela en la Fase 2.
+    const planResolvedRef = useRef(false);
+    // Contador de corridas: al vigilante saltar (o al empezar otra generación) se
+    // incrementa, invalidando el cierre de la corrida vieja para que su
+    // `setState` tardío no pise la pantalla de error ni salte al reproductor.
+    const generationRunRef = useRef(0);
+    const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    // true solo mientras una corrida está en vuelo: impide que un reporte tardío
+    // de una promesa huérfana (p. ej. el audio temprano descartado) rearme un
+    // vigilante después de que la corrida ya terminó.
+    const generatingRef = useRef(false);
+    // Firma del último progreso REAL visto (fase · paso · % entero). Sirve para
+    // distinguir avance real de un mero latido de espera, que solo mueve un
+    // contador: solo el primero rearma el vigilante.
+    const lastProgressSigRef = useRef('');
+
+    const clearWatchdog = useCallback(() => {
+        if (watchdogRef.current) {
+            clearTimeout(watchdogRef.current);
+            watchdogRef.current = null;
+        }
     }, []);
+
+    // Rearma el reloj de inactividad para la corrida actual.
+    const armWatchdog = useCallback(() => {
+        if (!generatingRef.current) return;
+        clearWatchdog();
+        const runId = generationRunRef.current;
+        watchdogRef.current = setTimeout(() => {
+            if (generationRunRef.current !== runId) return;
+            generationRunRef.current++; // neutraliza cualquier cierre tardío de esta corrida
+            setState(prev =>
+                (prev.status === 'generating_plan' || prev.status === 'generating_audio')
+                    ? {
+                          ...prev,
+                          status: 'error',
+                          error: 'La generación se quedó sin respuesta. Puede ser una saturación temporal del servicio. Vuelve a intentarlo.'
+                      }
+                    : prev
+            );
+        }, GENERATION_WATCHDOG_MS);
+    }, [clearWatchdog]);
+
+    // Funde las dos fases que se solapan (ver `mergeProgress`) mostrando la del
+    // plan mientras siga vivo en lugar de un audio ya al 100%. Rearma el vigilante
+    // SOLO ante progreso real (cambia fase, paso o %), no ante un latido de espera:
+    // si no, un stream colgado que sigue latiendo lo mantendría vivo para siempre.
+    const trackProgress = useCallback((snapshot: ProgressSnapshot) => {
+        const sig = `${snapshot.phase}:${snapshot.activeStepId ?? ''}:${Math.floor(snapshot.percent)}`;
+        if (sig !== lastProgressSigRef.current) {
+            lastProgressSigRef.current = sig;
+            armWatchdog();
+        }
+        setProgress(prev => mergeProgress(prev, snapshot, planResolvedRef.current));
+    }, [armWatchdog]);
 
     /**
      * Ejercicios agrupados por etapa de escucha, en el orden metodológico
@@ -291,6 +356,13 @@ const App: React.FC = () => {
     }, [state.config.level, state.config.textType, isCustomMode]);
 
     const handleGenerate = async (options?: { skipCache?: boolean }) => {
+        // Nueva corrida: se invalida el cierre de cualquier corrida anterior aún
+        // en vuelo y se arranca con el plan sin resolver.
+        const runId = ++generationRunRef.current;
+        const isCurrent = () => generationRunRef.current === runId;
+        planResolvedRef.current = false;
+        lastProgressSigRef.current = '';
+
         setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null }));
         setAudioError(null);
         setProgress(null);
@@ -337,12 +409,15 @@ const App: React.FC = () => {
         const cacheable = isCacheable(cacheParts);
         setCurrentCacheKey(cacheable ? cacheKey : null);
 
+        generatingRef.current = true;
+        armWatchdog();
         try {
             // Misma configuración = misma lección (el diálogo se pide con
             // temperature 0). Si ya se generó, no se vuelve a pagar el pipeline.
             if (cacheable && !options?.skipCache) {
                 const cached = await readLesson(cacheKey);
                 if (cached) {
+                    if (!isCurrent()) return;
                     setState(prev => ({
                         ...prev,
                         config: { ...prev.config, topic: finalTopic },
@@ -384,6 +459,11 @@ const App: React.FC = () => {
                 }
             );
 
+            // El plan ya resolvió: desde aquí, un snapshot rezagado de la Fase 1
+            // no debe volver a mostrarse por encima del audio (ver mergeProgress).
+            if (!isCurrent()) return;
+            planResolvedRef.current = true;
+
             setState(prev => ({
                 ...prev,
                 config: { ...prev.config, topic: finalTopic },
@@ -410,6 +490,7 @@ const App: React.FC = () => {
                         trackProgress
                     );
                 }
+                if (!isCurrent()) return;
                 setState(prev => ({
                     ...prev,
                     audioBlob: audioUrl,
@@ -420,6 +501,7 @@ const App: React.FC = () => {
                 if (cacheable) void writeLesson(cacheKey, plan, audioUrl);
             } catch (audioErr: any) {
                 console.warn("Audio generation failed:", audioErr);
+                if (!isCurrent()) return;
                 setAudioError(audioErr.message || "Fallo en la generación de audio");
                 setState(prev => ({
                     ...prev,
@@ -430,11 +512,17 @@ const App: React.FC = () => {
 
         } catch (error: any) {
             console.error("Critical Generation Error:", error);
+            if (!isCurrent()) return;
             setState(prev => ({
                 ...prev,
                 status: 'error',
                 error: error.message || "FALLO CRÍTICO EN LA SECUENCIA DE GENERACIÓN."
             }));
+        } finally {
+            // Éxito, error o abandono: la corrida terminó, se apaga su vigilante.
+            // (Si saltó el watchdog, el timer ya disparó; clearTimeout es inocuo.)
+            generatingRef.current = false;
+            clearWatchdog();
         }
     };
 
