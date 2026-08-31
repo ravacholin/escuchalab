@@ -963,16 +963,31 @@ Devuélvelos en el array "exercises" en ese mismo orden y sólo con los campos d
  * línea pesaba más que el registro fino de la escena (que además iba enterrado
  * dentro de `Tema:`). Lo regional tiene que oírse en cómo se pronuncia y se
  * conjuga, no en las muletillas: así la variante se mantiene sin romper el tono.
+ *
+ * El segundo síntoma, el que motiva esta revisión: las muletillas NO son un
+ * bloque único. Los marcadores del discurso neutros ("bueno", "o sea", "la
+ * verdad", "a ver", "es que", "mire/mirá") son habla natural en casi cualquier
+ * registro y solo hay que dosificarlos; los apelativos y el argot marcados
+ * ("güey", "boludo/a", "weón", "tío/a", "chido"…) son EXCLUSIVOS del trato entre
+ * pares. Meter "mucho güey en la entrevista de trabajo" o un "boludo" en la
+ * consulta rompe el registro aunque el trato de usted se respete. La regla no es
+ * prohibir las muletillas —eso vuelve a sonar a manual— sino ESCALAR su cantidad
+ * y su fuerza con la formalidad de la escena.
  */
 const REGISTER_CONSISTENCY =
   'REGISTRO Y VARIANTE: el tono lo fija la SITUACIÓN. Lo regional se oye en la PRONUNCIACIÓN, la gramática ' +
-  '(voseo/tuteo/ustedeo), el léxico cotidiano y la realia. En escenas DISTENDIDAS entre pares (amigos, familia, ' +
-  'confianza, gente joven) el registro natural ES el coloquial: usa CON SOLTURA las muletillas, los apelativos ' +
-  'y el argot propios de la variante que describe CONTEXT ("che", "boludo/a", "weón", "cachái", "güey", "tío/a", ' +
-  '"po", "pana", "chido", "guay", "bacán", "chévere"…) — así habla la gente de verdad, y sin eso el diálogo suena ' +
-  'a manual. Solo cuídate de no amontonarlos ni volverlos caricatura. En trato de SERVICIO, jerárquico, ' +
-  'profesional, sanitario, administrativo o institucional se mantiene el trato de respeto (usted donde corresponda) ' +
-  'y se dejan fuera el argot y las muletillas fuertes. Las groserías fuertes, solo si el tema lo pide explícitamente. ' +
+  '(voseo/tuteo/ustedeo), el léxico cotidiano y la realia, NO en la carga de argot. Las muletillas y apelativos ' +
+  'se ESCALAN con el registro, en dos niveles: (1) marcadores del discurso neutros ("bueno", "o sea", "la verdad", ' +
+  '"a ver", "es que", "digamos", "mire/mirá", "¿no?") — naturales con medida en casi cualquier escena hablada, ' +
+  'incluso semiformal; en lo muy formal, pocos y sobrios. (2) Apelativos y argot marcados de la variante ("che", ' +
+  '"boludo/a", "weón", "cachái", "güey", "tío/a", "po", "pana", "chido", "guay", "bacán", "chévere"…) — SOLO en ' +
+  'escenas DISTENDIDAS entre pares (amigos, familia, confianza, gente joven): ahí el registro natural ES el ' +
+  'coloquial y hay que usarlos CON SOLTURA, sin eso el diálogo suena a manual, cuidando solo de no amontonarlos ' +
+  'ni volverlos caricatura. En trato de SERVICIO, jerárquico, profesional, sanitario, administrativo o ' +
+  'institucional (una entrevista de trabajo, una consulta médica, una gestión en ventanilla) se mantiene el trato ' +
+  'de respeto (usted donde corresponda) y quedan FUERA el argot y los apelativos marcados: nada de "güey", ' +
+  '"boludo" ni "weón" ahí, por natural que suene entre amigos. Que la escena sea "cercana" o "de confianza" es ' +
+  'calidez y cortesía, NO licencia para el argot. Las groserías fuertes, solo si el tema lo pide explícitamente. ' +
   'Siempre natural y coherente con la escena.';
 
 /**
@@ -988,13 +1003,16 @@ const REGISTER_CONSISTENCY =
 const SPOKEN_NATURALNESS =
   'HABLA REAL (naturalidad, IMPORTANTE): esto es lengua HABLADA y espontánea, no lengua escrita leída en voz alta. ' +
   'Escribe como habla de verdad la gente de esa región, con el ritmo y las pequeñas imperfecciones de la conversación viva: ' +
-  '(a) Muletillas y marcadores del discurso propios de la variante, con medida ("o sea", "bueno", "pues", "mira/mirá", ' +
-  '"es que", "la verdad", "digamos", "a ver", "¿viste?/¿sabés?/¿sabes?/¿cachái?/¿no?", "dale/vale/órale"). ' +
+  '(a) Muletillas y marcadores del discurso propios de la variante, con medida y DOSIFICADOS SEGÚN EL REGISTRO (ver ' +
+  'REGISTRO Y VARIANTE): los neutros ("o sea", "bueno", "pues", "mira/mirá", "es que", "la verdad", "digamos", "a ver", ' +
+  '"¿viste?/¿sabés?/¿sabes?/¿no?") caben incluso en lo semiformal; los apelativos y el argot marcados ("güey", "boludo", ' +
+  '"weón", "tío", "dale/órale"…) SOLO entre pares, nunca en una escena formal (entrevista, consulta, trámite). ' +
   '(b) Reacciones y respuestas breves de escucha ("claro", "ajá", "ya", "sí, sí", "totalmente", "uf", "qué va"). ' +
   '(c) Frases a veces incompletas, reformulaciones, arranques en falso y elipsis: no todas las réplicas cerradas y perfectas. ' +
   '(d) Contracciones y habla ligada naturales de la región donde no estorben la comprensión del nivel. ' +
   '(e) Interjecciones, énfasis y algo de calidez emocional. ' +
-  'Que suene a personas concretas hablando entre ellas, con la informalidad que pida la escena, nunca a un texto recitado.';
+  'Que suene a personas concretas hablando entre ellas, con la informalidad que pida la escena, nunca a un texto recitado. ' +
+  'La naturalidad en una escena formal está en el ritmo, la cortesía y las reformulaciones, no en el argot.';
 
 const getRegisterInstruction = (textType: TextType): string => {
   switch (textType) {
