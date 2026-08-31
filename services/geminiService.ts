@@ -17,6 +17,7 @@ import {
   isQuotaError,
   markSwitchable,
   modelsFrom,
+  quotaScope,
   runWithModelFallback,
   thinkingConfigFor
 } from "./modelFallback";
@@ -2689,9 +2690,17 @@ export const generateAudio = async (
     // Extract meaningful message from API error if possible
     let msg = error.message || "Error desconocido";
     if (isQuotaError(error)) {
+      // Por modelo (10/día por modelo) ya se probó el siguiente escalón de
+      // `AUDIO_MODELS` dentro de `runWithModelFallback` antes de llegar aquí; si
+      // es por proyecto/clave, ese cupo lo comparten todos los modelos, así que
+      // no se malgastó ninguna petición cambiando. En ambos casos el llamador
+      // cae a la voz del navegador (App.tsx), que no tiene cuota.
       msg =
-        "se agotó la cuota del modelo de voz (el nivel gratuito da 10 peticiones al día). " +
-        "El plan de la lección sí se generó; vuelve a intentar el audio más tarde.";
+        quotaScope(error) === 'project'
+          ? "se agotó la cuota diaria de la clave de API (la comparten todos los modelos de voz, " +
+            "así que no se prueba otro). Se usará la voz del navegador; el plan de la lección sí se generó."
+          : "se agotó la cuota de los modelos de voz (el nivel gratuito da 10 peticiones al día por " +
+            "modelo). Se usará la voz del navegador; el plan de la lección sí se generó.";
     } else if (msg.includes("non-audio response") || msg.includes("INVALID_ARGUMENT")) {
       msg = "El modelo de audio rechazó el contenido del diálogo.";
     } else if (msg.includes("timeout") || msg.includes("DEADLINE_EXCEEDED")) {

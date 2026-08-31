@@ -51,6 +51,7 @@ const {
   isTimeoutError,
   markSwitchable,
   modelsFrom,
+  quotaScope,
   runWithModelFallback,
   shouldSwitchModel,
   thinkingConfigFor
@@ -150,6 +151,38 @@ const check = (label, condition, detail = '') => {
   check('un 429 sigue siendo falta de cuota', isQuotaError(new Error('got 429 Too Many Requests')));
   check('…y también cambia de modelo', shouldSwitchModel(new Error('got 429 Too Many Requests')));
   check('RESOURCE_EXHAUSTED cambia de modelo', shouldSwitchModel({ status: 'RESOURCE_EXHAUSTED' }));
+
+  // Alcance de la cuota: solo la de **proyecto/clave** corta la cadena; la de
+  // **modelo** (10/día por modelo) y la de alcance desconocido siguen cambiando
+  // de modelo, porque el siguiente escalón llega con su propio cupo intacto.
+  const cuotaPorModelo = Object.assign(
+    new Error(
+      '{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Resource has been exhausted ' +
+        '(e.g. check quota).","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure",' +
+        '"violations":[{"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests",' +
+        '"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier",' +
+        '"quotaDimensions":{"model":"gemini-3.1-flash-tts-preview","location":"global"}}]}]}}'
+    ),
+    { status: 429 }
+  );
+  const cuotaPorProyecto = Object.assign(
+    new Error(
+      '{"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"Quota exceeded for the project.",' +
+        '"details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure",' +
+        '"violations":[{"quotaId":"GenerateRequestsPerDayPerProject-FreeTier"}]}]}}'
+    ),
+    { status: 429 }
+  );
+  const cuotaBare = new Error('got 429 Too Many Requests');
+
+  check('la cuota por modelo se reconoce', quotaScope(cuotaPorModelo) === 'model', quotaScope(cuotaPorModelo));
+  check('…y cambia de modelo (cada modelo lleva su cupo)', shouldSwitchModel(cuotaPorModelo));
+  check('la cuota por proyecto se reconoce', quotaScope(cuotaPorProyecto) === 'project', quotaScope(cuotaPorProyecto));
+  check('…y NO cambia de modelo (el cupo lo comparten todos)', !shouldSwitchModel(cuotaPorProyecto));
+  check('una cuota sin detalle es de alcance desconocido', quotaScope(cuotaBare) === 'unknown', quotaScope(cuotaBare));
+  check('…y ante la duda cambia de modelo', shouldSwitchModel(cuotaBare));
+  check('un error que no es de cuota no tiene alcance de cuota',
+    quotaScope(new Error('socket hang up')) === 'unknown');
 
   // Un id retirado tiene que bajar un escalón, no romper la app.
   const retirado = new Error(
@@ -275,6 +308,25 @@ const check = (label, condition, detail = '') => {
       llamados.length === MODELS.length && new Set(llamados).size === MODELS.length,
       llamados.join(','));
   }
+
+  // f) La cuota **por proyecto/clave** no recorre la cadena: cambiar de modelo
+  // no la cura, así que se relanza al instante para caer al respaldo en vez de
+  // gastar una petición por escalón contra un cupo compartido que ya está a cero.
+  {
+    const llamados = [];
+    let capturado = null;
+    try {
+      await runWithModelFallback(MODELS, async (m) => {
+        llamados.push(m);
+        throw Object.assign(
+          new Error('429 RESOURCE_EXHAUSTED "quotaId":"GenerateRequestsPerDayPerProject-FreeTier"'),
+          { status: 429 }
+        );
+      });
+    } catch (error) { capturado = error; }
+    check('la cuota por proyecto para en el primer modelo', llamados.length === 1, llamados.join(','));
+    check('…y relanza el 429 tal cual para caer al respaldo', isQuotaError(capturado));
+  }
 }
 
 // --- 4. La escalera interna deja pasar lo que no es suyo -----------------
@@ -371,6 +423,19 @@ const check = (label, condition, detail = '') => {
   check('el mensaje de cuota habla de cuota',
     typeof msgCuota === 'string' && msgCuota.includes('cuota'), String(msgCuota));
 
+  // La cuota por proyecto explica que cambiar de modelo no ayuda; la de alcance
+  // desconocido (o por modelo) mantiene el mensaje de siempre.
+  const cuotaProyecto = Object.assign(
+    new Error('429 RESOURCE_EXHAUSTED "quotaId":"GenerateRequestsPerDayPerProject-FreeTier"'),
+    { status: 429 }
+  );
+  const msgProyecto = describeModelChainFailure(cuotaProyecto, 4);
+  check('el mensaje de cuota por proyecto dice que cambiar de modelo no ayuda',
+    typeof msgProyecto === 'string' && msgProyecto.includes('no ayuda'), String(msgProyecto));
+  check('…y menciona la clave de API o el proyecto',
+    typeof msgProyecto === 'string' && (msgProyecto.includes('clave de API') || msgProyecto.includes('proyecto')),
+    String(msgProyecto));
+
   // Red y timeout ahora también tienen su mensaje: antes el «Failed to fetch»
   // llegaba crudo a pantalla y no explicaba nada.
   const msgRed = describeModelChainFailure(new TypeError('Failed to fetch'), 4);
@@ -395,7 +460,8 @@ if (failures.length) {
 
 console.log(
   `✓ cadena de ${GENERATION_MODELS.length} modelos de texto (${GENERATION_MODELS.join(' → ')}): ` +
-    'saturación, cuota y modelo retirado bajan un escalón al instante; un fallo de red o ' +
+    'saturación, modelo retirado y cuota por modelo bajan un escalón al instante; la cuota por ' +
+    'proyecto/clave no recorre la cadena (se avisa y se cae al respaldo); un fallo de red o ' +
     'timeout se reintenta primero contra el mismo modelo y solo baja al agotar la escalera; ' +
     'ningún modelo se llama dos veces y la ruta normal sigue costando una sola llamada'
 );
