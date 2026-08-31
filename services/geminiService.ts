@@ -107,12 +107,8 @@ const STREAM_FIRST_CHUNK_MS = 90_000;
 const STREAM_STALL_MS = 30_000;
 /** Tope total de una tentativa de streaming, pase lo que pase. */
 const STREAM_TOTAL_MS = 180_000;
-/** Tope de la petición no-streaming (texto). */
+/** Tope de la petición no-streaming, para texto (fallback) y para audio (TTS). */
 const REQUEST_TOTAL_MS = 150_000;
-/** Espera máxima hasta el primer byte de audio del TTS. */
-const AUDIO_FIRST_CHUNK_MS = 60_000;
-/** Sin un byte de audio en este tiempo una vez arrancado, se da por colgado. */
-const AUDIO_STALL_MS = 30_000;
 
 interface TimeoutGuard {
   signal: AbortSignal;
@@ -1910,79 +1906,83 @@ export function concatPcmChunks(chunks: Uint8Array[]): Uint8Array {
   return out;
 }
 
-/** Recibe el audio en streaming para poder contar bytes según llegan. */
+/**
+ * Sintetiza el texto de **una** voz en una petición **no-streaming**.
+ *
+ * El TTS se pedía en streaming, y esa fue la única fuente del error
+ * «Incomplete JSON segment at the end»: lo lanza el parser incremental de JSON
+ * del SDK cuando el cuerpo del stream se corta a mitad de un objeto. Una
+ * llamada `generateContent` normal lee el cuerpo entero y lo parsea de una vez,
+ * así que ese error no puede darse. Y el streaming no aportaba nada al audio:
+ * el bloque de cada voz se necesita **completo** para partirlo en turnos
+ * (`splitIntoTurns`) y solo se concatena al final —no había ninguna ventaja de
+ * latencia, solo un contador de bytes en vivo—. A cambio, la vieja escalera
+ * (dos intentos de streaming + un fallback sin streaming) podía gastar **tres**
+ * peticiones por voz contra las diez del día y tirar los bytes ya recibidos; sin
+ * ella vuelve a valer la garantía de «exactamente 2 peticiones, sin reintentos».
+ *
+ * Se conserva la semántica de errores en la que se apoya la cadena de modelos:
+ * - Los errores del *modelo* (cuota 429, saturación 503/500, id retirado 404)
+ *   suben tal cual para que `runWithModelFallback` baje al siguiente modelo de
+ *   `AUDIO_MODELS` —la cuota es por modelo y un pico de saturación dura minutos—.
+ * - Un fallo de *red* o un *timeout* se reintenta un par de veces contra el
+ *   mismo modelo (el host es el mismo para toda la cadena, otro modelo no
+ *   arregla una red caída); si la escalera se agota, se marca conmutable
+ *   (`markSwitchable`) para que un endpoint muerto caiga al segundo modelo de
+ *   voz en vez de matar el audio de la lección entera.
+ */
 async function synthesizeWithProgress(
   ai: GoogleGenAI,
   params: GenerateContentParameters,
   hooks: {
     onAudio: (totalBytes: number, chunkCount: number) => void;
     onRetry: (attempt: number, received: number, reason: string) => void;
-    onFallback: (reason: string) => void;
   }
 ): Promise<Uint8Array> {
-  const STREAM_ATTEMPTS = 2;
+  const NETWORK_ATTEMPTS = 2;
   let lastError: unknown = null;
 
-  for (let attempt = 1; attempt <= STREAM_ATTEMPTS; attempt++) {
-    const chunks: Uint8Array[] = [];
-    let total = 0;
-    const guard = createTimeoutGuard({
-      firstChunkMs: AUDIO_FIRST_CHUNK_MS,
-      stallMs: AUDIO_STALL_MS,
-      totalMs: STREAM_TOTAL_MS
-    });
+  for (let attempt = 1; attempt <= NETWORK_ATTEMPTS; attempt++) {
+    const guard = createTimeoutGuard({ totalMs: REQUEST_TOTAL_MS });
+    let response;
     try {
-      const stream = await ai.models.generateContentStream(withSignal(params, guard.signal));
-      for await (const chunk of stream) {
-        guard.ping(); // llegó algo: la síntesis no está colgada
-        for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
-          const data = part.inlineData?.data;
-          if (!data) continue;
-          const bytes = base64ToBytes(data);
-          chunks.push(bytes);
-          total += bytes.length;
-          hooks.onAudio(total, chunks.length);
-        }
-      }
-      if (total === 0) throw new Error('el modelo no devolvió datos de audio');
-      return concatBytes(chunks, total);
+      response = await ai.models.generateContent(withSignal(params, guard.signal, REQUEST_TOTAL_MS));
     } catch (error) {
       const actual = guard.reason() ?? error;
-      // Los errores del *modelo* (cuota 429, saturación 503/500, id retirado
-      // 404) no se arreglan repitiendo contra el mismo modelo: la cuota es por
-      // modelo y cada reintento la vuelve a contar, y un pico de saturación
-      // dura minutos, no los 1,5 s de la escalera. Suben tal cual para que
-      // `generateAudio` baje al siguiente modelo de `AUDIO_MODELS`. Antes solo
-      // subía el 429 y un 503 se comía los tres intentos (dos de streaming más
-      // el fallback) contra el modelo caído. Los errores de red y los timeouts
-      // sí se reintentan aquí, contra el mismo modelo, como siempre.
+      // Los errores del modelo no se arreglan repitiendo contra el mismo modelo:
+      // suben para que la cadena baje de escalón.
       if (isModelError(actual)) throw actual;
       lastError = actual;
-      hooks.onRetry(attempt, total, errorMessage(actual));
+      hooks.onRetry(attempt, 0, errorMessage(actual));
       await sleep(500 * attempt);
+      continue;
     } finally {
       guard.dispose();
     }
+
+    // Sumar **todas** las partes con `inlineData`, no solo la primera: una
+    // respuesta troceada en varias partes perdería audio si nos quedáramos con
+    // `parts[0]`.
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (const part of response.candidates?.[0]?.content?.parts ?? []) {
+      const data = part.inlineData?.data;
+      if (!data) continue;
+      const bytes = base64ToBytes(data);
+      chunks.push(bytes);
+      total += bytes.length;
+    }
+    if (total === 0) {
+      console.error('[TTS] No audio data in response. Response structure:', JSON.stringify(response, null, 2));
+      throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
+    }
+    hooks.onAudio(total, 1);
+    return concatBytes(chunks, total);
   }
 
-  hooks.onFallback(errorMessage(lastError));
-  const guard = createTimeoutGuard({ totalMs: REQUEST_TOTAL_MS });
-  let response;
-  try {
-    response = await ai.models.generateContent(withSignal(params, guard.signal, REQUEST_TOTAL_MS));
-  } catch (error) {
-    throw guard.reason() ?? error;
-  } finally {
-    guard.dispose();
-  }
-  const audioData = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-  if (!audioData) {
-    console.error('[TTS] No audio data in response. Response structure:', JSON.stringify(response, null, 2));
-    throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
-  }
-  const bytes = base64ToBytes(audioData);
-  hooks.onAudio(bytes.length, 1);
-  return bytes;
+  // Agotada la escalera de red contra este modelo: ya no es un corte transitorio,
+  // así que se marca conmutable para que la cadena baje al segundo modelo de voz.
+  throw markSwitchable(lastError instanceof Error ? lastError : new Error(errorMessage(lastError)));
 }
 
 /**
@@ -2506,17 +2506,11 @@ export const generateAudio = async (
         },
         {
           onAudio: (totalBytes, chunkCount) => onBytes?.(totalBytes, chunkCount),
-          onRetry: (attempt, received, reason) => {
+          // Solo por fallo de red/timeout: el TTS es no-streaming, así que ya no
+          // hay «Incomplete JSON segment» ni fallback a la pista completa.
+          onRetry: (attempt, _received, reason) => {
             reporter.log(
-              `Síntesis de la petición ${index + 1}/${totalChunks} interrumpida tras ${formatBytes(received)} ` +
-                `(intento ${attempt}): ${reason}`,
-              'warn'
-            );
-          },
-          onFallback: (reason) => {
-            reporter.log(
-              `Streaming de audio no disponible en la petición ${index + 1}/${totalChunks} (${reason}); ` +
-                `se pide la pista completa`,
+              `La petición ${index + 1}/${totalChunks} falló por red (intento ${attempt}): ${reason}; se reintenta`,
               'warn'
             );
           }
@@ -2530,19 +2524,16 @@ export const generateAudio = async (
         // colgada del intento anterior escribiría en estos arrays ya
         // descartados, no en los del intento en curso.
         const bytesPerChunk = new Array<number>(totalChunks).fill(0);
-        const streamPartsPerChunk = new Array<number>(totalChunks).fill(0);
         let doneChunks = 0;
 
         const publish = () => {
           const totalBytes = bytesPerChunk.reduce((n, b) => n + b, 0);
-          const streamParts = streamPartsPerChunk.reduce((n, c) => n + c, 0);
           const seconds = totalBytes / TTS_BYTES_PER_SECOND;
           const counters = [
             { label: 'Audio recibido', value: formatSeconds(seconds) },
             { label: 'Datos', value: formatBytes(totalBytes) },
-            { label: 'Fragmentos', value: formatCount(streamParts) }
+            { label: 'Peticiones', value: `${formatCount(doneChunks)}/${formatCount(totalChunks)}` }
           ];
-          counters.push({ label: 'Peticiones', value: `${formatCount(doneChunks)}/${formatCount(totalChunks)}` });
           reporter.update('synthesis', {
             // El plan de peticiones es determinista, así que aquí sí hay un
             // denominador de verdad: no es una barra inventada sobre un reloj.
@@ -2554,7 +2545,6 @@ export const generateAudio = async (
             metrics: {
               audioBytes: totalBytes,
               audioSeconds: seconds,
-              chunks: streamParts,
               ttsRequests: totalChunks,
               ttsRequestsDone: doneChunks
             }
@@ -2572,9 +2562,8 @@ export const generateAudio = async (
             `${header}${singleVoiceDirective(request.owner)}${continuation}\n\n${body}`,
             request.owner,
             index,
-            (totalBytes, chunkCount) => {
+            (totalBytes) => {
               bytesPerChunk[index] = totalBytes;
-              streamPartsPerChunk[index] = chunkCount;
               publish();
             }
           );
