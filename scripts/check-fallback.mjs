@@ -72,7 +72,7 @@ const check = (label, condition, detail = '') => {
   );
   check(
     'el primero es el modelo documentado como primario',
-    GENERATION_MODELS[0] === 'gemini-3.6-flash',
+    GENERATION_MODELS[0] === 'gemini-3.5-flash-lite',
     GENERATION_MODELS[0]
   );
   check('todos son ids de Gemini', GENERATION_MODELS.every(m => m.startsWith('gemini-')));
