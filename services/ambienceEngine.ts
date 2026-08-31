@@ -35,7 +35,14 @@ export const DEFAULT_AMBIENCE_INTENSITY = 0.6;
 export const DEFAULT_AMBIENCE_DUCKING = 0.65;
 
 /** Brings the −24 dBFS beds up to a sensible pre-volume level. */
-export const BED_MAKEUP = 2.4;
+export const BED_MAKEUP = 2.0;
+/**
+ * Each bed runs two lightly-detuned playheads summed into one gain node (for width and
+ * to hide the loop). Two decorrelated copies sum ~+3 dB hotter than one, so the makeup —
+ * calibrated for a single playhead — was overshooting on every scene. This compensates
+ * the sum back to the intended level (1/√2 ≈ −3 dB).
+ */
+export const PLAYHEAD_SUM_COMP = 0.707;
 /** Events are scaled against the bed reference, and their spec gains keep them under it. */
 export const EVENT_MAKEUP = 1.15;
 /** Intensity is evaluated relative to this, so the default slider position is neutral. */
@@ -192,7 +199,7 @@ export class AmbienceEngine {
     this.bedBus = ctx.createGain();
     this.eventBus = ctx.createGain();
 
-    this.bedRefGain = this.maxLayerGain() * BED_MAKEUP;
+    this.bedRefGain = this.maxLayerGain() * BED_MAKEUP * PLAYHEAD_SUM_COMP;
     this.eventBus.gain.value = this.bedRefGain * EVENT_MAKEUP;
 
     this.buildBedBus();
@@ -283,7 +290,13 @@ export class AmbienceEngine {
   private startLayer(layer: BedLayer, buffer: AudioBuffer) {
     const { ctx } = this;
     const gain = ctx.createGain();
-    gain.gain.value = layer.gain * this.level * BED_MAKEUP;
+    const target = layer.gain * this.level * BED_MAKEUP * PLAYHEAD_SUM_COMP;
+    // Ease the bed in over a short ramp so that, if the decode landed a touch after the
+    // voice, it fades up instead of bursting in — and so the first duck-release does not
+    // snap the bed to full from silence.
+    const now = ctx.currentTime;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(Math.max(0.0001, target), now + 0.3);
 
     let head: AudioNode = gain;
     if (layer.highpass) {

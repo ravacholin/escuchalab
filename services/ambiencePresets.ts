@@ -153,6 +153,9 @@ export const SCENE_RECIPES = {
   street_rain:   R('Calle con lluvia',[B('rain', 1.0, { width: 1.0 })]),
   park_rain:     R('Parque con lluvia',[B('rain', 0.9, { width: 1.0 })],
                     { tone: { highShelfDb: -1 } }),
+  // Reuses the `forest` bed (otherwise heard only in radio_field) so nature stories on
+  // location don't all collapse onto `park`.
+  trail:         R('Sendero',         [B('forest', 0.9, { width: 1.0 })]),
 
   // --- work ----------------------------------------------------------------
   office:        R('Oficina',         [B('office', 0.9, { width: 0.5 })],
@@ -180,6 +183,11 @@ export const SCENE_RECIPES = {
                     { level: 0.8, events: [E('door', 30, 0.12, 'far'), E('chair', 26, 0.08), E('paper', 22, 0.07)] }),
   clinic_room:   R('Consulta',        [B('room_air', 1.0)],
                     { level: 0.9, events: [E('paper', 16, 0.1), E('chair', 30, 0.08)] }),
+  // A vet consult is a real room with people (and animals) in it, not the near-silent
+  // close-miked air of clinic_room/therapy_room — a synthetic hiss bed there just reads
+  // as loud static. Uses the real `office` recording, low, with faint reception activity.
+  vet_clinic:    R('Veterinaria',     [B('office', 0.55, { width: 0.6 })],
+                    { level: 0.8, events: [E('door', 30, 0.12, 'far'), E('chair', 28, 0.09), E('paper', 22, 0.07)] }),
   hospital:      R('Hospital',        [B('hall', 0.55, { width: 0.7 })],
                     { level: 0.8, tone: { tiltDb: -1 }, events: [E('door', 26, 0.12, 'far'), E('steps', 18, 0.1)] }),
   therapy_room:  R('Terapia',         [B('room_air', 0.9)],
@@ -228,6 +236,12 @@ export const SCENE_RECIPES = {
                       { events: [E('paper', 16, 0.08)] }),
   radio_street:    R('Corresponsal en calle',[B('street', 0.85, { width: 0.9 })], { level: 0.9 }),
   radio_field:     R('Grabación de campo',  [B('forest', 0.9, { width: 1.0 })]),
+  // On-location correspondent variants that put otherwise single-use real beds to work,
+  // so a market / transport / sports report is heard from the place it is about rather
+  // than from a generic street.
+  radio_market:    R('Mercado (directo)',   [B('market', 0.85, { width: 0.9 })], { level: 0.9 }),
+  radio_station:   R('Estación (directo)',  [B('station', 0.85, { width: 0.9 })], { level: 0.9 }),
+  radio_plaza:     R('Plaza (directo)',     [B('plaza', 0.85, { width: 0.95 })], { level: 0.9 }),
   radio_phone:     R('Línea telefónica',    [B('studio_air', 1.0)],
                       { tone: { bandpass: [300, 3400] } }),
 } as const;
@@ -277,7 +291,7 @@ const DIALOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Entrevista de Trabajo': 'office_meeting',
   'Banco / Finanzas': 'bank',
   'Consulta Médica': 'clinic_room',
-  'Veterinaria': 'clinic_room',
+  'Veterinaria': 'vet_clinic',
   'Cena con Amigos': 'restaurant',
   'Aeropuerto / Aerolínea': 'airport',
   'Servicio al Cliente': 'call_center',
@@ -304,18 +318,18 @@ const RADIO_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Política Municipal': 'studio_newsroom',
   'Tribunales y Justicia': 'studio_newsroom',
   'Tráfico': 'radio_street',
-  'Transporte Público': 'radio_street',
-  'Transporte y Movilidad': 'radio_street',
+  'Transporte Público': 'radio_station',
+  'Transporte y Movilidad': 'radio_station',
   'Seguridad Vial': 'radio_street',
   'Infraestructura Urbana': 'radio_street',
-  'Ferias y Mercados': 'radio_street',
+  'Ferias y Mercados': 'radio_market',
   'Servicios de la Ciudad': 'radio_street',
   'El Tiempo': 'radio_field',
   'Clima y Estaciones': 'radio_field',
   'Medio Ambiente': 'radio_field',
   'Medio Ambiente Local': 'radio_field',
   'Turismo de la Región': 'radio_field',
-  'Deportes Locales': 'radio_field',
+  'Deportes Locales': 'radio_plaza',
   'Geopolítica': 'radio_phone',
   'Economía y Mercados': 'radio_phone',
   'Economía Nacional': 'radio_phone',
@@ -398,7 +412,7 @@ const MONOLOGUE_SCENE_BY_LABEL: Record<string, SceneId> = {
   'Crónica de mi Barrio': 'street',
   'Mi Primer Viaje': 'station',
   'El Día que Perdí Algo': 'station',
-  'Un Viaje en Solitario': 'park',
+  'Un Viaje en Solitario': 'trail',
   'Mi Fin de Semana': 'park',
   'Una Mascota Especial': 'park',
   'Reencuentro Inesperado': 'plaza',
@@ -439,6 +453,7 @@ const KEYWORD_SCENES: Array<{ scene: SceneId; pattern: RegExp }> = [
   { scene: 'cafe', pattern: /(café|cafe|cafetería|cafeteria|desayuno|merienda|coffee|breakfast)/i },
   { scene: 'restaurant', pattern: /(restaurante|comida|cena|almuerzo|menú|menu|camarero|mesero|restaurant|dinner|lunch)/i },
   { scene: 'bar_night', pattern: /(bar|copas|cerveza|cóctel|coctel|pub|nightlife|fiesta)/i },
+  { scene: 'vet_clinic', pattern: /(veterinar|mascota|animal)/i },
   { scene: 'hospital', pattern: /(hospital|urgencias|clínica|clinica|enfermer|emergency)/i },
   { scene: 'clinic_room', pattern: /(médico|medico|doctor|consulta|salud|síntoma|sintoma|dentista|health)/i },
   { scene: 'shop_small', pattern: /(tienda|farmacia|comprar|ropa|zapatos|shop|store|pharmacy)/i },

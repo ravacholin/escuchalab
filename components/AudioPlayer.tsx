@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX, Download, SlidersHorizontal } from 'lucide-react';
 import { resolveAmbienceScene, type ResolvedAmbience } from '../services/ambiencePresets';
+import { loadBed } from '../services/ambienceLibrary';
 import {
   AmbienceEngine,
   DEFAULT_AMBIENCE_DUCKING,
@@ -370,7 +371,15 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const startPlayback = useCallback(() => {
     if (!speechRef.current) return;
     const ctx = ensureAudioContext();
-    if (ctx) setupSpeechProcessing(speechRef.current);
+    if (ctx) {
+      setupSpeechProcessing(speechRef.current);
+      // Warm the scene's bed cache now, on the same gesture that created the context, so
+      // the fetch+decode overlaps the speech's own start-up latency. `loadBed` caches the
+      // decode promise per context, so by the time `playing` fires and `startAmbience`
+      // runs, `startLayer` hits a warm buffer and the bed is present from the first turn
+      // instead of bursting in several seconds late on a cold cache.
+      scene.recipe.beds.forEach((l) => { void loadBed(ctx, l.bed); });
+    }
     const p = speechRef.current.play();
     if (p && typeof p.catch === 'function') p.catch(() => {});
     // Ambience is NOT started here: on the first play the fresh AudioContext, the
@@ -381,7 +390,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     // they lined up, which is why the second press sounded right.) Instead the
     // ambience is started from the <audio> element's `playing` event, i.e. the
     // instant the voice is really producing sound. See handleSpeechPlaying.
-  }, [ensureAudioContext, setupSpeechProcessing]);
+  }, [ensureAudioContext, setupSpeechProcessing, scene]);
 
   // Fired by the <audio> element when playback is actually producing sound (after
   // any first-play buffering/resume latency), so the ambience bed enters in step
