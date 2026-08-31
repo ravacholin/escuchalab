@@ -1372,7 +1372,8 @@ export const generateLessonPlan = async (
     `Elige "ambientScene": EXACTAMENTE uno de estos ids, el que mejor describa el LUGAR donde ocurre el audio ` +
     `(para un boletín de radio, un podcast o un monólogo el lugar es el estudio donde se graba, no aquello de lo que se habla): ` +
     `${MODEL_SELECTABLE_SCENES.join(', ')}. ` +
-    `Añade además "ambientKeywords": 3 palabras en inglés que describan el fondo sonoro.`;
+    `Añade además "ambientKeywords": una ÚNICA cadena de texto (no un array) con 3 palabras en inglés ` +
+    `separadas por comas que describan el fondo sonoro, p. ej. "coffee machine, cups, chatter".`;
 
   // A0 prioriza la naturalidad del habla por encima del recuento de turnos: el
   // objetivo del nivel es captar un dato dentro de habla nativa real.
