@@ -78,6 +78,15 @@ export interface ProgressSnapshot {
   measurable: boolean;
   activeStepId: string | null;
   finished: boolean;
+  /**
+   * `true` solo cuando este snapshot es la COLA del plan que sigue viva DESPUÉS
+   * de que el audio ya terminó (audio al 100%, plan aún sin resolver). La UI lo
+   * usa para mostrarlo como «casi listo · terminando los ejercicios» en vez de
+   * retroceder a un «Fase 1 de 2, 85%» con el contador subiendo, que se lee como
+   * si la app hubiera vuelto atrás y se hubiera colgado. Lo pone `mergeProgress`,
+   * nunca el `ProgressReporter` (el reporter no sabe qué pasa en la otra fase).
+   */
+  finishingTail?: boolean;
 }
 
 export type ProgressListener = (snapshot: ProgressSnapshot) => void;
@@ -93,7 +102,10 @@ export type ProgressListener = (snapshot: ProgressSnapshot) => void;
  *    ignora para no retroceder la pantalla (la intención original del filtro).
  *  - Un snapshot 'plan' con el audio ya al 100% (`finished`) y el plan aún vivo:
  *    ESTE es el caso que se quedaba colgado. Se muestra la Fase 1 en vivo
- *    (verificación, reintentos, cambio de modelo) en lugar de un 100% congelado.
+ *    (verificación, reintentos, cambio de modelo) en lugar de un 100% congelado,
+ *    pero MARCADO con `finishingTail` para que la UI no retroceda a «Fase 1 de 2,
+ *    85%» —lo que se lee como «se colgó y dejó de generar audio»— sino que diga
+ *    «audio listo · terminando los ejercicios».
  *  - Un snapshot 'plan' mientras el audio sigue en streaming: se conserva el
  *    audio para no parpadear entre fases (sus barras se están moviendo).
  *  - Cualquier snapshot 'audio' manda (inicio/reanudación de la Fase 2).
@@ -106,7 +118,7 @@ export function mergeProgress(
   if (!prev || prev.phase === snapshot.phase) return snapshot;
   if (snapshot.phase === 'plan') {
     if (planResolved) return prev;
-    if (prev.phase === 'audio' && prev.finished) return snapshot;
+    if (prev.phase === 'audio' && prev.finished) return { ...snapshot, finishingTail: true };
     if (prev.phase === 'audio') return prev;
   }
   return snapshot;
