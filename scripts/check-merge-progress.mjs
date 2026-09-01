@@ -12,7 +12,9 @@
  * contrato sin red ni React:
  *   - misma fase → siempre actualiza;
  *   - 'plan' con el plan ya resuelto → flush rezagado, se ignora;
- *   - 'plan' con el audio al 100% y el plan aún vivo → SE MUESTRA (caso del bug);
+ *   - 'plan' con el audio al 100% y el plan aún vivo → SE MUESTRA (caso del bug),
+ *     marcado `finishingTail` para que la UI diga «casi listo · terminando los
+ *     ejercicios» en lugar de retroceder a «Fase 1 de 2 · 85%»;
  *   - 'plan' con el audio aún en streaming → se conserva el audio (sin parpadeo);
  *   - cualquier 'audio' → manda.
  *
@@ -70,21 +72,31 @@ const snap = (phase, finished, tag) => ({ phase, finished, tag });
 check('sin previa → toma la nueva', mergeProgress(null, snap('plan', false, 'x'), false).tag === 'x');
 
 // 3. EL CASO DEL BUG: audio al 100% (finished) y el plan sigue vivo
-//    (planResolved=false) → se muestra el plan, no el 100% congelado.
+//    (planResolved=false) → se muestra el plan, no el 100% congelado, PERO
+//    marcado `finishingTail` para que la UI no retroceda visualmente a la Fase 1.
 {
   const prev = snap('audio', true, 'audio-100');
   const next = snap('plan', false, 'plan-vivo');
+  const merged = mergeProgress(prev, next, false);
   check('audio finished + plan aún vivo → muestra el plan (Fase 1 en vivo)',
-    mergeProgress(prev, next, false).tag === 'plan-vivo');
+    merged.tag === 'plan-vivo');
+  check('audio finished + plan aún vivo → marcado finishingTail',
+    merged.finishingTail === true);
+  // No debe mutar el snapshot original que llega (se devuelve una copia).
+  check('finishingTail no muta el snapshot de entrada',
+    next.finishingTail === undefined);
 }
 
 // 4. Audio aún en streaming (no finished) y llega un 'plan' interleaved →
-//    se conserva el audio para no parpadear entre fases.
+//    se conserva el audio para no parpadear entre fases (y sin marca de cola).
 {
   const prev = snap('audio', false, 'audio-mid');
   const next = snap('plan', false, 'plan-interleaved');
+  const merged = mergeProgress(prev, next, false);
   check('audio en streaming + plan interleaved → conserva el audio (sin parpadeo)',
-    mergeProgress(prev, next, false).tag === 'audio-mid');
+    merged.tag === 'audio-mid');
+  check('audio en streaming + plan interleaved → sin finishingTail',
+    merged.finishingTail === undefined);
 }
 
 // 5. Plan YA resuelto: un 'plan' posterior es un flush rezagado → se ignora,
@@ -114,5 +126,6 @@ if (failures.length) {
 console.log(
   '✓ mergeProgress correcto: la misma fase siempre avanza, el audio manda al empezar la Fase 2, ' +
     'un flush del plan ya resuelto se ignora, y —el caso que se colgaba— con el audio al 100% pero el ' +
-    'plan aún vivo se muestra la Fase 1 en vivo en lugar de un 100% congelado, sin parpadear mientras el audio corre'
+    'plan aún vivo se muestra la Fase 1 en vivo (marcada finishingTail, sin retroceder la pantalla) en ' +
+    'lugar de un 100% congelado, sin parpadear mientras el audio corre'
 );

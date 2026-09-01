@@ -112,6 +112,11 @@ const StepRow: React.FC<{ step: ProgressStep }> = ({ step }) => {
 
 const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, progress }) => {
   const phase: 'plan' | 'audio' = progress?.phase ?? (status === 'generating_plan' ? 'plan' : 'audio');
+  // Cola del plan viva DESPUÉS de que el audio ya terminó. Sin esto, la pantalla
+  // retrocedía a «Fase 1 de 2 · 85% · recepción de los ejercicios» con el contador
+  // de caracteres subiendo, que se lee como «volvió atrás, se colgó, no genera
+  // audio». Aquí se muestra como lo que de verdad es: casi listo.
+  const finishingTail = Boolean(progress?.finishingTail);
   const [now, setNow] = useState(() => Date.now());
 
   // Único elemento que avanza con el reloj, y porque es literalmente un reloj:
@@ -165,7 +170,7 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, progress }) => {
         {/* Main Status Display */}
         <div className="mb-8 text-center">
           <div className="inline-flex items-center justify-center w-16 h-16 mb-6 rounded-full bg-panel-2 border border-line relative">
-            {phase === 'plan' ? (
+            {phase === 'plan' && !finishingTail ? (
               <Cpu className="text-fg animate-pulse absolute" size={24} />
             ) : (
               <AudioWaveform className="text-fg animate-pulse absolute" size={24} />
@@ -174,10 +179,10 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, progress }) => {
           </div>
 
           <h2 className="font-display text-3xl md:text-4xl font-semibold tracking-tight text-fg mb-2">
-            {PHASE_TITLE[phase]}
+            {finishingTail ? 'Casi listo' : PHASE_TITLE[phase]}
           </h2>
           <p className="font-mono text-[11px] text-faint uppercase tracking-[0.16em]">
-            {PHASE_SUBTITLE[phase]}
+            {finishingTail ? 'Audio listo · afinando los ejercicios' : PHASE_SUBTITLE[phase]}
           </p>
         </div>
 
@@ -186,33 +191,44 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ status, progress }) => {
           <div className="flex items-end justify-between mb-2 gap-4">
             <div className="flex flex-col">
               <span className="font-mono text-[10px] text-faint uppercase tracking-wider">
-                {currentStep ? currentStep.label : 'A la espera del primer dato'}
+                {finishingTail
+                  ? 'Afinando los ejercicios'
+                  : currentStep ? currentStep.label : 'A la espera del primer dato'}
               </span>
               <span className="font-mono text-[10px] text-faint uppercase tracking-wider">
-                Paso {Math.min(doneCount + 1, steps.length || 1)} de {steps.length || '—'} · Transcurrido {formatClock(elapsed)}
+                {finishingTail
+                  ? `Transcurrido ${formatClock(elapsed)}`
+                  : `Paso ${Math.min(doneCount + 1, steps.length || 1)} de ${steps.length || '—'} · Transcurrido ${formatClock(elapsed)}`}
               </span>
             </div>
+            {/* En la cola tras el audio NO se muestra el % del plan (~85): sería un
+                retroceso desde el 100% del audio y se lee como si algo se hubiera
+                roto. Se marca como casi listo. */}
             <span className="font-mono text-sm text-fg font-bold whitespace-nowrap">
-              {measurable ? `${Math.floor(percent)}%` : `≥ ${Math.floor(percent)}%`}
+              {finishingTail ? 'Casi' : (measurable ? `${Math.floor(percent)}%` : `≥ ${Math.floor(percent)}%`)}
             </span>
           </div>
 
           <div className="w-full h-2.5 bg-panel-2 relative overflow-hidden border border-line rounded-full">
             <div
               className="absolute top-0 left-0 h-full bg-accent transition-[width] duration-200 ease-linear rounded-full"
-              style={{ width: `${percent}%` }}
+              style={{ width: `${finishingTail ? 100 : percent}%` }}
             />
-            {!measurable && (
-              // El paso en curso no tiene total conocido: se marca la zona
-              // indeterminada en vez de rellenarla con una cifra inventada.
+            {(!measurable || finishingTail) && (
+              // El paso en curso no tiene total conocido (o es la cola final tras
+              // el audio): se marca la zona en movimiento en vez de fingir una cifra.
               <div
                 className="absolute top-0 h-full w-24 bg-gradient-to-r from-transparent via-white/25 to-transparent animate-[shimmer_1.6s_linear_infinite]"
-                style={{ left: `${percent}%` }}
+                style={{ left: `${finishingTail ? 0 : percent}%` }}
               />
             )}
           </div>
 
-          {!measurable && (
+          {finishingTail ? (
+            <p className="font-mono text-[9px] text-faint uppercase tracking-wider mt-2">
+              El audio ya está listo. Se terminan los ejercicios y arranca la lección.
+            </p>
+          ) : !measurable && (
             <p className="font-mono text-[9px] text-faint uppercase tracking-wider mt-2">
               El servicio no informa del total de este paso: se muestra lo ya recibido.
             </p>
