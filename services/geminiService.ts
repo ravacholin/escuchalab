@@ -1162,17 +1162,32 @@ const A0_LEXICON =
   '(perro, carro, pata, peso, mesa, cara, mano, casa, banco, carta, cuenta, puerta, libro, sala, ' +
   'gato…), y NO metas en el mismo diálogo la pareja de ninguna de ellas.';
 
-const SPEAKER_KEY = /"speaker"\s*:/;
-const SLOT_KEY = /"slotId"\s*:/;
-const QUESTION_KEY = /"question"\s*:/;
-const EXERCISES_KEY = /"exercises"\s*:/;
+// Globales (flag `g`) porque el conteo del progreso avanza con `lastIndex` sobre
+// el texto acumulado en vez de re-escanearlo entero cada chunk (ver `scanCount`).
+const SPEAKER_KEY = /"speaker"\s*:/g;
+const SLOT_KEY = /"slotId"\s*:/g;
+const QUESTION_KEY = /"question"\s*:/g;
+const EXERCISES_KEY = /"exercises"\s*:/g;
 const TITLE_VALUE = /"title"\s*:\s*"((?:[^"\\]|\\.)*)"/;
 
-const countMatches = (text: string, pattern: RegExp): number => {
-  const re = new RegExp(pattern.source, 'g');
-  let count = 0;
-  while (re.exec(text) !== null) count++;
-  return count;
+// El stream del plan sólo crece: en vez de re-escanear TODO el JSON acumulado en
+// cada chunk (coste O(n²) en el hilo principal, justo cuando arranca el TTS en
+// paralelo), cada patrón lleva su propio offset y sólo mira el texto nuevo.
+// `count` es un contador de progreso; un desfase de un carácter en la frontera de
+// un chunk sería inocuo. El offset nunca retrocede por debajo del final del último
+// match (no hay doble conteo), y tras un tramo sin coincidencias salta hasta cerca
+// del final —menos la clave más larga— para no volver a recorrer lo ya visto.
+type ScanState = { offset: number; count: number };
+const MAX_KEY_LEN = 32;
+const newScan = (): ScanState => ({ offset: 0, count: 0 });
+const scanCount = (re: RegExp, text: string, state: ScanState): number => {
+  re.lastIndex = state.offset;
+  while (re.exec(text) !== null) {
+    state.count++;
+    state.offset = re.lastIndex;
+  }
+  if (text.length - MAX_KEY_LEN > state.offset) state.offset = text.length - MAX_KEY_LEN;
+  return state.count;
 };
 
 const plural = (n: number, singular: string, pluralForm: string) =>
@@ -1466,13 +1481,25 @@ export const generateLessonPlan = async (
       let titleLogged = false;
       let turnsSeen = 0;
       let exercisesSeen = 0;
+      // Estado del conteo incremental (ver `scanCount`): un offset por patrón.
+      const speakerScan = newScan();
+      const slotScan = newScan();
+      const questionScan = newScan();
+      const exercisesScan = newScan();
 
       // Un modelo nuevo empieza el JSON desde cero, igual que un reintento del
       // stream: los dos casos tienen que devolver la pantalla al mismo sitio, y
-      // por eso comparten esta función en vez de repetir las cuatro líneas.
+      // por eso comparten esta función en vez de repetir las líneas. También
+      // reinicia el conteo incremental, porque el texto acumulado vuelve a cero.
       const restartStream = () => {
         exercisesStarted = false;
         titleLogged = false;
+        turnsSeen = 0;
+        exercisesSeen = 0;
+        speakerScan.offset = speakerScan.count = 0;
+        slotScan.offset = slotScan.count = 0;
+        questionScan.offset = questionScan.count = 0;
+        exercisesScan.offset = exercisesScan.count = 0;
         reporter.reset(['dialogue', 'exercises']);
         reporter.start('dialogue');
       };
@@ -1497,8 +1524,11 @@ export const generateLessonPlan = async (
           },
           {
             onText: (full) => {
-              turnsSeen = countMatches(full, SPEAKER_KEY);
-              exercisesSeen = Math.max(countMatches(full, SLOT_KEY), countMatches(full, QUESTION_KEY));
+              turnsSeen = scanCount(SPEAKER_KEY, full, speakerScan);
+              exercisesSeen = Math.max(
+                scanCount(SLOT_KEY, full, slotScan),
+                scanCount(QUESTION_KEY, full, questionScan)
+              );
 
               if (!titleLogged) {
                 const match = TITLE_VALUE.exec(full);
@@ -1508,7 +1538,7 @@ export const generateLessonPlan = async (
                 }
               }
 
-              if (!exercisesStarted && EXERCISES_KEY.test(full)) {
+              if (!exercisesStarted && scanCount(EXERCISES_KEY, full, exercisesScan) > 0) {
                 exercisesStarted = true;
                 reporter.finish('dialogue', plural(turnsSeen, 'turno recibido', 'turnos recibidos'));
                 reporter.start('exercises');
