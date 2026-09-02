@@ -667,12 +667,14 @@ of the *moment*:
 through `config.abortSignal`). This is what fixes the *original* symptom — "se queda en
 recepción del guion y ni progresa": a request the server accepts but leaves hanging, or a
 stream that stops emitting mid-way, used to freeze the loading screen forever. The margins
-are thinking-aware, because these models spend real time before the first token (a *trivial*
-prompt already costs ~15 s and hundreds of thought tokens; a full lesson prompt measured
-~37 s to first token): the wait for the **first** chunk is generous (`STREAM_FIRST_CHUNK_MS`
-90 s) so a slow-but-working generation is never killed, while the inter-chunk stall once the
-flow has started is short (`STREAM_STALL_MS` 30 s), under a hard total cap
-(`STREAM_TOTAL_MS`). During that first-token wait an `onWaiting` heartbeat moves the
+are thinking-aware, because these models spend real time before the first token. That
+~37 s-to-first-token measurement was under *dynamic* thinking; capping it (`thinkingConfigFor`,
+below) brought the first token much closer, so the first-chunk margin was cut from the 90 s
+that number once justified down to a still-generous `STREAM_FIRST_CHUNK_MS` **45 s** — enough
+for a slow-but-working generation, while recovering from a genuine hang (a request the server
+accepts but never emits into) in half the time it used to take before the chain tried another
+model. The inter-chunk stall once the flow has started is short (`STREAM_STALL_MS` 30 s), under
+a hard total cap (`STREAM_TOTAL_MS` 120 s). During that first-token wait an `onWaiting` heartbeat moves the
 `dialogue` step's detail ("esperando la respuesta del modelo… (N s)") so the screen no longer
 looks frozen. The audio path (`synthesizeWithProgress`) carries the same guard.
 
