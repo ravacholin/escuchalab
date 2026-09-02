@@ -98,16 +98,21 @@ const TURN_GAP_MS = 220;
 // si se agota, en un cambio de modelo.
 
 // El primer token tarda más que los siguientes: estos modelos «piensan» antes
-// de emitir nada (un prompt trivial ya gasta ~15 s y cientos de tokens de
-// pensamiento), y con el prompt entero de una lección puede ser bastante más.
-// Ese silencio inicial es legítimo, así que el margen para el PRIMER chunk es
-// generoso; una vez que el flujo arranca, un silencio largo sí es un cuelgue.
+// de emitir nada. Antes esto era un dolor real: sin capar el pensamiento, un
+// modelo pensante tardaba ~37 s al primer token, y por eso el margen era de 90 s.
+// Ahora `thinkingConfigFor()` limita ese razonamiento (`thinkingLevel: 'low'` /
+// `thinkingBudget: 0`), así que el primer token llega mucho antes y 90 s pasó a
+// ser un techo sobredimensionado: cuando un modelo se cuelga de verdad (acepta la
+// petición y no emite nada), el usuario esperaba 90 s hasta que la cadena probaba
+// otro. Con el pensamiento ya acotado, 45 s cubre de sobra una generación lenta
+// pero viva y recupera de un cuelgue en la mitad de tiempo. Una vez que el flujo
+// arranca, un silencio largo sí es un cuelgue (margen corto).
 /** Espera máxima hasta el primer chunk (fase de «pensamiento» del modelo). */
-const STREAM_FIRST_CHUNK_MS = 90_000;
+const STREAM_FIRST_CHUNK_MS = 45_000;
 /** Sin un chunk en este tiempo **una vez arrancado** el flujo, se da por colgado. */
 const STREAM_STALL_MS = 30_000;
 /** Tope total de una tentativa de streaming, pase lo que pase. */
-const STREAM_TOTAL_MS = 180_000;
+const STREAM_TOTAL_MS = 120_000;
 /** Tope de la petición no-streaming, para texto (fallback) y para audio (TTS). */
 const REQUEST_TOTAL_MS = 150_000;
 
