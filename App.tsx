@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode, LessonPlan, WebSpeechPlan } from './types';
+import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode, LessonPlan, WebSpeechPlan, TurnTiming } from './types';
 import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
 import { generateLessonPlan, generateAudio } from './services/geminiService';
 import { isWebSpeechAvailable, planWebSpeech } from './services/webSpeechTts';
@@ -115,6 +115,7 @@ const App: React.FC = () => {
                 },
                 lessonPlan: null,
                 audioBlob: null,
+                audioTurns: null,
                 audioFallback: null,
                 error: null,
             };
@@ -131,6 +132,7 @@ const App: React.FC = () => {
                 },
                 lessonPlan: null,
                 audioBlob: null,
+                audioTurns: null,
                 audioFallback: null,
                 error: null,
             };
@@ -300,12 +302,32 @@ const App: React.FC = () => {
     const [openStages, setOpenStages] = useState<Set<ListeningStage>>(new Set());
     const [answered, setAnswered] = useState<Record<string, boolean>>({});
 
+    // Sincronía de la transcripción: qué turno suena (índice en `dialogue`) y si
+    // el alumno ya escuchó la pista entera al menos una vez. El resaltado solo se
+    // muestra en repaso —tras esa primera escucha— para no invitar a leer en vez
+    // de escuchar (ver el aviso de la pestaña Transcripción).
+    const [activeLine, setActiveLine] = useState<number | null>(null);
+    const [hasListenedOnce, setHasListenedOnce] = useState(false);
+    const activeLineRef = useRef<HTMLDivElement | null>(null);
+
     // Cada lección nueva reinicia el recorrido: se abre su primera etapa y se
     // olvidan las respuestas de la anterior.
     useEffect(() => {
         setAnswered({});
         setOpenStages(new Set(stagedExercises.length > 0 ? [stagedExercises[0].stage] : []));
     }, [stagedExercises]);
+
+    // Una lección nueva (cambia el diálogo) reinicia la sincronía de escucha.
+    useEffect(() => {
+        setActiveLine(null);
+        setHasListenedOnce(false);
+    }, [state.lessonPlan?.dialogue]);
+
+    // En repaso, seguir con la vista el turno que suena.
+    useEffect(() => {
+        if (!hasListenedOnce || activeLine === null || activeTab !== 'transcript') return;
+        activeLineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, [activeLine, hasListenedOnce, activeTab]);
 
     const toggleStage = useCallback((stage: ListeningStage) => {
         setOpenStages(prev => {
@@ -366,7 +388,7 @@ const App: React.FC = () => {
         planResolvedRef.current = false;
         lastProgressSigRef.current = '';
 
-        setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null, audioFallback: null }));
+        setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null, audioTurns: null, audioFallback: null }));
         setAudioError(null);
         setProgress(null);
 
@@ -426,6 +448,7 @@ const App: React.FC = () => {
                         config: { ...prev.config, topic: finalTopic },
                         lessonPlan: cached.plan,
                         audioBlob: cached.audio,
+                        audioTurns: cached.turns,
                         audioFallback: null,
                         status: 'ready'
                     }));
@@ -438,7 +461,8 @@ const App: React.FC = () => {
             // audio en paralelo con la cola del plan (ejercicios + verificación),
             // en vez de esperar a toda la lección. Mismo completion, mismo
             // contenido: solo se solapan las dos fases.
-            let earlyAudio: { dialogue: LessonPlan['dialogue']; promise: Promise<string> } | null = null;
+            type AudioResult = { audio: string; turns: TurnTiming[] };
+            let earlyAudio: { dialogue: LessonPlan['dialogue']; promise: Promise<AudioResult> } | null = null;
 
             const plan = await generateLessonPlan(
                 state.config.level,
@@ -476,18 +500,18 @@ const App: React.FC = () => {
             }));
 
             try {
-                let audioUrl: string;
+                let audioResult: AudioResult;
                 // Si el audio ya venía corriendo y el diálogo final coincide con el
                 // que lo lanzó, se aprovecha esa promesa. Si no arrancó pronto, o el
                 // diálogo cambió en un reintento (raro con temperature 0), se genera
                 // en secuencia — nunca se envía audio de un diálogo obsoleto.
-                const pending = earlyAudio as { dialogue: LessonPlan['dialogue']; promise: Promise<string> } | null;
+                const pending = earlyAudio as { dialogue: LessonPlan['dialogue']; promise: Promise<AudioResult> } | null;
                 if (pending && dialoguesEqual(pending.dialogue, plan.dialogue)) {
-                    audioUrl = await pending.promise;
+                    audioResult = await pending.promise;
                 } else {
                     // El audio no arrancó pronto, o el diálogo cambió en un reintento:
                     // la promesa temprana (si la hay) ya tiene su .catch y se descarta.
-                    audioUrl = await generateAudio(
+                    audioResult = await generateAudio(
                         plan.dialogue,
                         plan.characters,
                         state.config.accent,
@@ -497,13 +521,14 @@ const App: React.FC = () => {
                 if (!isCurrent()) return;
                 setState(prev => ({
                     ...prev,
-                    audioBlob: audioUrl,
+                    audioBlob: audioResult.audio,
+                    audioTurns: audioResult.turns,
                     audioFallback: null,
                     status: 'ready'
                 }));
                 // Solo se guarda la lección completa: una sin audio no ahorra
                 // nada al recuperarla, porque habría que volver al TTS igual.
-                if (cacheable) void writeLesson(cacheKey, plan, audioUrl);
+                if (cacheable) void writeLesson(cacheKey, plan, audioResult.audio, audioResult.turns);
             } catch (audioErr: any) {
                 console.warn("Audio generation failed:", audioErr);
                 if (!isCurrent()) return;
@@ -524,6 +549,7 @@ const App: React.FC = () => {
                         setState(prev => ({
                             ...prev,
                             audioBlob: null,
+                            audioTurns: null,
                             audioFallback: fallback,
                             status: 'ready'
                         }));
@@ -534,6 +560,7 @@ const App: React.FC = () => {
                 setState(prev => ({
                     ...prev,
                     audioBlob: null,
+                    audioTurns: null,
                     audioFallback: null,
                     status: 'ready'
                 }));
@@ -567,6 +594,7 @@ const App: React.FC = () => {
             status: 'idle',
             lessonPlan: null,
             audioBlob: null,
+            audioTurns: null,
             audioFallback: null,
             error: null
         }));
@@ -930,6 +958,9 @@ const App: React.FC = () => {
                                 scenarioActionLabel={state.config.mode === AppMode.Standard && !isCustomMode ? selectedModus.label : undefined}
                                 hideTrackInfo={state.config.mode === AppMode.AccentChallenge}
                                 downloadName={state.lessonPlan?.title}
+                                turns={state.audioTurns}
+                                onActiveLineChange={setActiveLine}
+                                onListened={() => setHasListenedOnce(true)}
                             />
                         ) : (
                             <div className="p-4 text-center font-mono text-xs text-faint uppercase tracking-wider">
@@ -976,21 +1007,29 @@ const App: React.FC = () => {
                                     </p>
                                 </div>
                                 <div className="flex flex-col">
-                                    {state.lessonPlan?.dialogue?.map((line, idx) => (
-                                        <div key={idx} className="grid grid-cols-[76px_1fr] gap-4 py-3 border-b border-line-soft last:border-0 group">
+                                    {state.lessonPlan?.dialogue?.map((line, idx) => {
+                                        // Resaltado solo en repaso (tras la primera escucha completa).
+                                        const isActive = hasListenedOnce && activeLine === idx;
+                                        return (
+                                        <div
+                                            key={idx}
+                                            ref={isActive ? activeLineRef : undefined}
+                                            className={`grid grid-cols-[76px_1fr] gap-4 py-3 border-b border-line-soft last:border-0 group transition-colors ${isActive ? 'bg-panel-2 rounded-lg' : ''}`}
+                                        >
                                             <div className="font-mono text-[11px] text-faint pt-1 text-right leading-relaxed">
                                                 {line.speaker}
                                                 {line.emotion && (
                                                     <span className="block text-faint/70 mt-1 normal-case">[{line.emotion}]</span>
                                                 )}
                                             </div>
-                                            <div className="border-l-2 border-line pl-4 group-hover:border-faint transition-colors">
-                                                <p className="text-[16px] text-muted leading-relaxed group-hover:text-fg transition-colors">
+                                            <div className={`border-l-2 pl-4 transition-colors ${isActive ? 'border-accent' : 'border-line group-hover:border-faint'}`}>
+                                                <p className={`text-[16px] leading-relaxed transition-colors ${isActive ? 'text-fg' : 'text-muted group-hover:text-fg'}`}>
                                                     {line.text}
                                                 </p>
                                             </div>
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             </div>
                         )}

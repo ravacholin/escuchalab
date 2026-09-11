@@ -57,7 +57,8 @@ const {
   ttsDialogueBudget,
   assignSpeakerVoices,
   planAudioRequests,
-  isQuotaError
+  isQuotaError,
+  computeTurnTimings
 } = await loadModule('services/geminiService.ts');
 const { checkTwoVoices, segmentPitches } = await loadModule('services/ttsVoiceCheck.ts');
 const { splitIntoTurns } = await loadModule('services/ttsTurnSplit.ts');
@@ -647,6 +648,62 @@ for (const accent of Object.values(Accent)) {
   }
 }
 
+// --- 11. Tiempos por turno (computeTurnTimings) --------------------------
+// Es la aritmética que destraba «repetir esta réplica» y el resaltado
+// sincronizado: los mismos bytes con los que se concatenan los turnos en orden
+// de diálogo, con un `gap` entre cada dos.
+{
+  const BPS = 48000; // 24 kHz · 16 bits mono
+  const GAP = 10560; // 0,22 s de silencio, como TURN_GAP_MS
+
+  // a) Caso determinista: 2 s, 1 s, 3 s con hueco entre medias.
+  {
+    const turns = [
+      { at: 0, bytes: 96000 },
+      { at: 1, bytes: 48000 },
+      { at: 2, bytes: 144000 },
+    ];
+    const t = computeTurnTimings(turns, GAP, BPS);
+    const near = (a, b) => Math.abs(a - b) < 1e-6;
+    check('tres turnos dan tres tramos', t.length === 3, `${t.length}`);
+    check('conserva el índice `at` en orden', t.map(x => x.at).join(',') === '0,1,2');
+    check('el primer tramo empieza en 0', near(t[0].startSec, 0), `${t[0].startSec}`);
+    check('cada tramo tiene fin después del inicio', t.every(x => x.endSec > x.startSec));
+    check('duración de cada turno = bytes/BPS',
+      near(t[0].endSec - t[0].startSec, 2) && near(t[1].endSec - t[1].startSec, 1) && near(t[2].endSec - t[2].startSec, 3),
+      t.map(x => (x.endSec - x.startSec).toFixed(3)).join(' / '));
+    check('el hueco entre turnos es exactamente el gap',
+      near(t[1].startSec - t[0].endSec, GAP / BPS) && near(t[2].startSec - t[1].endSec, GAP / BPS));
+    // Cubre la pista entera: último fin = suma de bytes + (k-1) huecos.
+    const total = (96000 + 48000 + 144000 + 2 * GAP) / BPS;
+    check('el último fin iguala la duración total de la pista', near(t.at(-1).endSec, total), `${t.at(-1).endSec} vs ${total}`);
+  }
+
+  // b) Monotonía estricta y sin solapes en un reparto arbitrario.
+  {
+    const sizes = [30000, 8000, 51000, 12000, 40000, 6000, 99000];
+    const turns = sizes.map((bytes, i) => ({ at: i, bytes }));
+    const t = computeTurnTimings(turns, GAP, BPS);
+    let monotonic = true;
+    for (let i = 0; i < t.length; i++) {
+      if (t[i].endSec <= t[i].startSec) monotonic = false;
+      if (i > 0 && t[i].startSec < t[i - 1].endSec) monotonic = false;
+    }
+    check('tramos monótonos y sin solaparse', monotonic, t.map(x => `${x.startSec.toFixed(2)}-${x.endSec.toFixed(2)}`).join(' '));
+    // El hueco entre turnos consecutivos es siempre el gap.
+    const gapSec = GAP / BPS;
+    const gapsOk = t.slice(1).every((x, i) => Math.abs((x.startSec - t[i].endSec) - gapSec) < 1e-6);
+    check('el hueco entre cada par de turnos es constante', gapsOk);
+  }
+
+  // c) Casos límite: un turno y ninguno.
+  {
+    const one = computeTurnTimings([{ at: 0, bytes: 72000 }], GAP, BPS);
+    check('un solo turno: un tramo desde 0', one.length === 1 && one[0].startSec === 0 && Math.abs(one[0].endSec - 1.5) < 1e-6);
+    check('sin turnos: sin tramos', computeTurnTimings([], GAP, BPS).length === 0);
+  }
+}
+
 if (failures.length) {
   console.error(`✗ ${failures.length} fallo(s) en el troceo de audio:`);
   for (const f of failures) console.error(`  · ${f}`);
@@ -660,5 +717,6 @@ console.log(
     'coste fijo de 2 peticiones por diálogo en los 8 acentos sin reintentos, ' +
     'errores de cuota distinguidos de los de red, ' +
     'cadena de modelos de voz con fallback (503/429 cambian de modelo, red no; un solo modelo por lección), ' +
-    'y recuperación de los turnos del bloque de cada voz (por silencio medido y, sin silencios, por reparto)'
+    'recuperación de los turnos del bloque de cada voz (por silencio medido y, sin silencios, por reparto), ' +
+    'y tiempos por turno (computeTurnTimings) monótonos, sin solapes y cubriendo la pista'
 );

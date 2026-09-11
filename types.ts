@@ -73,6 +73,23 @@ export interface DialogueLine {
 }
 
 /**
+ * Tiempos de inicio/fin (en segundos) de cada turno dentro de la pista PCM
+ * generada por `generateAudio`. Se derivan de forma determinista al concatenar
+ * los turnos en orden de diálogo (ver `computeTurnTimings` en `geminiService.ts`),
+ * a costo casi nulo: no hay timestamps del modelo. Es lo que permite «repetir esta
+ * réplica» y el resaltado sincronizado de la transcripción. `at` es el índice del
+ * turno en `dialogue`, misma convención que `WebSpeechPlan.lines[].at`.
+ *
+ * No aplica al modo respaldo (voz del navegador): ahí `speechSynthesis` ya habla
+ * intervención por intervención y el reproductor sigue el turno por su cuenta.
+ */
+export interface TurnTiming {
+  at: number;
+  startSec: number;
+  endSec: number;
+}
+
+/**
  * Plan de respaldo para sintetizar el diálogo con la Web Speech API del navegador
  * (`window.speechSynthesis`) cuando el TTS de Gemini falla —cuota agotada, modelo
  * caído, red— tras recorrer toda la cadena `AUDIO_MODELS`. Es gratis, sin clave,
@@ -267,6 +284,12 @@ export interface AppState {
   };
   lessonPlan: LessonPlan | null;
   audioBlob: string | null;
+  /**
+   * Tiempos por turno de la pista PCM (`audioBlob`), para repetir una réplica y
+   * sincronizar la transcripción. `null` cuando no hay PCM (modo respaldo) o
+   * cuando una lección cacheada de antes de esta función no los tiene.
+   */
+  audioTurns: TurnTiming[] | null;
   /**
    * Plan de respaldo con la voz del navegador, activo solo cuando el audio de
    * Gemini falló y `audioBlob` quedó en null. Excluyentes: o hay PCM, o hay

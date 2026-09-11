@@ -1,4 +1,4 @@
-import { AppMode, Accent, Length, Level, LessonPlan, TextType } from '../types';
+import { AppMode, Accent, Length, Level, LessonPlan, TextType, TurnTiming } from '../types';
 
 /**
  * Caché local de lecciones ya generadas.
@@ -39,6 +39,8 @@ interface CachedLesson {
   plan: LessonPlan;
   /** PCM crudo (24 kHz, mono, 16 bits), tal como lo devuelve el TTS. */
   audio: Uint8Array;
+  /** Tiempos por turno de la pista. Ausente en entradas anteriores a la función. */
+  turns?: TurnTiming[];
   lastUsed: number;
 }
 
@@ -46,6 +48,8 @@ export interface CachedLessonResult {
   plan: LessonPlan;
   /** El mismo base64 que devuelve `generateAudio()`. */
   audio: string;
+  /** Tiempos por turno; `null` en lecciones cacheadas antes de esta función. */
+  turns: TurnTiming[] | null;
 }
 
 /**
@@ -135,7 +139,11 @@ export async function readLesson(key: string): Promise<CachedLessonResult | null
 
     entry.lastUsed = Date.now();
     store.put(entry);
-    return { plan: entry.plan, audio: bytesToBase64(new Uint8Array(entry.audio)) };
+    return {
+      plan: entry.plan,
+      audio: bytesToBase64(new Uint8Array(entry.audio)),
+      turns: entry.turns ?? null,
+    };
   } catch (err) {
     console.warn('[Cache] Lectura fallida:', err);
     return null;
@@ -143,7 +151,12 @@ export async function readLesson(key: string): Promise<CachedLessonResult | null
 }
 
 /** Guarda una lección completa y descarta las más antiguas si hace falta. */
-export async function writeLesson(key: string, plan: LessonPlan, audioBase64: string): Promise<void> {
+export async function writeLesson(
+  key: string,
+  plan: LessonPlan,
+  audioBase64: string,
+  turns?: TurnTiming[] | null,
+): Promise<void> {
   const db = await openDb();
   if (!db || !audioBase64) return;
 
@@ -161,7 +174,7 @@ export async function writeLesson(key: string, plan: LessonPlan, audioBase64: st
     const excess = others.length - (MAX_ENTRIES - 1);
     for (let i = 0; i < excess; i++) store.delete(others[i]);
 
-    store.put({ key, plan, audio, lastUsed: Date.now() } satisfies CachedLesson);
+    store.put({ key, plan, audio, turns: turns ?? undefined, lastUsed: Date.now() } satisfies CachedLesson);
   } catch (err) {
     console.warn('[Cache] Escritura fallida:', err);
   }
