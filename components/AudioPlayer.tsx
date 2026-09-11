@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Pause, RotateCcw, Activity, Radio, Sparkles, Volume2, VolumeX, Download, SlidersHorizontal, Info } from 'lucide-react';
+import { Play, Pause, RotateCcw, Rewind, Repeat, Repeat1, Activity, Radio, Sparkles, Volume2, VolumeX, Download, SlidersHorizontal, Info } from 'lucide-react';
 import { resolveAmbienceScene, type ResolvedAmbience } from '../services/ambiencePresets';
 import { loadBed, bedAssetUrl } from '../services/ambienceLibrary';
 import {
@@ -8,7 +8,7 @@ import {
   DEFAULT_AMBIENCE_INTENSITY,
   DEFAULT_AMBIENCE_VOLUME,
 } from '../services/ambienceEngine';
-import { TextType, WebSpeechPlan } from '../types';
+import { TextType, WebSpeechPlan, TurnTiming } from '../types';
 import { ACCENT_LOCALE, pickWebSpeechVoices, type VoiceLike } from '../services/webSpeechTts';
 
 interface AudioPlayerProps {
@@ -34,6 +34,20 @@ interface AudioPlayerProps {
   hideTrackInfo?: boolean; // Hide source metadata
   /** Base filename (sin extensión) para descargar el audio de la lección. */
   downloadName?: string;
+  /**
+   * Tiempos por turno de la pista PCM (`services/geminiService.ts`). Permiten
+   * repetir la réplica actual y avisar qué turno suena. `null`/ausente en modo
+   * respaldo (ahí el turno se sigue por `fallbackLine`) o en lecciones cacheadas
+   * antes de esta función.
+   */
+  turns?: TurnTiming[] | null;
+  /**
+   * Índice de turno (`at` en el diálogo) que suena ahora, o `null`. Lo consume
+   * `App.tsx` para resaltar la transcripción en modo repaso.
+   */
+  onActiveLineChange?: (at: number | null) => void;
+  /** Se dispara al terminar de escuchar la pista entera por primera vez. */
+  onListened?: () => void;
 }
 
 // ----------------------------------------------------------------------
@@ -137,6 +151,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   sceneHint,
   hideTrackInfo,
   downloadName,
+  turns,
+  onActiveLineChange,
+  onListened,
 }) => {
   const speechRef = useRef<HTMLAudioElement | null>(null);
 
@@ -160,6 +177,50 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [playbackRate, setPlaybackRate] = useState(recommendedSpeed);
   const [showMixer, setShowMixer] = useState(false);
+  const [loop, setLoop] = useState(false);
+  const loopRef = useRef(loop);
+  useEffect(() => { loopRef.current = loop; }, [loop]);
+
+  // Ventana de «repetir esta réplica»: cuando está puesta, la reproducción PCM se
+  // frena en ese segundo (chequeado en onTimeUpdate) para no seguir con el resto
+  // del diálogo. `null` = reproducción normal.
+  const playUntilRef = useRef<number | null>(null);
+  // Último turno reportado a `onActiveLineChange`, para no repetir el aviso en
+  // cada onTimeUpdate (~4/s). Índice `at` del diálogo, o null.
+  const reportedAtRef = useRef<number | null | undefined>(undefined);
+  // La primera escucha completa se avisa una sola vez.
+  const listenedRef = useRef(false);
+
+  // Índice `at` del turno que suena en el segundo `t`: el último turno cuyo
+  // `startSec` ya pasó. Durante el hueco de 220 ms entre turnos mantiene el
+  // último (no parpadea a null). Antes del primer turno, null. Los turnos vienen
+  // ordenados por tiempo (orden de diálogo), así que basta un barrido.
+  const turnAtTime = useCallback((t: number): number | null => {
+    if (!turns || turns.length === 0) return null;
+    let at: number | null = null;
+    for (const turn of turns) {
+      if (turn.startSec <= t + 1e-3) at = turn.at;
+      else break;
+    }
+    return at;
+  }, [turns]);
+
+  // Avisa a App qué turno suena, sin repetir el mismo valor en cada onTimeUpdate.
+  const reportActive = useCallback((at: number | null) => {
+    if (reportedAtRef.current === at) return;
+    reportedAtRef.current = at;
+    onActiveLineChange?.(at);
+  }, [onActiveLineChange]);
+
+  const markListened = useCallback(() => {
+    if (listenedRef.current) return;
+    listenedRef.current = true;
+    onListened?.();
+  }, [onListened]);
+
+  // Indirección para que el bucle del modo respaldo pueda re-arrancar desde 0 sin
+  // que `speakFallbackFrom` tenga que referenciarse a sí mismo.
+  const speakFallbackFromRef = useRef<(i: number) => void>(() => {});
 
   // --- MODO RESPALDO (voz del navegador) ---------------------------------
   // Activo cuando no hay PCM de Gemini pero sí un plan Web Speech. La reproducción
@@ -508,20 +569,54 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
       u.onstart = () => {
         fallbackLineRef.current = i;
         setFallbackLine(i);
+        reportActive(line.at);
         engineRef.current?.applySpeechLevel(0.85);
       };
       u.onend = () => {
         engineRef.current?.applySpeechLevel(0);
         if (i >= lines.length - 1) {
+          markListened();
+          if (loopRef.current) {
+            speakFallbackFromRef.current(0);
+            return;
+          }
           setIsPlaying(false);
           fallbackLineRef.current = 0;
           setFallbackLine(0);
+          reportActive(null);
           stopAmbience();
         }
       };
       synth.speak(u);
     }
-  }, [isFallback, webSpeech, resolveSpeakerVoices, stopAmbience]);
+  }, [isFallback, webSpeech, resolveSpeakerVoices, stopAmbience, reportActive, markListened]);
+
+  // Habla **una sola** intervención (repetir la réplica actual en modo respaldo).
+  // No sigue con el resto del diálogo.
+  const speakFallbackOne = useCallback((idx: number) => {
+    if (!isFallback || typeof window === 'undefined' || !window.speechSynthesis) return;
+    const synth = window.speechSynthesis;
+    const voices = resolveSpeakerVoices();
+    synth.cancel();
+    const lines = webSpeech!.lines;
+    const i = Math.max(0, Math.min(idx, lines.length - 1));
+    fallbackLineRef.current = i;
+    setFallbackLine(i);
+    ensureAudioContext();
+    if (!engineRef.current) startAmbience();
+    const line = lines[i];
+    const u = new SpeechSynthesisUtterance(line.text);
+    const v = voices.get(line.speaker) as SpeechSynthesisVoice | null | undefined;
+    if (v) u.voice = v;
+    u.lang = v?.lang || ACCENT_LOCALE[webSpeech!.accent] || 'es-ES';
+    u.rate = playRateRef.current;
+    u.onstart = () => { reportActive(line.at); engineRef.current?.applySpeechLevel(0.85); };
+    u.onend = () => { engineRef.current?.applySpeechLevel(0); setIsPlaying(false); };
+    synth.speak(u);
+    setIsPlaying(true);
+  }, [isFallback, webSpeech, resolveSpeakerVoices, ensureAudioContext, startAmbience, reportActive]);
+
+  useEffect(() => { speakFallbackFromRef.current = speakFallbackFrom; }, [speakFallbackFrom]);
 
   const startFallbackPlayback = useCallback(() => {
     ensureAudioContext();
@@ -568,7 +663,18 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   };
 
   const onTimeUpdate = () => {
-    if (speechRef.current) setCurrentTime(speechRef.current.currentTime);
+    const el = speechRef.current;
+    if (!el) return;
+    const t = el.currentTime;
+    setCurrentTime(t);
+    // Fin de la ventana de «repetir esta réplica»: frenar sin seguir con el
+    // resto del diálogo.
+    if (playUntilRef.current !== null && t >= playUntilRef.current) {
+      playUntilRef.current = null;
+      el.pause();
+      stopAmbience();
+    }
+    reportActive(turnAtTime(t));
   };
 
   const onLoadedMetadata = () => {
@@ -579,8 +685,22 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   };
 
   const onEnded = () => {
+    playUntilRef.current = null;
+    markListened();
+    if (loopRef.current) {
+      // Reiniciar la pista sin parar el ambiente: el bed se re-sincroniza solo
+      // desde el evento `playing`. `reportActive(null)` limpia el resaltado antes
+      // de volver a empezar.
+      if (speechRef.current) speechRef.current.currentTime = 0;
+      setCurrentTime(0);
+      reportActive(null);
+      startPlayback();
+      setIsPlaying(true);
+      return;
+    }
     setIsPlaying(false);
     setCurrentTime(0);
+    reportActive(null);
     stopAmbience();
   };
 
@@ -589,15 +709,56 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const percent = (e.clientX - rect.left) / rect.width;
     const nt = percent * duration;
+    // Un seek manual cancela la ventana de «repetir réplica».
+    playUntilRef.current = null;
     speechRef.current.currentTime = nt;
     setCurrentTime(nt);
+    reportActive(turnAtTime(nt));
+  };
+
+  // Retroceder 10 s. En modo respaldo no hay línea de tiempo: se vuelve a la
+  // réplica anterior.
+  const rewind = () => {
+    if (isFallback) {
+      const target = Math.max(0, (fallbackLineRef.current || 0) - 1);
+      fallbackLineRef.current = target;
+      startFallbackPlayback();
+      return;
+    }
+    const el = speechRef.current;
+    if (!el) return;
+    playUntilRef.current = null;
+    const nt = Math.max(0, el.currentTime - 10);
+    el.currentTime = nt;
+    setCurrentTime(nt);
+    reportActive(turnAtTime(nt));
+  };
+
+  // Repetir la réplica que suena ahora, y frenar al final de esa réplica.
+  const repeatTurn = () => {
+    if (isFallback) {
+      speakFallbackOne(fallbackLineRef.current || 0);
+      return;
+    }
+    const el = speechRef.current;
+    if (!el || !turns || turns.length === 0) return;
+    const at = turnAtTime(el.currentTime);
+    const turn = (at !== null ? turns.find(t => t.at === at) : undefined) ?? turns[0];
+    playUntilRef.current = turn.endSec;
+    el.currentTime = turn.startSec;
+    setCurrentTime(turn.startSec);
+    reportActive(turn.at);
+    startPlayback();
+    setIsPlaying(true);
   };
 
   const reset = () => {
     if (isFallback) { resetFallback(); return; }
     if (!speechRef.current) return;
+    playUntilRef.current = null;
     speechRef.current.currentTime = 0;
     setCurrentTime(0);
+    reportActive(null);
     startPlayback();
     setIsPlaying(true);
   };
@@ -695,6 +856,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   // En modo respaldo no hay tiempo ni seek: se puede reproducir en cuanto hay plan,
   // y el progreso se mide por intervención hablada. En modo PCM manda `speechUrl`.
   const canPlay = isFallback || !!speechUrl;
+  // Repetir la réplica: en PCM necesita los tiempos por turno (ausentes en
+  // lecciones cacheadas antes de esta función); en respaldo, siempre.
+  const canRepeat = isFallback ? canPlay : (!!turns && turns.length > 0);
   const progressRatio = isFallback
     ? (fallbackTotal ? Math.min(1, (fallbackLine + (isPlaying ? 1 : 0)) / fallbackTotal) : 0)
     : (duration ? currentTime / duration : 0);
@@ -763,8 +927,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
         </div>
       </div>
 
-      {/* Controls */}
-      <div className="flex items-center gap-2.5 px-4 pb-3.5 pt-1">
+      {/* Controls. `flex-wrap` + el grupo de botones con su propio `flex-wrap`
+          evitan el desborde en el reproductor fijo de mobile: si no entran, el
+          grupo baja a una segunda línea en vez de salirse de la tarjeta. */}
+      <div className="flex flex-wrap items-center gap-2.5 px-4 pb-3.5 pt-1">
         <button
           onClick={togglePlay}
           disabled={!canPlay}
@@ -790,46 +956,75 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
           <div className="flex-1" />
         )}
 
-        <button
-          onClick={reset}
-          disabled={!canPlay}
-          title="Reiniciar"
-          aria-label="Reiniciar"
-          className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition group"
-        >
-          <RotateCcw size={17} className="group-hover:-rotate-45 transition-transform" />
-        </button>
-        <button
-          onClick={() => {
-            const ci = SPEEDS.indexOf(playbackRate);
-            const ni = (ci + 1) % SPEEDS.length;
-            setPlaybackRate(SPEEDS[ni]);
-          }}
-          title="Velocidad de reproducción"
-          className="flex-none h-9 px-2.5 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 transition font-mono text-[12px] font-bold tabular-nums"
-        >
-          {playbackRate}x
-        </button>
-        <button
-          onClick={() => setShowMixer((v) => !v)}
-          aria-expanded={showMixer}
-          title="Ajustes de ambiente"
-          aria-label="Ajustes de ambiente"
-          className={`flex-none w-9 h-9 rounded-lg grid place-items-center transition ${showMixer ? 'text-fg bg-panel-2' : 'text-muted hover:text-fg hover:bg-panel-2'}`}
-        >
-          <SlidersHorizontal size={17} />
-        </button>
-        {!isFallback && (
+        <div className="flex flex-wrap items-center justify-end gap-1.5 flex-none ml-auto">
           <button
-            onClick={handleDownload}
-            disabled={!speechUrl}
-            title="Descargar audio (WAV, solo voz)"
-            aria-label="Descargar audio"
+            onClick={rewind}
+            disabled={!canPlay}
+            title={isFallback ? 'Réplica anterior' : 'Retroceder 10 s'}
+            aria-label={isFallback ? 'Réplica anterior' : 'Retroceder 10 segundos'}
             className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition"
           >
-            <Download size={16} />
+            <Rewind size={16} />
           </button>
-        )}
+          <button
+            onClick={repeatTurn}
+            disabled={!canRepeat}
+            title="Repetir esta réplica"
+            aria-label="Repetir esta réplica"
+            className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition"
+          >
+            <Repeat1 size={17} />
+          </button>
+          <button
+            onClick={() => setLoop((v) => !v)}
+            aria-pressed={loop}
+            title={loop ? 'Bucle activado' : 'Repetir la pista en bucle'}
+            aria-label="Repetir la pista en bucle"
+            className={`flex-none w-9 h-9 rounded-lg grid place-items-center transition ${loop ? 'text-ink bg-accent hover:brightness-105' : 'text-muted hover:text-fg hover:bg-panel-2'}`}
+          >
+            <Repeat size={16} />
+          </button>
+          <button
+            onClick={reset}
+            disabled={!canPlay}
+            title="Reiniciar"
+            aria-label="Reiniciar"
+            className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition group"
+          >
+            <RotateCcw size={17} className="group-hover:-rotate-45 transition-transform" />
+          </button>
+          <button
+            onClick={() => {
+              const ci = SPEEDS.indexOf(playbackRate);
+              const ni = (ci + 1) % SPEEDS.length;
+              setPlaybackRate(SPEEDS[ni]);
+            }}
+            title="Velocidad de reproducción"
+            className="flex-none h-9 px-2.5 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 transition font-mono text-[12px] font-bold tabular-nums"
+          >
+            {playbackRate}x
+          </button>
+          <button
+            onClick={() => setShowMixer((v) => !v)}
+            aria-expanded={showMixer}
+            title="Ajustes de ambiente"
+            aria-label="Ajustes de ambiente"
+            className={`flex-none w-9 h-9 rounded-lg grid place-items-center transition ${showMixer ? 'text-fg bg-panel-2' : 'text-muted hover:text-fg hover:bg-panel-2'}`}
+          >
+            <SlidersHorizontal size={17} />
+          </button>
+          {!isFallback && (
+            <button
+              onClick={handleDownload}
+              disabled={!speechUrl}
+              title="Descargar audio (WAV, solo voz)"
+              aria-label="Descargar audio"
+              className="flex-none w-9 h-9 rounded-lg grid place-items-center text-muted hover:text-fg hover:bg-panel-2 disabled:opacity-40 transition"
+            >
+              <Download size={16} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Ambience mixer (collapsible) */}

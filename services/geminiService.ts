@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, GenerateContentParameters, Modality } from "@google/genai";
-import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode } from "../types";
+import { Level, Length, TextType, Accent, LessonPlan, Character, AppMode, TurnTiming } from "../types";
 import { ExerciseSlot, FORMAT_RULES, getBlueprint, STAGE_META } from "../data/listeningSyllabus";
 import { DATA_POINTS, inferDataPoint } from "../data/dataPoints";
 import { fillMissingSlots } from "./exerciseEngines";
@@ -2454,19 +2454,49 @@ export function planAudioRequests(
   };
 }
 
+/**
+ * Deriva los tiempos por turno de la pista PCM, sin coste de red ni de cómputo:
+ * es la misma aritmética de bytes con la que `generateAudio` concatena los turnos
+ * en orden de diálogo. `orderedTurns` son los turnos **ya en el orden en que se
+ * concatenan** (índice `at` en `dialogue` + bytes del turno), y entre cada dos hay
+ * `gapBytes` de silencio —exactamente como en el ensamblado, que empuja el `gap`
+ * antes de cada turno salvo el primero—. Devuelve un tramo por turno, con `startSec`
+ * y `endSec` estrictamente crecientes y sin solapar. Pura y exportada para poder
+ * fijarla offline (`check:audio`).
+ */
+export function computeTurnTimings(
+  orderedTurns: Array<{ at: number; bytes: number }>,
+  gapBytes: number,
+  bytesPerSecond: number = TTS_BYTES_PER_SECOND
+): TurnTiming[] {
+  const timings: TurnTiming[] = [];
+  let cursor = 0;
+  orderedTurns.forEach((turn, i) => {
+    if (i > 0) cursor += gapBytes;
+    const startByte = cursor;
+    cursor += turn.bytes;
+    timings.push({
+      at: turn.at,
+      startSec: startByte / bytesPerSecond,
+      endSec: cursor / bytesPerSecond,
+    });
+  });
+  return timings;
+}
+
 export const generateAudio = async (
   dialogue: LessonPlan['dialogue'],
   characters: Character[],
   accent: Accent,
   onProgress?: ProgressListener
-): Promise<string> => {
+): Promise<{ audio: string; turns: TurnTiming[] }> => {
   const reporter = new ProgressReporter('audio', AUDIO_STEPS, onProgress);
   reporter.start('prepare');
 
   // DYNAMIC INSTANTIATION WITH STORED KEY
   const ai = getAi();
 
-  if (!dialogue || dialogue.length === 0) return "";
+  if (!dialogue || dialogue.length === 0) return { audio: "", turns: [] };
 
   const plan = planAudioRequests(dialogue, characters, accent);
   // Final validation before sending
@@ -2654,13 +2684,19 @@ export const generateAudio = async (
     }
 
     const ordered: Uint8Array[] = [];
+    const orderedTurns: Array<{ at: number; bytes: number }> = [];
     const gap = silencePcm(TURN_GAP_MS);
     for (const at of [...perTurn.keys()].sort((a, b) => a - b)) {
       if (ordered.length) ordered.push(gap);
-      ordered.push(...(perTurn.get(at) as Uint8Array[]));
+      const pieces = perTurn.get(at) as Uint8Array[];
+      ordered.push(...pieces);
+      orderedTurns.push({ at, bytes: pieces.reduce((n, p) => n + p.byteLength, 0) });
     }
 
     const audioBytes = concatPcmChunks(ordered);
+    // Los tiempos por turno salen de la misma aritmética de bytes del ensamblado:
+    // el mismo `gap` entre turnos y los mismos trozos que se concatenan.
+    const turns = computeTurnTimings(orderedTurns, gap.byteLength, TTS_BYTES_PER_SECOND);
     if (audioBytes.length === 0) {
       throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
     }
@@ -2705,7 +2741,7 @@ export const generateAudio = async (
     reporter.flush();
 
     console.log('[TTS] Audio generation successful');
-    return audioData;
+    return { audio: audioData, turns };
   } catch (error: any) {
     const active = reporter.snapshot().activeStepId;
     if (active) reporter.fail(active, errorMessage(error));
