@@ -484,7 +484,7 @@ measurement.
 - The only clock-driven element left is the elapsed-time counter, because it is a clock.
 
 ### Component Structure
-- `App.tsx`: Main orchestrator - handles all state and screen rendering. The lesson is walked stage by stage: each `ListeningStage` is a **collapsible section** with an `n/m resueltos` counter, and only the first opens. Everything used to be painted in one scroll — five or six cards, several of them tables, before the learner had decided where to start — and a good part of what read as an unmanageable load was that, independently of the content. `ExerciseCard` reports each submit through the optional `onAnswered` prop; the card's own state stays its own.
+- `App.tsx`: Main orchestrator - handles all state and screen rendering. `services/geminiService.ts` (and the Gemini SDK with it, ~half the bundle) is **loaded on demand** (`loadGeminiService`), prefetched when the config screen shows; keep it out of static imports from UI code — `webSpeechTts.ts` gets its speaker helpers from the dependency-free `services/speakerText.ts` for that reason. Each `ExerciseCard` sits in its own `ErrorBoundary` (with `fallback`), so one malformed exercise no longer takes down the lesson and its audio. The lesson is walked stage by stage: each `ListeningStage` is a **collapsible section** with an `n/m resueltos` counter, and only the first opens. Everything used to be painted in one scroll — five or six cards, several of them tables, before the learner had decided where to start — and a good part of what read as an unmanageable load was that, independently of the content. `ExerciseCard` reports each submit through the optional `onAnswered` prop; the card's own state stays its own.
 - `AudioPlayer.tsx`: Transport, speech routing and ambience UI. The ambience engine itself lives in `services/ambienceEngine.ts` (see Ambient Sound System above); the component was 1529 lines when ~900 of them were the engine.
 - `ExerciseCard.tsx`: Polymorphic renderer for the 13 formats; shows the skill badge, and on submit reveals the `sourceTurns` lines as proof of the key. `dictation` gets its own renderer: a single open `<input>` with the datum's label, `inputMode="numeric"` where the datum is only digits, and the datum in its real spelling revealed on submit.
 - `MatrixSelector.tsx`: Locus × Modus grid interface for Standard mode
@@ -650,6 +650,7 @@ of the *moment*:
   a bare `PerProject`/`PerUser` with no model dimension → per-project. **Unknown scope
   defaults to switching**: recovering real output from a fresh model beats the failsafe, and
   one wasted round-trip is cheap, so only positive project-scope evidence cuts the chain.
+- **Requests nobody can fix stop at once**: a rejected API key (`isAuthError`: 400 `API_KEY_INVALID`, 401, 403) or an unsupported region (`isRegionError`) is neither retried nor switched — the key and the region are the same for every model. A plain 400 `INVALID_ARGUMENT` (`isBadRequestError`) is not retried against the same model (it would return the same 400) but does switch. The ladders use `isNotRetryable()`.
 - **Everything else keeps the existing ladder first**: network failures, a stream cut
   halfway, an empty response, a timeout. A *single* dropped connection must not burn the
   whole chain, so a raw network/timeout error does **not** switch models on its own — it is

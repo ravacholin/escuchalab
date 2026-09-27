@@ -350,12 +350,51 @@ export function isTimeoutError(error: unknown): boolean {
 }
 
 /**
- * Errores del *modelo*: existe pero no atiende, no existe, o se acabó su cupo.
- * Son los que cambian de modelo **de inmediato**, sin gastar la escalera interna
- * contra un escalón que ya se sabe que no va a contestar.
+ * Google no atiende peticiones desde la región del usuario (400
+ * `FAILED_PRECONDITION`, «User location is not supported»). Como la clave
+ * rechazada, no lo cura ni repetir ni otro modelo.
+ */
+export function isRegionError(error: unknown): boolean {
+  const text = deepErrorText(error);
+  return text.includes('location is not supported') || text.includes('user location');
+}
+
+/**
+ * El modelo rechazó la petición tal como se envió (400 `INVALID_ARGUMENT`):
+ * un parámetro que ese modelo no admite, un texto que el TTS no quiere leer.
+ * Repetir exactamente la misma petición devuelve exactamente el mismo 400, así
+ * que la escalera de red solo gastaba dos llamadas más antes de cambiar de
+ * modelo. Otro escalón sí puede aceptarla (distinta familia, distinto
+ * `thinkingConfig`), así que se trata como un error del modelo: se baja ya.
+ * Se excluyen la clave y la región, que comparten código 400 pero no los cura
+ * ningún modelo.
+ */
+export function isBadRequestError(error: unknown): boolean {
+  if (isAuthError(error) || isRegionError(error)) return false;
+  if (hasCode(error, 400)) return true;
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 'INVALID_ARGUMENT') return true;
+  return errorText(error).toLowerCase().includes('invalid_argument');
+}
+
+/**
+ * Errores del *modelo*: existe pero no atiende, no existe, se acabó su cupo o
+ * rechazó la petición. Son los que cambian de modelo **de inmediato**, sin
+ * gastar la escalera interna contra un escalón que ya se sabe que no va a
+ * contestar.
  */
 export function isModelError(error: unknown): boolean {
-  return isQuotaError(error) || isModelUnavailableError(error) || isModelNotFoundError(error);
+  return isQuotaError(error) || isModelUnavailableError(error) || isModelNotFoundError(error) ||
+    isBadRequestError(error);
+}
+
+/**
+ * ¿Hay que dejar de reintentar contra este modelo? Los errores del modelo
+ * suben para que la cadena baje de escalón; la clave rechazada y la región no
+ * soportada suben para terminar, porque no los arregla nada.
+ */
+export function isNotRetryable(error: unknown): boolean {
+  return isModelError(error) || isAuthError(error) || isRegionError(error);
 }
 
 /**
@@ -402,7 +441,9 @@ const isMarkedSwitchable = (error: unknown): boolean =>
  */
 export function shouldSwitchModel(error: unknown): boolean {
   if (isQuotaError(error)) return quotaScope(error) !== 'project';
-  return isModelUnavailableError(error) || isModelNotFoundError(error) || isMarkedSwitchable(error);
+  if (isAuthError(error) || isRegionError(error)) return false;
+  return isModelUnavailableError(error) || isModelNotFoundError(error) || isBadRequestError(error) ||
+    isMarkedSwitchable(error);
 }
 
 /**
@@ -463,6 +504,14 @@ export function describeModelChainFailure(error: unknown, tried: number): string
   if (isAuthError(error)) {
     return 'Google rechazó la clave de API (no es válida, caducó o no tiene acceso a Gemini). ' +
       'Tocá «Clave» para ingresar otra; podés generarla en aistudio.google.com/apikey.';
+  }
+  if (isRegionError(error)) {
+    return 'Google no ofrece la API de Gemini desde la región desde la que te conectás. ' +
+      'No depende de la clave ni del modelo.';
+  }
+  if (isBadRequestError(error)) {
+    return `${tried === 1 ? 'el modelo rechazó' : `los ${tried} modelos probados rechazaron`} la petición ` +
+      '(400). Probá con otra configuración o con instrucciones personalizadas más cortas.';
   }
   if (isQuotaError(error)) {
     if (quotaScope(error) === 'project') {

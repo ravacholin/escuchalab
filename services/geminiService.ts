@@ -9,12 +9,12 @@ import { verifyExercises } from "./exerciseVerification";
 import { checkTwoVoices } from "./ttsVoiceCheck";
 import { splitIntoTurns } from "./ttsTurnSplit";
 import { parseLenientJson } from "./jsonRepair";
+import { canonicalSpeakerLabel, findCharacter, normalizeSpeaker, sanitizeForTTS } from "./speakerText";
 import {
   AUDIO_MODELS,
   GENERATION_MODELS,
   describeModelChainFailure,
-  isAuthError,
-  isModelError,
+  isNotRetryable,
   isQuotaError,
   markSwitchable,
   modelsFrom,
@@ -49,6 +49,9 @@ const AUDIO_MODEL = AUDIO_MODELS[0];
 // `isQuotaError` vivía aquí y ahora vive con el resto de la clasificación de
 // errores; se re-exporta porque `scripts/check-audio.mjs` lo importa de aquí.
 export { isQuotaError };
+// Viven en `speakerText.ts` (sin dependencias, cargable sin el SDK); se
+// re-exportan porque los checks y `webSpeechTts` las buscaban aquí.
+export { canonicalSpeakerLabel, findCharacter, sanitizeForTTS };
 
 let lastKey = "";
 let aiInstance: GoogleGenAI | null = null;
@@ -283,9 +286,10 @@ export async function generateJsonWithProgress(
       const actual = guard.reason() ?? error;
       // Sin cuota, reintentar solo gasta más cuota; saturado, reintentar en
       // 500 ms no cambia nada. Los dos casos los arregla otro modelo, no otra
-      // vuelta de esta escalera. Una clave rechazada no la arregla nadie: sube
-      // tal cual. La red y los timeouts sí se reintentan aquí.
-      if (isModelError(actual) || isAuthError(actual)) throw actual;
+      // vuelta de esta escalera, ni un 400 (la misma petición da el mismo 400).
+      // Una clave rechazada no la arregla nadie: sube tal cual. La red y los
+      // timeouts sí se reintentan aquí.
+      if (isNotRetryable(actual)) throw actual;
       lastError = actual;
       hooks.onRetry(attempt, accumulated.length, errorMessage(actual));
       await sleep(500 * attempt);
@@ -307,7 +311,7 @@ export async function generateJsonWithProgress(
     return text;
   } catch (error) {
     const actual = guard.reason() ?? error;
-    if (isModelError(actual) || isAuthError(actual)) throw actual;
+    if (isNotRetryable(actual)) throw actual;
     // Agotada la escalera contra este modelo por red o timeout: ya no es un
     // corte transitorio de un intento, así que se marca conmutable para que la
     // cadena baje al siguiente modelo en vez de rendirse. Un corte de red suelto
@@ -350,14 +354,6 @@ function concatBytes(chunks: Uint8Array[], total: number): Uint8Array {
 // (`parseLenientJson`): además de quitar las vallas markdown, repara los fallos
 // que el modelo comete de verdad en respuestas largas en lugar de reventar.
 
-// Sanitize text for TTS to avoid "non-audio response" errors caused by stage directions or formatting
-export function sanitizeForTTS(text: string): string {
-  if (!text) return "";
-  return text
-    .replace(/[\*\[\]\(\)]/g, '') // Remove * [ ] ( ) characters often used for actions/emotions
-    .replace(/\s+/g, ' ')         // Normalize whitespace
-    .trim();
-}
 
 // --- CONFIGURATION: PERFILES FONÉTICOS TTS (PRONUNCIACIÓN) ---
 // Estos perfiles se inyectan como INSTRUCCIÓN al TTS para forzar pronunciación correcta
@@ -1998,7 +1994,7 @@ async function synthesizeWithProgress(
       const actual = guard.reason() ?? error;
       // Los errores del modelo no se arreglan repitiendo contra el mismo modelo:
       // suben para que la cadena baje de escalón.
-      if (isModelError(actual) || isAuthError(actual)) throw actual;
+      if (isNotRetryable(actual)) throw actual;
       lastError = actual;
       hooks.onRetry(attempt, 0, errorMessage(actual));
       await sleep(500 * attempt);
@@ -2116,49 +2112,8 @@ export interface SpeakerVoiceAssignment {
   tone?: string;
 }
 
-/** Minúsculas, sin tildes, sin acotaciones ni puntuación. Solo para comparar. */
-function normalizeSpeaker(raw: string): string {
-  return (raw || '')
-    .replace(/\([^)]*\)/g, ' ')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu, '')
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
 
-/**
- * Limpia la etiqueta que se le manda al TTS. El nombre se conserva —es lo que
- * el modelo espera ver delante de cada turno— pero sin acotaciones ni signos
- * que puedan romper la correspondencia con el `speechConfig`.
- */
-export function canonicalSpeakerLabel(raw: string): string {
-  const cleaned = (raw || '')
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(/[\*\[\]\{\}_"“”:]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return cleaned || (raw || '').trim();
-}
 
-export function findCharacter(speaker: string, characters: Character[]): Character | undefined {
-  const target = normalizeSpeaker(speaker);
-  if (!target) return undefined;
-  const named = characters.filter(c => normalizeSpeaker(c.name));
-
-  return (
-    named.find(c => normalizeSpeaker(c.name) === target) ||
-    // "Ana" ↔ "Ana Gómez", "Sra. Ana" ↔ "Ana": el más largo primero, para que
-    // "Ana María" no se lleve los turnos de "Ana".
-    [...named]
-      .sort((a, b) => normalizeSpeaker(b.name).length - normalizeSpeaker(a.name).length)
-      .find(c => {
-        const name = normalizeSpeaker(c.name);
-        return target.split(' ').includes(name) || name.split(' ').includes(target);
-      })
-  );
-}
 
 /**
  * Elige el par de voces para dos hablantes.
