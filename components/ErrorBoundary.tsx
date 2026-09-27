@@ -15,6 +15,12 @@ import React from 'react';
  */
 interface Props {
   children: React.ReactNode;
+  /**
+   * Qué mostrar en lugar de la pantalla completa. Con él, el límite sirve para
+   * aislar una parte (una tarjeta de ejercicio): si esa parte revienta, se
+   * sustituye solo ella y el resto de la lección —el audio incluido— sigue.
+   */
+  fallback?: React.ReactNode;
 }
 interface State {
   error: Error | null;
@@ -49,6 +55,7 @@ export default class ErrorBoundary extends React.Component<Props, State> {
   render(): React.ReactNode {
     const { error } = this.state;
     if (!error) return this.props.children;
+    if (this.props.fallback !== undefined) return this.props.fallback;
 
     return (
       <div className="min-h-[100dvh] w-full bg-ink flex items-center justify-center p-6 text-fg">

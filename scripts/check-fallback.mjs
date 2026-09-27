@@ -45,6 +45,8 @@ const {
   GENERATION_MODELS,
   describeModelChainFailure,
   isAuthError,
+  isBadRequestError,
+  isRegionError,
   isModelNotFoundError,
   isModelUnavailableError,
   isNetworkError,
@@ -441,6 +443,44 @@ const check = (label, condition, detail = '') => {
     check('una clave rechazada cuesta una sola llamada', llamadas.join(',') === 'a:stream', llamadas.join(','));
     check('…sin bajar de modelo', switches.length === 0, switches.join(' '));
     check('…y llega intacta al llamador', isAuthError(capturado), capturado?.message);
+
+    // e) Un 400 que no es de clave: la misma petición da el mismo 400, así que
+    // no se repite contra el mismo modelo, pero otro modelo sí puede aceptarla.
+    const rechazo = () => Object.assign(
+      new Error('{"error":{"code":400,"message":"thinking_level is not supported by this model.","status":"INVALID_ARGUMENT"}}'),
+      { status: 400 }
+    );
+    check('un 400 INVALID_ARGUMENT es petición rechazada', isBadRequestError(rechazo()));
+    check('…la clave inválida no cuenta como petición rechazada', !isBadRequestError(claveInvalida()));
+    check('…y sí cambia de modelo', shouldSwitchModel(rechazo()));
+    {
+      const llamadas400 = [];
+      const switches400 = [];
+      try {
+        await runWithModelFallback(
+          ['a', 'b'],
+          (model) => generateJsonWithProgress(
+            fakeAi((via) => { llamadas400.push(`${model}:${via}`); throw rechazo(); }),
+            { model, contents: 'x' },
+            hooks()
+          ),
+          { onSwitch: (from, to) => switches400.push(`${from}→${to}`) }
+        );
+      } catch { /* se agota la cadena */ }
+      check('un 400 cuesta una llamada por modelo, sin escalera de reintentos',
+        llamadas400.join(',') === 'a:stream,b:stream', llamadas400.join(','));
+      check('…bajando de modelo', switches400.join(' ') === 'a→b', switches400.join(' '));
+    }
+
+    // f) Región no soportada: tampoco la cura otro modelo.
+    const region = Object.assign(
+      new Error('{"error":{"code":400,"message":"User location is not supported for the API use.","status":"FAILED_PRECONDITION"}}'),
+      { status: 400 }
+    );
+    check('la región no soportada se reconoce', isRegionError(region));
+    check('…no es una petición rechazada ni cambia de modelo', !isBadRequestError(region) && !shouldSwitchModel(region));
+    const msgRegion = describeModelChainFailure(region, 4);
+    check('…y su mensaje habla de la región', typeof msgRegion === 'string' && msgRegion.includes('región'), String(msgRegion));
 
     const msgClave = describeModelChainFailure(claveInvalida(), 4);
     check('el mensaje de clave rechazada habla de la clave y no muestra el JSON',

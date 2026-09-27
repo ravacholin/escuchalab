@@ -479,9 +479,23 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     if (!speechRef.current) return;
     const el = speechRef.current;
 
+    const token = ++playTokenRef.current;
     const startVoice = () => {
       const p = el.play();
-      if (p && typeof p.catch === 'function') p.catch(() => {});
+      if (p && typeof p.catch === 'function') {
+        p.catch((err: unknown) => {
+          // Un AbortError es una pausa que llegó antes que el sonido: esperado.
+          // Cualquier otro rechazo (sobre todo NotAllowedError: Safari/iOS no
+          // siempre acepta un play() diferido tras el toque) dejaba el botón en
+          // «reproduciendo» y todo en silencio. Se vuelve a «pausa» para que un
+          // segundo toque lo arranque, salvo que ya haya otro arranque en curso.
+          if ((err as { name?: string } | null)?.name === 'AbortError') return;
+          if (playTokenRef.current !== token) return;
+          console.warn('[Audio] El navegador rechazó la reproducción.', err);
+          setIsPlaying(false);
+          stopAmbience();
+        });
+      }
     };
 
     const ctx = ensureAudioContext();
@@ -507,7 +521,6 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     // and enters in step with the voice, instead of ahead of it (the fresh context /
     // one-shot createMediaElementSource / resume all delay the voice on the first play).
     let voiceStarted = false;
-    const token = ++playTokenRef.current;
     const startVoiceOnce = () => {
       if (voiceStarted || playTokenRef.current !== token) return;
       voiceStarted = true;
@@ -515,7 +528,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     };
     Promise.all(scene.recipe.beds.map((l) => loadBed(ctx, l.bed))).then(startVoiceOnce, startVoiceOnce);
     window.setTimeout(startVoiceOnce, 1200);
-  }, [ensureAudioContext, setupSpeechProcessing, scene]);
+  }, [ensureAudioContext, setupSpeechProcessing, scene, stopAmbience]);
 
   // Fired by the <audio> element when playback is actually producing sound (after
   // any first-play buffering/resume latency), so the ambience bed enters in step

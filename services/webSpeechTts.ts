@@ -19,7 +19,7 @@
  */
 
 import { Accent, Character, DialogueLine, WebSpeechPlan } from '../types';
-import { sanitizeForTTS, canonicalSpeakerLabel, findCharacter } from './geminiService';
+import { sanitizeForTTS, canonicalSpeakerLabel, findCharacter } from './speakerText';
 
 /** ¿Hay Web Speech utilizable en este entorno? */
 export function isWebSpeechAvailable(): boolean {

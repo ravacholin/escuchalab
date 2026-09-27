@@ -2,12 +2,12 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode, LessonPlan, WebSpeechPlan, TurnTiming } from './types';
 import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
-import { generateLessonPlan, generateAudio } from './services/geminiService';
 import { isWebSpeechAvailable, planWebSpeech } from './services/webSpeechTts';
 import { ProgressSnapshot, mergeProgress } from './services/generationProgress';
 import { forgetLesson, isCacheable, lessonCacheKey, readLesson, writeLesson } from './services/lessonCache';
 import AudioPlayer from './components/AudioPlayer';
 import ExerciseCard from './components/ExerciseCard';
+import ErrorBoundary from './components/ErrorBoundary';
 import LoadingScreen from './components/LoadingScreen';
 import AuthScreen from './components/AuthScreen';
 import SelectInput from './components/SelectInput';
@@ -37,6 +37,18 @@ const MODES = [
     { value: AppMode.Vocabulary, label: 'Vocabulario', icon: BookOpen },
     { value: AppMode.AccentChallenge, label: 'Adivina Acento', icon: Mic2 },
 ];
+
+// El servicio de generación (y con él el SDK de Gemini, ~450 KB de ~1 MB) no
+// hace falta para mostrar la pantalla de la clave ni la de configuración: se
+// carga bajo demanda y se precarga en cuanto se ve la configuración, así que el
+// clic en «Generar» no lo espera. Una lección cacheada ni siquiera lo necesita.
+// Si el trozo no se puede descargar (sin conexión, o una pestaña abierta desde
+// antes de un deploy que ya no encuentra su archivo) se dice qué hacer en vez
+// de mostrar «Failed to fetch dynamically imported module».
+const loadGeminiService = () =>
+    import('./services/geminiService').catch(() => {
+        throw new Error('No se pudo cargar el generador de lecciones. Revisá la conexión y recargá la página.');
+    });
 
 const getSpeedForLevel = (level: Level): number => {
     // User requested natural speed for all levels, no "slow motion"
@@ -152,6 +164,10 @@ const App: React.FC = () => {
         checkKey();
         window.addEventListener('storage', checkKey);
         return () => window.removeEventListener('storage', checkKey);
+    }, [state.status]);
+
+    useEffect(() => {
+        if (state.status === 'idle') void loadGeminiService().catch(() => { /* se reintenta al generar */ });
     }, [state.status]);
 
     const handleAuthSuccess = () => {
@@ -465,6 +481,9 @@ const App: React.FC = () => {
                     return;
                 }
             }
+
+            const { generateLessonPlan, generateAudio } = await loadGeminiService();
+            if (!isCurrent()) return;
 
             // El TTS solo necesita diálogo + personajes, no los ejercicios. En
             // cuanto el diálogo termina de llegar por el stream, se arranca el
@@ -1106,14 +1125,25 @@ const App: React.FC = () => {
                                         utilidad `flex` de Tailwind gana a `[hidden]` y la etapa
                                         «plegada» seguía mostrando todas sus tarjetas. */}
                                     <div className={`px-2 sm:px-3 pb-3 flex-col gap-3 ${isOpen ? 'flex' : 'hidden'}`}>
+                                        {/* Cada tarjeta con su propio límite de error: un
+                                            ejercicio con una forma inesperada ya no tumba la
+                                            lección entera ni su audio. */}
                                         {group.items.map((ex, idx) => (
-                                            <ExerciseCard
+                                            <ErrorBoundary
                                                 key={keyOf(ex, idx)}
-                                                exercise={ex}
-                                                index={idx}
-                                                dialogue={state.lessonPlan?.dialogue}
-                                                onAnswered={correct => markAnswered(keyOf(ex, idx), correct)}
-                                            />
+                                                fallback={
+                                                    <div className="rounded-xl border border-line bg-panel-2 px-4 py-3 text-sm text-muted">
+                                                        Este ejercicio no se pudo mostrar. El resto de la lección sigue disponible.
+                                                    </div>
+                                                }
+                                            >
+                                                <ExerciseCard
+                                                    exercise={ex}
+                                                    index={idx}
+                                                    dialogue={state.lessonPlan?.dialogue}
+                                                    onAnswered={correct => markAnswered(keyOf(ex, idx), correct)}
+                                                />
+                                            </ErrorBoundary>
                                         ))}
                                     </div>
                                 </section>
