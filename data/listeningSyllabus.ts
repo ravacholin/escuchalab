@@ -35,36 +35,10 @@ import { DataPointKind, dataPointProfile } from '@/data/dataPoints';
 // Etapas y habilidades: metadatos para la interfaz
 // ---------------------------------------------------------------------------
 
-export const STAGE_ORDER: ListeningStage[] = [
-  'anticipacion',
-  'global',
-  'selectiva',
-  'intensiva',
-  'reflexion'
-];
-
-export const STAGE_META: Record<ListeningStage, { label: string; hint: string }> = {
-  anticipacion: {
-    label: 'Antes de escuchar',
-    hint: 'Respondé esto ANTES de darle play. No hay respuestas incorrectas por adivinar: sirve para activar lo que ya sabés.'
-  },
-  global: {
-    label: 'Idea global',
-    hint: 'Primera escucha completa. No busques detalles: buscá de qué va, para qué hablan y en qué queda.'
-  },
-  selectiva: {
-    label: 'Detalle',
-    hint: 'Segunda escucha. Ahora sí: información concreta, datos, quién hace qué y en qué orden.'
-  },
-  intensiva: {
-    label: 'Foco en la lengua',
-    hint: 'Tercera escucha, por tramos. Se trabaja la forma exacta: qué palabras se dijeron y qué matiz tienen.'
-  },
-  reflexion: {
-    label: 'Después de escuchar',
-    hint: 'Qué indicios te sirvieron. Esto es lo que se transfiere a la próxima escucha.'
-  }
-};
+// Viven en `listeningStages.ts`, sin dependencias, para que la pantalla de la
+// lección pueda usarlas sin cargar todo el syllabus en el bundle inicial.
+import { STAGE_META, STAGE_ORDER } from './listeningStages';
+export { STAGE_META, STAGE_ORDER };
 
 export const SKILL_LABELS: Record<ListeningSkill, string> = {
   decodificacion: 'discriminación fónica',

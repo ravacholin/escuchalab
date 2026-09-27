@@ -517,22 +517,22 @@ export function describeModelChainFailure(error: unknown, tried: number): string
     if (quotaScope(error) === 'project') {
       return 'se agotó la cuota diaria de la clave de API. Es un límite del proyecto que ' +
         'comparten todos los modelos, así que cambiar de modelo no ayuda; el nivel gratuito ' +
-        'se renueva cada día, vuelve a intentarlo más tarde.';
+        'se renueva cada día, volvé a intentarlo más tarde.';
     }
     return `se agotó la cuota en ${modelos}. El nivel gratuito se renueva cada día; ` +
-      'vuelve a intentarlo más tarde.';
+      'volvé a intentarlo más tarde.';
   }
   if (isModelUnavailableError(error)) {
     return `${tried === 1 ? 'el modelo de Gemini está saturado' : `los ${tried} modelos de Gemini probados están saturados`} ` +
-      'ahora mismo. Suele durar unos minutos: vuelve a intentarlo.';
+      'ahora mismo. Suele durar unos minutos: volvé a intentarlo.';
   }
   if (isTimeoutError(error)) {
     return `Gemini dejó de responder a tiempo (se probaron ${modelos}). ` +
-      'Puede ser la conexión o una sobrecarga puntual: vuelve a intentarlo.';
+      'Puede ser la conexión o una sobrecarga puntual: volvé a intentarlo.';
   }
   if (isNetworkError(error)) {
-    return 'no se pudo conectar con Gemini. Revisa tu conexión a internet ' +
-      '(o si algún bloqueador/extensión está cortando la petición) y vuelve a intentarlo.';
+    return 'no se pudo conectar con Gemini. Revisá tu conexión a internet ' +
+      '(o si algún bloqueador/extensión está cortando la petición) y volvé a intentarlo.';
   }
   return null;
 }
