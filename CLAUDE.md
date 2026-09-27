@@ -267,6 +267,11 @@ that is local arithmetic, which cannot run out of quota.
     identical; on the rare mismatch the early promise is discarded and the audio is regenerated
     in sequence, so **audio for a stale dialogue is never shipped**. The normal path still costs
     exactly 2 TTS requests. `check:early-audio` pins the dispatch contract offline.
+  - **The early audio is salvaged when the plan fails after dispatching it.** Those 2 requests
+    are already spent, so the catch stores the promise in `salvagedAudioRef` under
+    `audioSignature(dialogue, characters, accent)`; the next run's `startAudio()` reuses it
+    instead of calling the TTS when the signature matches (the usual case at temperature 0),
+    and the error screen says so. In memory only; a failed TTS promise withdraws itself.
 
 ### Ambient Sound System
 
@@ -484,7 +489,7 @@ measurement.
 - The only clock-driven element left is the elapsed-time counter, because it is a clock.
 
 ### Component Structure
-- `App.tsx`: Main orchestrator - handles all state and screen rendering. `services/geminiService.ts` (and the Gemini SDK with it, ~half the bundle) is **loaded on demand** (`loadGeminiService`), prefetched when the config screen shows; keep it out of static imports from UI code — `webSpeechTts.ts` gets its speaker helpers from the dependency-free `services/speakerText.ts` for that reason. Each `ExerciseCard` sits in its own `ErrorBoundary` (with `fallback`), so one malformed exercise no longer takes down the lesson and its audio. The lesson is walked stage by stage: each `ListeningStage` is a **collapsible section** with an `n/m resueltos` counter, and only the first opens. Everything used to be painted in one scroll — five or six cards, several of them tables, before the learner had decided where to start — and a good part of what read as an unmanageable load was that, independently of the content. `ExerciseCard` reports each submit through the optional `onAnswered` prop; the card's own state stays its own.
+- `App.tsx`: Main orchestrator - handles all state and screen rendering. `services/geminiService.ts` (and the Gemini SDK with it, ~half the bundle) is **loaded on demand** (`loadGeminiService`), prefetched when the config screen shows, together with the screens that only exist after «Generar» (`LoadingScreen`, `AudioPlayer`, `ExerciseCard`, via `React.lazy` + `Suspense`); keep all of them out of static imports from `App.tsx`. `STAGE_META`/`STAGE_ORDER` live in the dependency-free `data/listeningStages.ts` (re-exported by the syllabus) so the syllabus stays out of the initial bundle too — `webSpeechTts.ts` gets its speaker helpers from the dependency-free `services/speakerText.ts` for that reason. Each `ExerciseCard` sits in its own `ErrorBoundary` (with `fallback`), so one malformed exercise no longer takes down the lesson and its audio. The lesson is walked stage by stage: each `ListeningStage` is a **collapsible section** with an `n/m resueltos` counter, and only the first opens. Everything used to be painted in one scroll — five or six cards, several of them tables, before the learner had decided where to start — and a good part of what read as an unmanageable load was that, independently of the content. `ExerciseCard` reports each submit through the optional `onAnswered` prop; the card's own state stays its own.
 - `AudioPlayer.tsx`: Transport, speech routing and ambience UI. The ambience engine itself lives in `services/ambienceEngine.ts` (see Ambient Sound System above); the component was 1529 lines when ~900 of them were the engine.
 - `ExerciseCard.tsx`: Polymorphic renderer for the 13 formats; shows the skill badge, and on submit reveals the `sourceTurns` lines as proof of the key. `dictation` gets its own renderer: a single open `<input>` with the datum's label, `inputMode="numeric"` where the datum is only digits, and the datum in its real spelling revealed on submit.
 - `MatrixSelector.tsx`: Locus × Modus grid interface for Standard mode
@@ -558,7 +563,7 @@ cadena `AUDIO_MODELS`.
   `audioBlob` (PCM), o hay `audioFallback` (`WebSpeechPlan`), nunca ambos (`types.ts`).
 - **`services/webSpeechTts.ts`** es lógica **pura y serializable**: `planWebSpeech(dialogue,
   characters, accent)` arma una intervención por turno en orden de diálogo (reutilizando
-  `sanitizeForTTS`/`canonicalSpeakerLabel`/`findCharacter` de `geminiService.ts`), y
+  `sanitizeForTTS`/`canonicalSpeakerLabel`/`findCharacter` de `speakerText.ts`), y
   `pickWebSpeechVoices(voices, accent, genders)` —que recibe la lista de voces como
   argumento, así se prueba sin navegador— elige la voz por `ACCENT_LOCALE` (acento → BCP-47
   `es-XX`), degradando a cualquier `es-*` y luego a cualquier voz, y da dos voces distintas

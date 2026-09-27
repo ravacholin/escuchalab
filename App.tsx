@@ -1,14 +1,11 @@
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense, lazy } from 'react';
 import { AppState, Exercise, Level, Length, ListeningStage, TextType, Accent, AppMode, LessonPlan, WebSpeechPlan, TurnTiming } from './types';
-import { STAGE_META, STAGE_ORDER } from './data/listeningSyllabus';
+import { STAGE_META, STAGE_ORDER } from './data/listeningStages';
 import { isWebSpeechAvailable, planWebSpeech } from './services/webSpeechTts';
 import { ProgressSnapshot, mergeProgress } from './services/generationProgress';
 import { forgetLesson, isCacheable, lessonCacheKey, readLesson, writeLesson } from './services/lessonCache';
-import AudioPlayer from './components/AudioPlayer';
-import ExerciseCard from './components/ExerciseCard';
 import ErrorBoundary from './components/ErrorBoundary';
-import LoadingScreen from './components/LoadingScreen';
 import AuthScreen from './components/AuthScreen';
 import SelectInput from './components/SelectInput';
 import MatrixSelector from './components/MatrixSelector';
@@ -50,6 +47,21 @@ const loadGeminiService = () =>
         throw new Error('No se pudo cargar el generador de lecciones. Revisá la conexión y recargá la página.');
     });
 
+// Lo mismo para las pantallas que solo existen después de pulsar «Generar»: la
+// de carga, el reproductor (con el motor de ambiente) y las tarjetas de
+// ejercicio. Se precargan junto con el servicio, así que al usarlas ya están.
+const loadLoadingScreen = () => import('./components/LoadingScreen');
+const loadAudioPlayer = () => import('./components/AudioPlayer');
+const loadExerciseCard = () => import('./components/ExerciseCard');
+const LoadingScreen = lazy(loadLoadingScreen);
+const AudioPlayer = lazy(loadAudioPlayer);
+const ExerciseCard = lazy(loadExerciseCard);
+const prefetchLessonModules = () => {
+    for (const load of [loadGeminiService, loadLoadingScreen, loadAudioPlayer, loadExerciseCard]) {
+        void load().catch(() => { /* se reintenta al usarlo */ });
+    }
+};
+
 const getSpeedForLevel = (level: Level): number => {
     // User requested natural speed for all levels, no "slow motion"
     return 1.0;
@@ -74,6 +86,20 @@ const dialoguesEqual = (a: LessonPlan['dialogue'], b: LessonPlan['dialogue']): b
     a.length === b.length &&
     a.every((line, i) =>
         line.speaker === b[i].speaker && normalizeTurnText(line.text) === normalizeTurnText(b[i].text));
+
+// Firma de TODO lo que decide el audio: acento, personajes (género y tono eligen
+// y dirigen la voz) y diálogo turno a turno. Dos generaciones con la misma firma
+// producen el mismo audio, así que puede reutilizarse sin volver al TTS.
+const audioSignature = (
+    dialogue: LessonPlan['dialogue'],
+    characters: LessonPlan['characters'],
+    accent: Accent
+): string =>
+    JSON.stringify([
+        accent,
+        (characters || []).map(c => [c.name, c.gender, c.tone ?? '']),
+        dialogue.map(line => [line.speaker, normalizeTurnText(line.text)])
+    ]);
 
 // Recuerda el último nivel elegido por el usuario para que sea el default la próxima vez.
 const DEFAULT_LEVEL_KEY = 'escuchalab_default_level';
@@ -167,7 +193,7 @@ const App: React.FC = () => {
     }, [state.status]);
 
     useEffect(() => {
-        if (state.status === 'idle') void loadGeminiService().catch(() => { /* se reintenta al generar */ });
+        if (state.status === 'idle') prefetchLessonModules();
     }, [state.status]);
 
     const handleAuthSuccess = () => {
@@ -175,7 +201,7 @@ const App: React.FC = () => {
     };
 
     const handleResetKey = () => {
-        if (window.confirm("¿Seguro que quieres borrar la API Key y salir? Esto requerirá ingresarla de nuevo.")) {
+        if (window.confirm("¿Seguro que querés borrar la clave de API y salir? Vas a tener que ingresarla de nuevo.")) {
             localStorage.removeItem('gemini_api_key');
             setState(prev => ({ ...prev, status: 'auth', error: null }));
         }
@@ -239,6 +265,12 @@ const App: React.FC = () => {
     // distinguir avance real de un mero latido de espera, que solo mueve un
     // contador: solo el primero rearma el vigilante.
     const lastProgressSigRef = useRef('');
+    // Audio rescatado de una corrida cuyo plan falló DESPUÉS de haber lanzado el
+    // TTS temprano. Esas 2 peticiones (de las 10 diarias) ya estaban gastadas y
+    // el audio se tiraba; ahora se guarda con su firma y, si el reintento produce
+    // el mismo diálogo (lo normal con temperature 0), se reutiliza sin volver a
+    // pagar el TTS. Solo vive en memoria: una recarga lo olvida.
+    const salvagedAudioRef = useRef<{ signature: string; promise: Promise<{ audio: string; turns: TurnTiming[] }> } | null>(null);
 
     const clearWatchdog = useCallback(() => {
         if (watchdogRef.current) {
@@ -260,7 +292,7 @@ const App: React.FC = () => {
                     ? {
                           ...prev,
                           status: 'error',
-                          error: 'La generación se quedó sin respuesta. Puede ser una saturación temporal del servicio. Vuelve a intentarlo.'
+                          error: 'La generación se quedó sin respuesta. Puede ser una saturación temporal del servicio. Volvé a intentarlo.'
                       }
                     : prev
             );
@@ -460,6 +492,11 @@ const App: React.FC = () => {
         const cacheable = isCacheable(cacheParts);
         setCurrentCacheKey(cacheable ? cacheKey : null);
 
+        // Declarado fuera del try: si el plan falla con el audio ya lanzado, el
+        // catch lo rescata (ver salvagedAudioRef).
+        type AudioResult = { audio: string; turns: TurnTiming[] };
+        let earlyAudio: { dialogue: LessonPlan['dialogue']; signature: string; promise: Promise<AudioResult> } | null = null;
+
         generatingRef.current = true;
         armWatchdog();
         try {
@@ -490,8 +527,18 @@ const App: React.FC = () => {
             // audio en paralelo con la cola del plan (ejercicios + verificación),
             // en vez de esperar a toda la lección. Mismo completion, mismo
             // contenido: solo se solapan las dos fases.
-            type AudioResult = { audio: string; turns: TurnTiming[] };
-            let earlyAudio: { dialogue: LessonPlan['dialogue']; promise: Promise<AudioResult> } | null = null;
+
+            // Lanza el TTS, o reutiliza el audio rescatado de un intento anterior
+            // si es exactamente el mismo (misma firma).
+            const startAudio = (dialogue: LessonPlan['dialogue'], characters: LessonPlan['characters']) => {
+                const signature = audioSignature(dialogue, characters, state.config.accent);
+                const salvaged = salvagedAudioRef.current;
+                if (salvaged && salvaged.signature === signature) {
+                    salvagedAudioRef.current = null;
+                    return { signature, promise: salvaged.promise };
+                }
+                return { signature, promise: generateAudio(dialogue, characters, state.config.accent, trackProgress) };
+            };
 
             const plan = await generateLessonPlan(
                 state.config.level,
@@ -504,13 +551,13 @@ const App: React.FC = () => {
                 { audio: trimmedAudioPrompt, exercises: trimmedExercisePrompt },
                 {
                     onDialogueReady: (dialogue, characters) => {
-                        const promise = generateAudio(dialogue, characters, state.config.accent, trackProgress);
+                        const { signature, promise } = startAudio(dialogue, characters);
                         // Si el plan acaba lanzando (p. ej. reintentos por JSON agotados)
                         // tras haber arrancado el audio, esta promesa queda huérfana: el
                         // .catch evita un "unhandled rejection". Aun así, `await promise`
                         // más abajo sigue propagando el fallo al camino de audioError.
                         promise.catch(() => {});
-                        earlyAudio = { dialogue, promise };
+                        earlyAudio = { dialogue, signature, promise };
                         setState(prev => ({ ...prev, status: 'generating_audio' }));
                     }
                 }
@@ -534,18 +581,13 @@ const App: React.FC = () => {
                 // que lo lanzó, se aprovecha esa promesa. Si no arrancó pronto, o el
                 // diálogo cambió en un reintento (raro con temperature 0), se genera
                 // en secuencia — nunca se envía audio de un diálogo obsoleto.
-                const pending = earlyAudio as { dialogue: LessonPlan['dialogue']; promise: Promise<AudioResult> } | null;
+                const pending = earlyAudio as { dialogue: LessonPlan['dialogue']; signature: string; promise: Promise<AudioResult> } | null;
                 if (pending && dialoguesEqual(pending.dialogue, plan.dialogue)) {
                     audioResult = await pending.promise;
                 } else {
                     // El audio no arrancó pronto, o el diálogo cambió en un reintento:
                     // la promesa temprana (si la hay) ya tiene su .catch y se descarta.
-                    audioResult = await generateAudio(
-                        plan.dialogue,
-                        plan.characters,
-                        state.config.accent,
-                        trackProgress
-                    );
+                    audioResult = await startAudio(plan.dialogue, plan.characters).promise;
                 }
                 if (!isCurrent()) return;
                 setState(prev => ({
@@ -597,11 +639,25 @@ const App: React.FC = () => {
 
         } catch (error: any) {
             console.error("Critical Generation Error:", error);
+            // El plan falló con el audio ya lanzado: se rescata antes de mirar si
+            // la corrida sigue vigente (el vigilante también deja huérfano el
+            // audio). Si el TTS termina fallando, el rescate se retira solo.
+            const orphan = earlyAudio as { signature: string; promise: Promise<AudioResult> } | null;
+            if (orphan) {
+                const rescued = { signature: orphan.signature, promise: orphan.promise };
+                salvagedAudioRef.current = rescued;
+                orphan.promise.catch(() => {
+                    if (salvagedAudioRef.current === rescued) salvagedAudioRef.current = null;
+                });
+            }
             if (!isCurrent()) return;
+            const baseMessage = error.message || "FALLO CRÍTICO EN LA SECUENCIA DE GENERACIÓN.";
             setState(prev => ({
                 ...prev,
                 status: 'error',
-                error: error.message || "FALLO CRÍTICO EN LA SECUENCIA DE GENERACIÓN."
+                error: orphan
+                    ? `${baseMessage} El audio de este diálogo ya se generó: si reintentás con la misma configuración y el diálogo sale igual, se reutiliza sin gastar cuota de voz.`
+                    : baseMessage
             }));
         } finally {
             // Éxito, error o abandono: la corrida terminó, se apaga su vigilante.
@@ -649,7 +705,11 @@ const App: React.FC = () => {
 
     // --- SCREEN: LOADING ---
     if (state.status === 'generating_plan' || state.status === 'generating_audio') {
-        return <LoadingScreen status={state.status} progress={progress} />;
+        return (
+            <Suspense fallback={<div className="min-h-[100dvh] w-full bg-ink" />}>
+                <LoadingScreen status={state.status} progress={progress} />
+            </Suspense>
+        );
     }
 
     // --- SCREEN: ERROR ---
@@ -866,7 +926,7 @@ const App: React.FC = () => {
                                                 value={customAudioPrompt}
                                                 onChange={(e) => setCustomAudioPrompt(e.target.value)}
                                                 rows={3}
-                                                placeholder="Ej: que uno de los personajes esté nervioso; una charla entre tres amigos; incluye un malentendido gracioso…"
+                                                placeholder="Ej: que uno de los personajes esté nervioso; una charla entre tres amigos; incluí un malentendido gracioso…"
                                                 className="w-full rounded-xl bg-panel border border-line p-3 font-sans text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-white/10 transition-all placeholder:text-faint resize-y"
                                             />
                                             <p className="mt-1.5 text-xs text-faint leading-relaxed">
@@ -879,7 +939,7 @@ const App: React.FC = () => {
                                                 value={customExercisePrompt}
                                                 onChange={(e) => setCustomExercisePrompt(e.target.value)}
                                                 rows={3}
-                                                placeholder="Ej: céntrate en los conectores; que las preguntas sean más difíciles; enfatiza el vocabulario de negocios…"
+                                                placeholder="Ej: centrate en los conectores; que las preguntas sean más difíciles; enfatizá el vocabulario de negocios…"
                                                 className="w-full rounded-xl bg-panel border border-line p-3 font-sans text-sm text-fg outline-none focus:border-accent focus:ring-2 focus:ring-white/10 transition-all placeholder:text-faint resize-y"
                                             />
                                             <p className="mt-1.5 text-xs text-faint leading-relaxed">
@@ -980,6 +1040,11 @@ const App: React.FC = () => {
                                 </div>
                             </div>
                         ) : (state.audioBlob || state.audioFallback) ? (
+                            <Suspense fallback={
+                                <div className="p-4 text-center font-mono text-xs text-faint uppercase tracking-wider">
+                                    Inicializando audio…
+                                </div>
+                            }>
                             <AudioPlayer
                                 key={state.lessonPlan?.title || 'audio-player'}
                                 speechSrc={state.audioBlob || ''}
@@ -997,6 +1062,7 @@ const App: React.FC = () => {
                                 onActiveLineChange={setActiveLine}
                                 onListened={() => setHasListenedOnce(true)}
                             />
+                            </Suspense>
                         ) : (
                             <div className="p-4 text-center font-mono text-xs text-faint uppercase tracking-wider">
                                 Inicializando audio…
@@ -1137,12 +1203,14 @@ const App: React.FC = () => {
                                                     </div>
                                                 }
                                             >
-                                                <ExerciseCard
-                                                    exercise={ex}
-                                                    index={idx}
-                                                    dialogue={state.lessonPlan?.dialogue}
-                                                    onAnswered={correct => markAnswered(keyOf(ex, idx), correct)}
-                                                />
+                                                <Suspense fallback={<div className="h-24 rounded-xl border border-line bg-panel-2" />}>
+                                                    <ExerciseCard
+                                                        exercise={ex}
+                                                        index={idx}
+                                                        dialogue={state.lessonPlan?.dialogue}
+                                                        onAnswered={correct => markAnswered(keyOf(ex, idx), correct)}
+                                                    />
+                                                </Suspense>
                                             </ErrorBoundary>
                                         ))}
                                     </div>

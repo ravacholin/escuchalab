@@ -33,7 +33,7 @@ import {
 // Helper to get key from storage
 const getApiKey = (): string => {
   const key = localStorage.getItem('gemini_api_key');
-  if (!key) throw new Error("API Key no encontrada. Por favor, reinicia la app e ingrésala.");
+  if (!key) throw new Error("No se encontró la clave de API. Reiniciá la app e ingresala.");
   return key;
 };
 
@@ -2017,7 +2017,7 @@ async function synthesizeWithProgress(
     }
     if (total === 0) {
       console.error('[TTS] No audio data in response. Response structure:', JSON.stringify(response, null, 2));
-      throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
+      throw new Error("El modelo no devolvió datos de audio. Verificá la configuración o intentá de nuevo.");
     }
     hooks.onAudio(total, 1);
     return concatBytes(chunks, total);
@@ -2655,7 +2655,7 @@ export const generateAudio = async (
     // el mismo `gap` entre turnos y los mismos trozos que se concatenan.
     const turns = computeTurnTimings(orderedTurns, gap.byteLength, TTS_BYTES_PER_SECOND);
     if (audioBytes.length === 0) {
-      throw new Error("El modelo no devolvió datos de audio. Verifica la configuración o intenta de nuevo.");
+      throw new Error("El modelo no devolvió datos de audio. Verificá la configuración o intentá de nuevo.");
     }
 
     const totalSeconds = audioBytes.length / TTS_BYTES_PER_SECOND;
@@ -2727,7 +2727,7 @@ export const generateAudio = async (
     } else if (msg.includes("non-audio response") || msg.includes("INVALID_ARGUMENT")) {
       msg = "El modelo de audio rechazó el contenido del diálogo.";
     } else if (msg.includes("timeout") || msg.includes("DEADLINE_EXCEEDED")) {
-      msg = "Tiempo de espera agotado. El audio puede ser muy largo, intenta reducir la longitud.";
+      msg = "Tiempo de espera agotado. El audio puede ser muy largo: probá con una duración más corta.";
     }
     throw new Error(`Error TTS: ${msg}`);
   }
