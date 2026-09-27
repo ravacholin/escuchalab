@@ -366,6 +366,12 @@ const App: React.FC = () => {
     }, [selectedLocus]);
 
 
+    // El aviso de validación de la pantalla de configuración se retira en cuanto
+    // el usuario toca lo que faltaba (o cambia de modalidad).
+    useEffect(() => {
+        setState(prev => (prev.status === 'idle' && prev.error) ? { ...prev, error: null } : prev);
+    }, [vocabTopic, customTopicInput, isCustomMode, state.config.mode]);
+
     // --- RANDOMIZER LOGIC ---
     const handleRandomizeMatrix = useCallback(() => {
         const contexts = resolveContextList(state.config.textType, state.config.level);
@@ -388,34 +394,38 @@ const App: React.FC = () => {
         planResolvedRef.current = false;
         lastProgressSigRef.current = '';
 
-        setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null, audioTurns: null, audioFallback: null }));
-        setAudioError(null);
-        setProgress(null);
-
         let finalTopic = "";
 
+        // La validación va ANTES de pasar a la pantalla de carga, y su mensaje se
+        // muestra en la de configuración. Antes se cambiaba a 'generating_plan' y
+        // se volvía a 'idle' con un error que esa pantalla no pintaba: el botón
+        // parecía no hacer nada.
         if (state.config.mode === AppMode.Vocabulary) {
             if (!vocabTopic.trim()) {
-                setState(prev => ({ ...prev, status: 'idle', error: "Por favor, escribe un tema para ampliar vocabulario." }));
+                setState(prev => ({ ...prev, status: 'idle', error: "Escribí un tema para ampliar vocabulario." }));
                 return;
             }
-            finalTopic = vocabTopic;
+            finalTopic = vocabTopic.trim();
         }
         else if (state.config.mode === AppMode.AccentChallenge) {
             finalTopic = "Encuentro entre desconocidos con acentos distintos";
         }
         else {
             if (isCustomMode) {
-                finalTopic = customTopicInput;
+                finalTopic = customTopicInput.trim();
             } else {
                 finalTopic = `Contexto Físico: ${selectedLocus.value} || Situación Específica: ${selectedModus.value} || Registro: ${selectedLocus.registerInstruction}`;
             }
         }
 
         if (!finalTopic && state.config.mode === AppMode.Standard) {
-            setState(prev => ({ ...prev, status: 'idle', error: "Debes definir el escenario." }));
+            setState(prev => ({ ...prev, status: 'idle', error: "Describí el escenario personalizado o elegí uno de la lista." }));
             return;
         }
+
+        setState(prev => ({ ...prev, status: 'generating_plan', error: null, audioBlob: null, audioTurns: null, audioFallback: null }));
+        setAudioError(null);
+        setProgress(null);
 
         const trimmedAudioPrompt = customAudioPrompt.trim();
         const trimmedExercisePrompt = customExercisePrompt.trim();
@@ -864,6 +874,12 @@ const App: React.FC = () => {
 
                         {/* Sticky generate button */}
                         <div className="sticky bottom-0 px-6 sm:px-10 md:px-12 pb-6 pt-4 bg-gradient-to-t from-ink via-ink/95 to-transparent">
+                            {state.error && (
+                                <div role="alert" className="mb-3 flex items-start gap-2.5 rounded-xl border border-line bg-panel-2 px-4 py-3 text-sm text-fg">
+                                    <AlertTriangle size={16} className="mt-0.5 flex-shrink-0 text-muted" />
+                                    <span>{state.error}</span>
+                                </div>
+                            )}
                             <button
                                 onClick={() => void handleGenerate()}
                                 className="w-full py-5 rounded-2xl bg-accent text-ink font-display text-xl font-semibold tracking-tight hover:brightness-105 active:brightness-95 transition-all flex items-center justify-center gap-3 group shadow-[0_12px_34px_-12px_rgba(255,255,255,0.4)]"
@@ -1034,72 +1050,76 @@ const App: React.FC = () => {
                             </div>
                         )}
 
-                        {/* EXERCISES VIEW — recorrido por etapas de escucha */}
-                        {activeTab === 'exercises' && (
-                            <div className="max-w-2xl mx-auto flex flex-col gap-4">
-                                {stagedExercises.length === 0 && (
-                                    <p className="text-sm text-muted">
-                                        No se pudo construir ningún ejercicio verificable para este audio.
-                                    </p>
-                                )}
-                                {stagedExercises.map(group => {
-                                    const isOpen = openStages.has(group.stage);
-                                    const keyOf = (ex: Exercise, idx: number) => ex.id || `${group.stage}_${idx}`;
-                                    const done = group.items.filter((ex, idx) => keyOf(ex, idx) in answered).length;
-                                    const total = group.items.length;
-                                    const pct = total ? Math.round((done / total) * 100) : 0;
-                                    const allDone = done === total && total > 0;
-                                    return (
-                                    <section key={group.stage} className={`rounded-2xl border bg-panel overflow-hidden transition-colors ${isOpen ? 'border-accent/25' : 'border-line'}`}>
-                                        <button
-                                            type="button"
-                                            onClick={() => toggleStage(group.stage)}
-                                            aria-expanded={isOpen}
-                                            className="w-full text-left flex items-center gap-3.5 px-4 sm:px-5 py-4 group"
+                        {/* EXERCISES VIEW — recorrido por etapas de escucha.
+                            Oculta, no desmontada, al pasar a la transcripción: el estado
+                            de cada tarjeta vive dentro de ella, y desmontarla borraba las
+                            respuestas mientras los contadores de etapa seguían en n/m. */}
+                        <div className={`max-w-2xl mx-auto flex-col gap-4 ${activeTab === 'exercises' ? 'flex' : 'hidden'}`}>
+                            {stagedExercises.length === 0 && (
+                                <p className="text-sm text-muted">
+                                    No se pudo construir ningún ejercicio verificable para este audio.
+                                </p>
+                            )}
+                            {stagedExercises.map(group => {
+                                const isOpen = openStages.has(group.stage);
+                                const keyOf = (ex: Exercise, idx: number) => ex.id || `${group.stage}_${idx}`;
+                                const done = group.items.filter((ex, idx) => keyOf(ex, idx) in answered).length;
+                                const total = group.items.length;
+                                const pct = total ? Math.round((done / total) * 100) : 0;
+                                const allDone = done === total && total > 0;
+                                return (
+                                <section key={group.stage} className={`rounded-2xl border bg-panel overflow-hidden transition-colors ${isOpen ? 'border-accent/25' : 'border-line'}`}>
+                                    <button
+                                        type="button"
+                                        onClick={() => toggleStage(group.stage)}
+                                        aria-expanded={isOpen}
+                                        className="w-full text-left flex items-center gap-3.5 px-4 sm:px-5 py-4 group"
+                                    >
+                                        <span className="font-mono text-[12px] text-faint">
+                                            {String(group.position).padStart(2, '0')}
+                                        </span>
+                                        <h3 className="font-display text-lg font-semibold text-fg flex-1 group-hover:text-fg transition-colors">
+                                            {STAGE_META[group.stage].label}
+                                        </h3>
+                                        {/* progress ring */}
+                                        <span
+                                            className="relative w-7 h-7 rounded-full grid place-items-center flex-none"
+                                            style={{ background: `conic-gradient(${allDone ? '#f4f6f8' : '#c4cace'} ${pct}%, #20262d 0)` }}
+                                            title={`${done}/${total} resueltos`}
                                         >
-                                            <span className="font-mono text-[12px] text-faint">
-                                                {String(group.position).padStart(2, '0')}
-                                            </span>
-                                            <h3 className="font-display text-lg font-semibold text-fg flex-1 group-hover:text-fg transition-colors">
-                                                {STAGE_META[group.stage].label}
-                                            </h3>
-                                            {/* progress ring */}
-                                            <span
-                                                className="relative w-7 h-7 rounded-full grid place-items-center flex-none"
-                                                style={{ background: `conic-gradient(${allDone ? '#f4f6f8' : '#c4cace'} ${pct}%, #20262d 0)` }}
-                                                title={`${done}/${total} resueltos`}
-                                            >
-                                                <span className="absolute inset-[3px] rounded-full bg-panel" />
-                                                <span className="relative z-10 font-mono text-[9px] font-bold text-fg tabular-nums">{done}/{total}</span>
-                                            </span>
-                                            {isOpen
-                                                ? <ChevronUp size={17} className="text-faint flex-shrink-0" />
-                                                : <ChevronDown size={17} className="text-faint flex-shrink-0" />}
-                                        </button>
-                                        {isOpen && (
-                                            <p className="px-4 sm:px-5 -mt-1 pb-3 text-[13px] text-faint leading-relaxed">
-                                                {STAGE_META[group.stage].hint}
-                                            </p>
-                                        )}
-                                        {/* Ocultas, no desmontadas: el estado de corrección vive
-                                            dentro de cada tarjeta, así que desmontarlas haría que
-                                            plegar una etapa para mirar otra borrase lo respondido. */}
-                                        <div hidden={!isOpen} className="px-2 sm:px-3 pb-3 flex flex-col gap-3">
-                                            {group.items.map((ex, idx) => (
-                                                <ExerciseCard
-                                                    key={keyOf(ex, idx)}
-                                                    exercise={ex}
-                                                    index={idx}
-                                                    dialogue={state.lessonPlan?.dialogue}
-                                                    onAnswered={correct => markAnswered(keyOf(ex, idx), correct)}
-                                                />
-                                            ))}
-                                        </div>
-                                    </section>
-                                    );
-                                })}
-                            </div>
-                        )}
+                                            <span className="absolute inset-[3px] rounded-full bg-panel" />
+                                            <span className="relative z-10 font-mono text-[9px] font-bold text-fg tabular-nums">{done}/{total}</span>
+                                        </span>
+                                        {isOpen
+                                            ? <ChevronUp size={17} className="text-faint flex-shrink-0" />
+                                            : <ChevronDown size={17} className="text-faint flex-shrink-0" />}
+                                    </button>
+                                    {isOpen && (
+                                        <p className="px-4 sm:px-5 -mt-1 pb-3 text-[13px] text-faint leading-relaxed">
+                                            {STAGE_META[group.stage].hint}
+                                        </p>
+                                    )}
+                                    {/* Ocultas, no desmontadas: el estado de corrección vive
+                                        dentro de cada tarjeta, así que desmontarlas haría que
+                                        plegar una etapa para mirar otra borrase lo respondido.
+                                        Se oculta con la clase, no con el atributo `hidden`: la
+                                        utilidad `flex` de Tailwind gana a `[hidden]` y la etapa
+                                        «plegada» seguía mostrando todas sus tarjetas. */}
+                                    <div className={`px-2 sm:px-3 pb-3 flex-col gap-3 ${isOpen ? 'flex' : 'hidden'}`}>
+                                        {group.items.map((ex, idx) => (
+                                            <ExerciseCard
+                                                key={keyOf(ex, idx)}
+                                                exercise={ex}
+                                                index={idx}
+                                                dialogue={state.lessonPlan?.dialogue}
+                                                onAnswered={correct => markAnswered(keyOf(ex, idx), correct)}
+                                            />
+                                        ))}
+                                    </div>
+                                </section>
+                                );
+                            })}
+                        </div>
                     </div>
                 </main>
             </div>

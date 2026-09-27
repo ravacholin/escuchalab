@@ -303,6 +303,32 @@ export function isNetworkError(error: unknown): boolean {
 }
 
 /**
+ * La clave de API no sirve: inválida, caducada, revocada o sin permiso sobre la
+ * API de Gemini (400 `API_KEY_INVALID`, 401, 403 `PERMISSION_DENIED`).
+ *
+ * No lo arregla ni repetir ni cambiar de modelo —la clave es la misma para toda
+ * la cadena—, y sin esta distinción el 400 caía en la escalera de red: dos
+ * streams, una petición completa, `markSwitchable` y vuelta a empezar con cada
+ * modelo. Una clave mal copiada costaba así una docena de llamadas y casi un
+ * minuto de espera antes de mostrar el JSON crudo del error. `AuthScreen` solo
+ * comprueba el prefijo `AIza`, así que este es el caso habitual, no uno raro.
+ */
+export function isAuthError(error: unknown): boolean {
+  if (hasCode(error, 401) || hasCode(error, 403)) return true;
+  const status = (error as { status?: unknown } | null)?.status;
+  if (status === 'UNAUTHENTICATED' || status === 'PERMISSION_DENIED') return true;
+  const text = deepErrorText(error);
+  return (
+    text.includes('api_key_invalid') ||
+    text.includes('api key not valid') ||
+    text.includes('api key expired') ||
+    text.includes('api_key_expired') ||
+    text.includes('unauthenticated') ||
+    text.includes('permission_denied')
+  );
+}
+
+/**
  * La petición se canceló por tiempo: el modelo aceptó la conexión pero dejó de
  * enviar datos (el caso «se queda en recepción del guion y no progresa») o tardó
  * más de la cuenta en total. Lo produce el `AbortController` que ahora rodea a
@@ -434,6 +460,10 @@ export async function runWithModelFallback<T>(
  */
 export function describeModelChainFailure(error: unknown, tried: number): string | null {
   const modelos = tried === 1 ? 'el modelo de texto' : `los ${tried} modelos de texto probados`;
+  if (isAuthError(error)) {
+    return 'Google rechazó la clave de API (no es válida, caducó o no tiene acceso a Gemini). ' +
+      'Tocá «Clave» para ingresar otra; podés generarla en aistudio.google.com/apikey.';
+  }
   if (isQuotaError(error)) {
     if (quotaScope(error) === 'project') {
       return 'se agotó la cuota diaria de la clave de API. Es un límite del proyecto que ' +
