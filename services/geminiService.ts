@@ -13,6 +13,7 @@ import {
   AUDIO_MODELS,
   GENERATION_MODELS,
   describeModelChainFailure,
+  isAuthError,
   isModelError,
   isQuotaError,
   markSwitchable,
@@ -282,8 +283,9 @@ export async function generateJsonWithProgress(
       const actual = guard.reason() ?? error;
       // Sin cuota, reintentar solo gasta más cuota; saturado, reintentar en
       // 500 ms no cambia nada. Los dos casos los arregla otro modelo, no otra
-      // vuelta de esta escalera. La red y los timeouts sí se reintentan aquí.
-      if (isModelError(actual)) throw actual;
+      // vuelta de esta escalera. Una clave rechazada no la arregla nadie: sube
+      // tal cual. La red y los timeouts sí se reintentan aquí.
+      if (isModelError(actual) || isAuthError(actual)) throw actual;
       lastError = actual;
       hooks.onRetry(attempt, accumulated.length, errorMessage(actual));
       await sleep(500 * attempt);
@@ -305,7 +307,7 @@ export async function generateJsonWithProgress(
     return text;
   } catch (error) {
     const actual = guard.reason() ?? error;
-    if (isModelError(actual)) throw actual;
+    if (isModelError(actual) || isAuthError(actual)) throw actual;
     // Agotada la escalera contra este modelo por red o timeout: ya no es un
     // corte transitorio de un intento, así que se marca conmutable para que la
     // cadena baje al siguiente modelo en vez de rendirse. Un corte de red suelto
@@ -1996,7 +1998,7 @@ async function synthesizeWithProgress(
       const actual = guard.reason() ?? error;
       // Los errores del modelo no se arreglan repitiendo contra el mismo modelo:
       // suben para que la cadena baje de escalón.
-      if (isModelError(actual)) throw actual;
+      if (isModelError(actual) || isAuthError(actual)) throw actual;
       lastError = actual;
       hooks.onRetry(attempt, 0, errorMessage(actual));
       await sleep(500 * attempt);

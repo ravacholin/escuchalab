@@ -106,9 +106,24 @@ const ExerciseCard: React.FC<ExerciseCardProps> = ({ exercise, index, dialogue, 
     // Robust Ordering Initialization using safeExercise
     if (safeExercise.type === 'ordering' || safeExercise.type === 'chunk_order') {
       if (safeExercise.options && safeExercise.options.length > 0) {
-          // Shuffle options for the initial state
-          const shuffled = [...safeExercise.options].sort(() => Math.random() - 0.5);
-          setOrderedList(shuffled.map((o: any) => o.id));
+          // Fisher-Yates (el `sort(() => Math.random() - 0.5)` de antes está
+          // sesgado) y nunca en el orden correcto: con tres fragmentos, uno de
+          // cada seis ejercicios llegaba ya resuelto y bastaba con enviarlo.
+          const ids: string[] = safeExercise.options.map((o: any) => o.id);
+          const correct = Array.isArray(safeExercise.correctAnswer) ? safeExercise.correctAnswer.join('\u0000') : null;
+          let shuffled = ids;
+          for (let attempt = 0; attempt < 10; attempt++) {
+              shuffled = [...ids];
+              for (let i = shuffled.length - 1; i > 0; i--) {
+                  const j = Math.floor(Math.random() * (i + 1));
+                  [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+              }
+              if (shuffled.join('\u0000') !== correct) break;
+          }
+          if (shuffled.length > 1 && shuffled.join('\u0000') === correct) {
+              [shuffled[0], shuffled[1]] = [shuffled[1], shuffled[0]];
+          }
+          setOrderedList(shuffled);
       } else {
           setOrderedList([]);
       }

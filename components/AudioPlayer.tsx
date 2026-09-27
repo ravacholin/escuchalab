@@ -185,6 +185,10 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
   // frena en ese segundo (chequeado en onTimeUpdate) para no seguir con el resto
   // del diálogo. `null` = reproducción normal.
   const playUntilRef = useRef<number | null>(null);
+  // Turno de arranque pendiente: `startPlayback` difiere la voz hasta que cargan
+  // los fondos (o 1,2 s). Una pausa en ese intervalo lo invalida; si no, la voz
+  // arrancaba igual un momento después, con el botón ya en «pausa».
+  const playTokenRef = useRef(0);
   // Último turno reportado a `onActiveLineChange`, para no repetir el aviso en
   // cada onTimeUpdate (~4/s). Índice `at` del diálogo, o null.
   const reportedAtRef = useRef<number | null | undefined>(undefined);
@@ -503,8 +507,9 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     // and enters in step with the voice, instead of ahead of it (the fresh context /
     // one-shot createMediaElementSource / resume all delay the voice on the first play).
     let voiceStarted = false;
+    const token = ++playTokenRef.current;
     const startVoiceOnce = () => {
-      if (voiceStarted) return;
+      if (voiceStarted || playTokenRef.current !== token) return;
       voiceStarted = true;
       startVoice();
     };
@@ -654,6 +659,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({
     if (isFallback) { toggleFallbackPlay(); return; }
     if (!speechRef.current) return;
     if (isPlaying) {
+      playTokenRef.current++;
       speechRef.current.pause();
       stopAmbience();
     } else {

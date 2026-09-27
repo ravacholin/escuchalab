@@ -44,6 +44,7 @@ async function loadModule(entry) {
 const {
   GENERATION_MODELS,
   describeModelChainFailure,
+  isAuthError,
   isModelNotFoundError,
   isModelUnavailableError,
   isNetworkError,
@@ -404,6 +405,46 @@ const check = (label, condition, detail = '') => {
     check('…bajando por la cadena en vez de rendirse en el primero',
       switches.join(' ') === 'a→b', switches.join(' '));
     check('…y acaba relanzando el fallo de red', capturado?.message === 'Failed to fetch', capturado?.message);
+  }
+
+  // d) Clave rechazada: el 400 `API_KEY_INVALID` real. Antes caía en la
+  // escalera de red y, marcado conmutable, recorría la cadena entera: una clave
+  // mal copiada costaba 3 llamadas por modelo. Ahora sale a la primera y no
+  // baja de modelo, porque la clave es la misma para todos.
+  {
+    const claveInvalida = () => Object.assign(
+      new Error('{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.",' +
+        '"status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}'),
+      { status: 400 }
+    );
+    check('el 400 API_KEY_INVALID es error de clave', isAuthError(claveInvalida()));
+    check('un 403 PERMISSION_DENIED es error de clave',
+      isAuthError(Object.assign(new Error('403 PERMISSION_DENIED'), { status: 403 })));
+    check('un 503 no es error de clave',
+      !isAuthError(Object.assign(new Error('503 UNAVAILABLE'), { code: 503 })));
+    check('un fallo de red no es error de clave', !isAuthError(new TypeError('Failed to fetch')));
+
+    const llamadas = [];
+    const switches = [];
+    let capturado = null;
+    try {
+      await runWithModelFallback(
+        ['a', 'b'],
+        (model) => generateJsonWithProgress(
+          fakeAi((via) => { llamadas.push(`${model}:${via}`); throw claveInvalida(); }),
+          { model, contents: 'x' },
+          hooks()
+        ),
+        { onSwitch: (from, to) => switches.push(`${from}→${to}`) }
+      );
+    } catch (error) { capturado = error; }
+    check('una clave rechazada cuesta una sola llamada', llamadas.join(',') === 'a:stream', llamadas.join(','));
+    check('…sin bajar de modelo', switches.length === 0, switches.join(' '));
+    check('…y llega intacta al llamador', isAuthError(capturado), capturado?.message);
+
+    const msgClave = describeModelChainFailure(claveInvalida(), 4);
+    check('el mensaje de clave rechazada habla de la clave y no muestra el JSON',
+      typeof msgClave === 'string' && msgClave.includes('clave') && !msgClave.includes('{'), String(msgClave));
   }
 }
 
