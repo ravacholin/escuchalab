@@ -8,6 +8,7 @@ import { MODEL_SELECTABLE_SCENES, isSceneId } from "./ambiencePresets";
 import { verifyExercises } from "./exerciseVerification";
 import { checkTwoVoices } from "./ttsVoiceCheck";
 import { splitIntoTurns } from "./ttsTurnSplit";
+import { toRawPcm } from "./ttsAudioFormat";
 import { parseLenientJson } from "./jsonRepair";
 import { canonicalSpeakerLabel, findCharacter, normalizeSpeaker, sanitizeForTTS } from "./speakerText";
 import {
@@ -2011,7 +2012,15 @@ async function synthesizeWithProgress(
     for (const part of response.candidates?.[0]?.content?.parts ?? []) {
       const data = part.inlineData?.data;
       if (!data) continue;
-      const bytes = base64ToBytes(data);
+      // Los modelos 3.8 devuelven WAV (cabecera RIFF) por defecto; el resto de la
+      // ruta trabaja sobre PCM crudo. Un formato inesperado es un defecto de
+      // *este* modelo, así que se marca conmutable y la cadena prueba el siguiente.
+      let bytes: Uint8Array;
+      try {
+        bytes = toRawPcm(base64ToBytes(data), part.inlineData?.mimeType);
+      } catch (formatError) {
+        throw markSwitchable(formatError instanceof Error ? formatError : new Error(errorMessage(formatError)));
+      }
       chunks.push(bytes);
       total += bytes.length;
     }

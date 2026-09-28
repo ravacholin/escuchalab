@@ -66,10 +66,26 @@ export type GenerationModel = (typeof GENERATION_MODELS)[number];
  * (medida contra el primario), y eso solo afecta al diagnóstico `checkTwoVoices`
  * y al margen de separación de voces, no a la corrección del audio.
  *
- * Comprobado contra la API (agosto de 2026) con una clave del nivel gratuito:
- *  - `gemini-3.1-flash-tts-preview` — primario, responde con audio.
- *  - `gemini-2.5-flash-preview-tts` — responde con audio; buen alternativo
- *    (es también el que usa por defecto `scripts/measure-tts-voices.mjs`).
+ * Septiembre de 2026: Google publicó en GA (22/09) `gemini-3.8-flash-tts` y
+ * `gemini-3.8-flash-lite-tts`, ambos con nivel gratuito según la página de
+ * precios, aceptan los mismos 30 `prebuiltVoiceConfig` (Kore, Fenrir, Zephyr…)
+ * por `generateContent` y la documentación presenta el Lite como reemplazo de
+ * `gemini-3.1-flash-tts-preview`. Orden de la cadena:
+ *  - `gemini-3.8-flash-tts` — primario: el modelo insignia, el que la
+ *    documentación destaca por sus acentos regionales, que es justamente lo que
+ *    enseña la app. Devuelve **WAV** por defecto, no PCM crudo: lo normaliza
+ *    `toRawPcm()` (`services/ttsAudioFormat.ts`).
+ *  - `gemini-3.8-flash-lite-tts` — mismo esquema de API, más rápido; primer
+ *    respaldo, con su propia cuota diaria por modelo.
+ *  - `gemini-3.1-flash-tts-preview` — el primario anterior (comprobado en agosto
+ *    de 2026); sigue disponible y queda como respaldo.
+ *  - `gemini-2.5-flash-preview-tts` — último escalón. Desde el 18/09/2026 Google
+ *    limita los modelos 2.5 a proyectos que ya los usaban, así que en una clave
+ *    nueva puede no responder; como es el último, no cuesta nada tenerlo.
+ * La tabla `pitchHz` de `TTS_VOICES` se midió contra los modelos anteriores:
+ * conviene volver a medirla con `npm run tts:voices` sobre el primario nuevo.
+ *
+ * Descartado:
  *  - `gemini-2.5-pro-preview-tts` — **fuera de la cadena a propósito**: en el
  *    nivel gratuito da `limit: 0` (`GenerateRequestsPerDayPerProjectPerModel-FreeTier`
  *    para `gemini-2.5-pro-tts`), es decir cero peticiones; siempre devuelve 429.
@@ -78,6 +94,8 @@ export type GenerationModel = (typeof GENERATION_MODELS)[number];
  *    añadirlo aquí como último escalón: la ruta de audio ya lo trataría bien.
  */
 export const AUDIO_MODELS = [
+  'gemini-3.8-flash-tts',
+  'gemini-3.8-flash-lite-tts',
   'gemini-3.1-flash-tts-preview',
   'gemini-2.5-flash-preview-tts'
 ] as const;

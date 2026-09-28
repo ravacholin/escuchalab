@@ -26,7 +26,7 @@ import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const CACHE = join(ROOT, '.tts-voice-cache');
-const MODEL = process.env.TTS_MODEL || 'gemini-2.5-flash-preview-tts';
+const MODEL = process.env.TTS_MODEL || 'gemini-3.8-flash-tts';
 
 /** Todas las voces que admite el modelo, según el error 400 de la propia API. */
 const ALL_VOICES = [
@@ -45,12 +45,12 @@ if (!process.env.GEMINI_API_KEY) {
   process.exit(1);
 }
 
-async function loadChecker() {
+async function loadChecker(entry = 'services/ttsVoiceCheck.ts') {
   const dir = await mkdtemp(join(ROOT, '.measure-'));
   const outfile = join(dir, 'module.mjs');
   try {
     await build({
-      entryPoints: [join(ROOT, 'services/ttsVoiceCheck.ts')],
+      entryPoints: [join(ROOT, entry)],
       outfile,
       bundle: true,
       format: 'esm',
@@ -91,10 +91,11 @@ async function synthesize(voice) {
     }
     if (!response.ok) return { error: `${response.status} ${raw.slice(0, 160)}` };
 
-    const data = JSON.parse(raw).candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-    if (!data) return { error: 'la respuesta no traía audio' };
+    const inline = JSON.parse(raw).candidates?.[0]?.content?.parts?.[0]?.inlineData;
+    if (!inline?.data) return { error: 'la respuesta no traía audio' };
 
-    const pcm = new Uint8Array(Buffer.from(data, 'base64'));
+    // Los modelos 3.8 devuelven WAV por defecto: se mide el PCM, no la cabecera.
+    const pcm = toRawPcm(new Uint8Array(Buffer.from(inline.data, 'base64')), inline.mimeType);
     writeFileSync(file, pcm);
     return { pcm, cached: false };
   }
@@ -102,6 +103,7 @@ async function synthesize(voice) {
 }
 
 const { segmentPitches } = await loadChecker();
+const { toRawPcm } = await loadChecker('services/ttsAudioFormat.ts');
 const median = (values) => [...values].sort((a, b) => a - b)[values.length >> 1];
 
 const wanted = process.argv[2] ? process.argv[2].split(',') : ALL_VOICES;

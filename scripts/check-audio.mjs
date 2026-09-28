@@ -62,6 +62,7 @@ const {
 } = await loadModule('services/geminiService.ts');
 const { checkTwoVoices, segmentPitches } = await loadModule('services/ttsVoiceCheck.ts');
 const { splitIntoTurns } = await loadModule('services/ttsTurnSplit.ts');
+const { toRawPcm } = await loadModule('services/ttsAudioFormat.ts');
 const { AUDIO_MODELS, isModelError, isNetworkError, runWithModelFallback } =
   await loadModule('services/modelFallback.ts');
 const { Accent } = await loadModule('types.ts');
@@ -471,10 +472,14 @@ for (const accent of Object.values(Accent)) {
 // alternativa y no se generaba nada. Ahora hay cadena, consistente dentro de
 // una lección (un solo modelo resuelto para todas sus peticiones).
 {
-  check('el modelo de voz primario es gemini-3.1-flash-tts-preview',
-    AUDIO_MODELS[0] === 'gemini-3.1-flash-tts-preview', AUDIO_MODELS.join(', '));
-  check('la cadena de voz incluye el alternativo comprobado gemini-2.5-flash-preview-tts',
-    AUDIO_MODELS.includes('gemini-2.5-flash-preview-tts'));
+  check('el modelo de voz primario es gemini-3.8-flash-tts (GA)',
+    AUDIO_MODELS[0] === 'gemini-3.8-flash-tts', AUDIO_MODELS.join(', '));
+  check('el segundo escalón es gemini-3.8-flash-lite-tts (GA)',
+    AUDIO_MODELS[1] === 'gemini-3.8-flash-lite-tts', AUDIO_MODELS.join(', '));
+  check('la cadena de voz conserva los respaldos comprobados (3.1 preview y 2.5 preview)',
+    AUDIO_MODELS.includes('gemini-3.1-flash-tts-preview') &&
+      AUDIO_MODELS.includes('gemini-2.5-flash-preview-tts'));
+  check('la cadena de voz no repite modelos', new Set(AUDIO_MODELS).size === AUDIO_MODELS.length);
   // El pro-tts da limit:0 en el nivel gratuito (siempre 429): no debe estar en
   // la cadena de una app pensada para el nivel gratuito.
   check('la cadena de voz no incluye ningún modelo pro (limit:0 en free tier)',
@@ -524,6 +529,45 @@ for (const accent of Object.values(Accent)) {
     threw = /503|unavailable/.test(e.message);
   }
   check('con toda la cadena de voz caída se relanza el error', threw);
+}
+
+// --- 10c. WAV de los modelos 3.8 → PCM crudo -----------------------------
+// Los 3.8 devuelven WAV con cabecera RIFF por defecto; toda la ruta de audio
+// espera PCM sin cabecera. Sin quitarla, la cabecera sonaría como un chasquido
+// y desalinearía el corte de turnos.
+{
+  const makeWav = (pcm, { rate = 24000, channels = 1, bits = 16, format = 1, extra = false } = {}) => {
+    const extraChunk = extra ? 12 : 0;
+    const buf = new Uint8Array(44 + extraChunk + pcm.length);
+    const dv = new DataView(buf.buffer);
+    const tag = (o, t) => { for (let i = 0; i < 4; i++) buf[o + i] = t.charCodeAt(i); };
+    tag(0, 'RIFF'); dv.setUint32(4, 36 + extraChunk + pcm.length, true); tag(8, 'WAVE');
+    tag(12, 'fmt '); dv.setUint32(16, 16, true); dv.setUint16(20, format, true);
+    dv.setUint16(22, channels, true); dv.setUint32(24, rate, true);
+    dv.setUint32(28, rate * channels * bits / 8, true); dv.setUint16(32, channels * bits / 8, true);
+    dv.setUint16(34, bits, true);
+    let o = 36;
+    if (extra) { tag(o, 'LIST'); dv.setUint32(o + 4, 4, true); tag(o + 8, 'INFO'); o += 12; }
+    tag(o, 'data'); dv.setUint32(o + 4, pcm.length, true);
+    buf.set(pcm, o + 8);
+    return buf;
+  };
+  const pcm = new Uint8Array(4800).map((_, i) => (i * 37) & 0xff);
+  const sameBytes = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+
+  check('un WAV 24 kHz mono 16 bits devuelve exactamente su PCM', sameBytes(toRawPcm(makeWav(pcm)), pcm));
+  check('un WAV con chunks extra antes de data devuelve exactamente su PCM',
+    sameBytes(toRawPcm(makeWav(pcm, { extra: true })), pcm));
+  check('el PCM crudo (modelos 3.1/2.5) pasa sin tocar',
+    toRawPcm(pcm, 'audio/L16;codec=pcm;rate=24000') === pcm);
+  let rejected = 0;
+  for (const bad of [{ rate: 44100 }, { channels: 2 }, { bits: 8 }, { format: 3 }]) {
+    try { toRawPcm(makeWav(pcm, bad)); } catch { rejected++; }
+  }
+  check('un WAV en otro formato se rechaza en vez de reproducirse a otra velocidad', rejected === 4, `${rejected}/4`);
+  let rateRejected = false;
+  try { toRawPcm(pcm, 'audio/L16;rate=16000'); } catch { rateRejected = true; }
+  check('PCM crudo declarado a otra frecuencia se rechaza', rateRejected);
 }
 
 // --- 11. Recuperar los turnos del bloque de cada voz ---------------------
