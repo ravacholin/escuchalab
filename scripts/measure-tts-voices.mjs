@@ -26,7 +26,7 @@ import { pathToFileURL } from 'node:url';
 
 const ROOT = resolve(import.meta.dirname, '..');
 const CACHE = join(ROOT, '.tts-voice-cache');
-const MODEL = process.env.TTS_MODEL || 'gemini-3.8-flash-tts';
+const MODEL = process.env.TTS_MODEL || 'gemini-3.1-flash-tts-preview';
 
 /** Todas las voces que admite el modelo, según el error 400 de la propia API. */
 const ALL_VOICES = [
