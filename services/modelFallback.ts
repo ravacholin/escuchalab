@@ -67,23 +67,26 @@ export type GenerationModel = (typeof GENERATION_MODELS)[number];
  * y al margen de separación de voces, no a la corrección del audio.
  *
  * Septiembre de 2026: Google publicó en GA (22/09) `gemini-3.8-flash-tts` y
- * `gemini-3.8-flash-lite-tts`, ambos con nivel gratuito según la página de
- * precios, aceptan los mismos 30 `prebuiltVoiceConfig` (Kore, Fenrir, Zephyr…)
- * por `generateContent` y la documentación presenta el Lite como reemplazo de
- * `gemini-3.1-flash-tts-preview`. Orden de la cadena:
- *  - `gemini-3.8-flash-tts` — primario: el modelo insignia, el que la
- *    documentación destaca por sus acentos regionales, que es justamente lo que
- *    enseña la app. Devuelve **WAV** por defecto, no PCM crudo: lo normaliza
- *    `toRawPcm()` (`services/ttsAudioFormat.ts`).
- *  - `gemini-3.8-flash-lite-tts` — mismo esquema de API, más rápido; primer
- *    respaldo, con su propia cuota diaria por modelo.
- *  - `gemini-3.1-flash-tts-preview` — el primario anterior (comprobado en agosto
- *    de 2026); sigue disponible y queda como respaldo.
+ * `gemini-3.8-flash-lite-tts`, ambos con nivel gratuito y los mismos 30
+ * `prebuiltVoiceConfig`. Pero **no son un reemplazo directo**: tratan el texto
+ * como una transcripción **literal** («treats the text field strictly as a
+ * verbatim transcript»). Las consignas que esta app antepone al diálogo —el
+ * perfil fonético del acento y `singleVoiceDirective`, en inglés— los modelos
+ * anteriores las interpretaban como dirección; los 3.8 las **leen en voz alta**.
+ * La primera versión que los puso a la cabeza de la cadena produjo exactamente
+ * eso: una voz en inglés recitando la consigna antes del diálogo. En los 3.8 el
+ * estilo va en metadatos (`speech_metadata.style`, API de Interactions) y el
+ * acento se elige por voz de la biblioteca extendida, no por instrucción: es
+ * otra arquitectura, que no se puede adoptar a ciegas. Orden de la cadena:
+ *  - `gemini-3.1-flash-tts-preview` — primario: interpreta las consignas en
+ *    línea, que es de lo que depende todo el sistema de acentos.
+ *  - `gemini-3.8-flash-tts` y `gemini-3.8-flash-lite-tts` — respaldos. Reciben
+ *    **solo el diálogo**, sin perfil ni consigna (`takesInlineDirections`): se
+ *    pierde la guía de acento, nunca se lee una instrucción. Devuelven **WAV**
+ *    por defecto, que normaliza `toRawPcm()` (`services/ttsAudioFormat.ts`).
  *  - `gemini-2.5-flash-preview-tts` — último escalón. Desde el 18/09/2026 Google
  *    limita los modelos 2.5 a proyectos que ya los usaban, así que en una clave
  *    nueva puede no responder; como es el último, no cuesta nada tenerlo.
- * La tabla `pitchHz` de `TTS_VOICES` se midió contra los modelos anteriores:
- * conviene volver a medirla con `npm run tts:voices` sobre el primario nuevo.
  *
  * Descartado:
  *  - `gemini-2.5-pro-preview-tts` — **fuera de la cadena a propósito**: en el
@@ -94,13 +97,23 @@ export type GenerationModel = (typeof GENERATION_MODELS)[number];
  *    añadirlo aquí como último escalón: la ruta de audio ya lo trataría bien.
  */
 export const AUDIO_MODELS = [
+  'gemini-3.1-flash-tts-preview',
   'gemini-3.8-flash-tts',
   'gemini-3.8-flash-lite-tts',
-  'gemini-3.1-flash-tts-preview',
   'gemini-2.5-flash-preview-tts'
 ] as const;
 
 export type AudioModel = (typeof AUDIO_MODELS)[number];
+
+/**
+ * ¿Interpreta este modelo de voz las consignas escritas antes del texto?
+ * Los 3.8 no: leen todo como transcripción literal, así que a ellos se les
+ * manda solo el diálogo. Ante la duda (un id desconocido) se responde `false`:
+ * perder la guía de acento es mucho más barato que oír la consigna en voz alta.
+ */
+export function takesInlineDirections(model: string): boolean {
+  return /^gemini-(2\.5|3\.1)-flash(-preview)?-tts(-preview)?$/.test(model);
+}
 
 /**
  * Cómo limitar el "pensamiento" previo al primer token, por familia de modelo.

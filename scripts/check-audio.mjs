@@ -63,7 +63,7 @@ const {
 const { checkTwoVoices, segmentPitches } = await loadModule('services/ttsVoiceCheck.ts');
 const { splitIntoTurns } = await loadModule('services/ttsTurnSplit.ts');
 const { toRawPcm } = await loadModule('services/ttsAudioFormat.ts');
-const { AUDIO_MODELS, isModelError, isNetworkError, runWithModelFallback } =
+const { AUDIO_MODELS, takesInlineDirections, isModelError, isNetworkError, runWithModelFallback } =
   await loadModule('services/modelFallback.ts');
 const { Accent } = await loadModule('types.ts');
 
@@ -472,13 +472,21 @@ for (const accent of Object.values(Accent)) {
 // alternativa y no se generaba nada. Ahora hay cadena, consistente dentro de
 // una lección (un solo modelo resuelto para todas sus peticiones).
 {
-  check('el modelo de voz primario es gemini-3.8-flash-tts (GA)',
-    AUDIO_MODELS[0] === 'gemini-3.8-flash-tts', AUDIO_MODELS.join(', '));
-  check('el segundo escalón es gemini-3.8-flash-lite-tts (GA)',
-    AUDIO_MODELS[1] === 'gemini-3.8-flash-lite-tts', AUDIO_MODELS.join(', '));
-  check('la cadena de voz conserva los respaldos comprobados (3.1 preview y 2.5 preview)',
-    AUDIO_MODELS.includes('gemini-3.1-flash-tts-preview') &&
+  // Los 3.8 leen el texto como transcripción literal: a la cabeza de la cadena,
+  // recitaban en inglés la consigna y el perfil fonético antes del diálogo.
+  check('el modelo de voz primario interpreta consignas (gemini-3.1-flash-tts-preview)',
+    AUDIO_MODELS[0] === 'gemini-3.1-flash-tts-preview' && takesInlineDirections(AUDIO_MODELS[0]),
+    AUDIO_MODELS.join(', '));
+  check('la cadena conserva los 3.8 (GA) y el 2.5 preview como respaldos',
+    AUDIO_MODELS.includes('gemini-3.8-flash-tts') &&
+      AUDIO_MODELS.includes('gemini-3.8-flash-lite-tts') &&
       AUDIO_MODELS.includes('gemini-2.5-flash-preview-tts'));
+  check('a los modelos 3.8 nunca se les mandan consignas (las leerían en voz alta)',
+    !takesInlineDirections('gemini-3.8-flash-tts') && !takesInlineDirections('gemini-3.8-flash-lite-tts'));
+  check('los modelos 2.5/3.1 sí reciben la consigna y el perfil fonético',
+    takesInlineDirections('gemini-3.1-flash-tts-preview') && takesInlineDirections('gemini-2.5-flash-preview-tts'));
+  check('un modelo de voz desconocido recibe solo el diálogo (ante la duda, no se arriesga a leer la consigna)',
+    !takesInlineDirections('gemini-9.9-flash-tts'));
   check('la cadena de voz no repite modelos', new Set(AUDIO_MODELS).size === AUDIO_MODELS.length);
   // El pro-tts da limit:0 en el nivel gratuito (siempre 429): no debe estar en
   // la cadena de una app pensada para el nivel gratuito.

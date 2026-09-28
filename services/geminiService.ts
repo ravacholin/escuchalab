@@ -13,6 +13,7 @@ import { parseLenientJson } from "./jsonRepair";
 import { canonicalSpeakerLabel, findCharacter, normalizeSpeaker, sanitizeForTTS } from "./speakerText";
 import {
   AUDIO_MODELS,
+  takesInlineDirections,
   GENERATION_MODELS,
   describeModelChainFailure,
   isNotRetryable,
@@ -2597,10 +2598,16 @@ export const generateAudio = async (
           const continuation = request.part > 0
             ? ' This is the continuation of the same speaker: keep exactly the same voice, pace and accent.'
             : '';
+          // Los modelos 3.8 leen el texto como transcripción literal: si reciben
+          // el perfil fonético y la consigna, los *dicen* (en inglés) antes del
+          // diálogo. A ellos solo se les manda el diálogo.
+          const text = takesInlineDirections(model)
+            ? `${header}${singleVoiceDirective(request.owner)}${continuation}\n\n${body}`
+            : body;
 
           const bytes = await ask(
             model,
-            `${header}${singleVoiceDirective(request.owner)}${continuation}\n\n${body}`,
+            text,
             request.owner,
             index,
             (totalBytes) => {
