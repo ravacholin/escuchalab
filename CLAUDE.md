@@ -154,8 +154,12 @@ dialogue and stops overflowing the per-accent budget. What is paid instead is th
 speaker's block comes back continuous and has to be cut into turns (`splitIntoTurns`) — and
 that is local arithmetic, which cannot run out of quota.
 
-- Model: `gemini-3.1-flash-tts-preview`, PCM 24 kHz / 16-bit mono. Free tier is
-  **10 requests per day per model**, which is the constraint the whole design answers to.
+- Model: `gemini-3.8-flash-tts` (GA since 22 Sep 2026, free tier), PCM 24 kHz / 16-bit mono.
+  The 3.8 models return **WAV with a RIFF header** by default, not raw PCM; `toRawPcm()`
+  (`services/ttsAudioFormat.ts`) strips it (and rejects any other rate/channels/depth) so the
+  rest of the pipeline still sees headerless PCM. A format error is `markSwitchable`d, so the
+  chain tries the next model. Free-tier quota is **per model** and small (10 requests per day
+  per model on the preview models), which is the constraint the whole design answers to.
 - **The TTS request is non-streaming** (`synthesizeWithProgress` → `generateContent`, not
   `generateContentStream`). Streaming the audio bought nothing: the speaker's block is needed
   *whole* to be cut into turns (`splitIntoTurns`) and is only concatenated at the end, so
@@ -716,7 +720,13 @@ verifier and the deterministic engines guard the output, not the depth of the re
 never `high`) config. The TTS path is untouched — `AUDIO_MODEL` does not think.
 
 **`AUDIO_MODELS` is now a short chain, not a single model** (`services/modelFallback.ts`):
-`"gemini-3.1-flash-tts-preview"` → `"gemini-2.5-flash-preview-tts"`. For a long time the TTS
+`"gemini-3.8-flash-tts"` → `"gemini-3.8-flash-lite-tts"` → `"gemini-3.1-flash-tts-preview"` →
+`"gemini-2.5-flash-preview-tts"`. The two 3.8 models went GA on 22 Sep 2026 with a free tier,
+accept the same 30 `prebuiltVoiceConfig` names through `generateContent`, and the flagship
+leads because its documented strength is regional accents — what the app teaches. Since
+18 Sep 2026 Google restricts the 2.5 models to projects that already used them, so the last
+rung may not answer on a new key. The `pitchHz` table was measured on the older models:
+re-run `npm run tts:voices` (now defaulting to `gemini-3.8-flash-tts`) with a key. For a long time the TTS
 was deliberately one model — the fixed 2-request cost, and the fear that two speakers of one
 lesson might be synthesised by different models — but when the primary went down (`503`) there
 was **no alternative and no audio at all**, the same hole the text chain already closed.
@@ -748,11 +758,12 @@ chain's first rung — the one always tried first and named on the loading scree
   `GenerateRequestsPerDayPerProjectPerModel-FreeTier` for `gemini-2.5-pro-tts` — i.e. zero
   free-tier requests, always. Since the whole app is built for the free tier, adding it would
   only cost a wasted round trip; a maintainer with billing enabled can append it as a last rung.
-- `check:audio` pins the chain: the primary is first, the checked fallback is present, no `pro`
-  model is included, a 503/429 is a model error (switches) while a network error is not, a 503
+- `check:audio` pins the chain: `gemini-3.8-flash-tts` first and `gemini-3.8-flash-lite-tts`
+  second, the older fallbacks present, no duplicates, no `pro` model included, WAV→PCM
+  normalisation exact (extra chunks included) and non-24 kHz/mono/16-bit audio rejected, a 503/429 is a model error (switches) while a network error is not, a 503
   on the primary lands on the second model with one switch, the normal path costs one model
   resolution and zero switches, and an exhausted chain rethrows.
-- `scripts/measure-tts-voices.mjs` still defaults to `"gemini-2.5-flash-preview-tts"`.
+- `scripts/measure-tts-voices.mjs` defaults to `"gemini-3.8-flash-tts"` and strips the WAV header before measuring.
 
 ## Important Notes
 
