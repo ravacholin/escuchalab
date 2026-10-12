@@ -134,10 +134,53 @@ export function takesInlineDirections(model: string): boolean {
  * razonamiento; la cadena existe por disponibilidad, no por capacidad.
  */
 export function thinkingConfigFor(model: string): Record<string, unknown> {
-  // Los 3.x no permiten apagar el pensamiento del todo; `low` es el mínimo.
+  // 3.5-flash-lite documenta `minimal` (su valor por defecto): mandarle `low`
+  // le *subía* el pensamiento y retrasaba el primer token.
+  if (model.startsWith('gemini-3.5-flash-lite')) return { thinkingLevel: 'minimal' };
+  // El resto de los 3.x no permite apagar el pensamiento; `low` es lo más bajo
+  // que admiten todos (3.6-flash, 3.8-flash, 3.1-flash-lite).
   if (model.startsWith('gemini-3')) return { thinkingLevel: 'low' };
   // 2.5-flash sí admite desactivarlo por completo.
   return { thinkingBudget: 0 };
+}
+
+/**
+ * Parámetros de muestreo (`temperature`), por familia de modelo.
+ *
+ * Octubre de 2026: la documentación de Gemini 3.6 Flash / 3.5 Flash-Lite dice
+ * que `temperature`, `top_p` y `top_k` están **obsoletos e ignorados** en esos
+ * modelos y en todos los posteriores, y que en generaciones futuras mandarlos
+ * devolverá **HTTP 400**. Un 400 `INVALID_ARGUMENT` haría bajar de escalón en
+ * cada lección (una ida y vuelta perdida) y, con toda la cadena nueva, dejaría
+ * la app sin generar. Así que solo se manda a las familias que lo honran (2.5
+ * y 3.1); a cualquier otra —incluido un id desconocido, que por fuerza será más
+ * nuevo— no se le manda nada.
+ *
+ * Consecuencia que hay que tener presente: en esos modelos el guion **ya no es
+ * determinista** aunque se pida 0. Lo que dependía de eso está protegido de otra
+ * forma: `dialoguesEqual` descarta el audio temprano si el diálogo cambió, y el
+ * caché guarda la lección completa, no la regenera.
+ */
+export function samplingConfigFor(model: string, temperature: number): Record<string, unknown> {
+  return /^gemini-(2\.5|3\.1)-/.test(model) ? { temperature } : {};
+}
+
+/**
+ * ¿El modelo que contestó (`response.modelVersion`) es otro que el pedido?
+ *
+ * Google a veces discontinúa un id y **redirige** sus peticiones a otro modelo
+ * sin devolver error (octubre de 2026: `gemini-3.5-flash` → `gemini-3.6-flash`,
+ * `gemini-3.7-flash` → `gemini-3.8-flash`). La cadena no puede verlo —no hay
+ * error que clasificar—, así que se compara lo servido con lo pedido y se avisa
+ * en el log. Una revisión numérica del mismo id (`gemini-x-001`) no cuenta como
+ * cambio. Sin `modelVersion` no se afirma nada.
+ */
+export function servedModelMismatch(requested: string, served: string | undefined | null): string | null {
+  if (!served) return null;
+  const clean = served.replace(/^models\//, '').trim();
+  if (!clean || clean === requested) return null;
+  if (clean.startsWith(requested) && /^-\d+$/.test(clean.slice(requested.length))) return null;
+  return clean;
 }
 
 const errorText = (error: unknown): string =>

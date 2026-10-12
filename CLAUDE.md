@@ -713,13 +713,29 @@ the switch (`«…» no está disponible (…); se cambia a «…»`) and, if th
 from the primary, says which model produced it. A speaker-count retry restarts from the
 model that just answered (`modelsFrom`), not from the top.
 
+**October 2026: silent redirects and ignored sampling.** Google discontinued `gemini-3.5-flash`
+and now silently redirects it to `gemini-3.6-flash` (and `gemini-3.7-flash` → `gemini-3.8-flash`).
+None of those ids, nor any `-latest` alias, is in either chain (`check:fallback` asserts it), so
+nothing changes model under us — `gemini-3.5-flash-lite` and `gemini-3.6-flash` are separate,
+still-available models. But a redirect produces **no error**, so the chain cannot see it:
+`servedModelMismatch(requested, response.modelVersion)` compares what answered with what was
+asked and the loading log warns («Google redirigió «…» a «…» sin avisar»), for the plan and for
+the TTS. Separately, the docs for 3.6 Flash / 3.5 Flash-Lite declare `temperature`/`top_p`/`top_k`
+**deprecated and ignored** on those and all later models, returning **HTTP 400** in future
+generations. `samplingConfigFor(model, t)` therefore sends `temperature` only to the 2.5 and 3.1
+families and nothing to any other id (unknown ids are newer by construction) — otherwise a 400
+`INVALID_ARGUMENT` would cost a wasted switch on every lesson. Consequence: on the primary the
+"temperature 0" dialogue is **no longer deterministic**; `dialoguesEqual` (early audio) and the
+cache (stores the complete lesson) already cover that.
+
 **The plan call caps the model's thinking** (`thinkingConfigFor`, `services/modelFallback.ts`).
 The primary is a *thinking* model, and the lesson-plan request used to carry **no thinking
 configuration at all**, so the model reasoned with a dynamic budget and took ~37 s to emit
 the first token — the entire "se queda en recepción del guion" slowness was that silence,
 not the generation itself. The cap is computed **per model** because the same `config` is
 reused across the whole chain and the families take different controls: 3.x models get
-`thinkingLevel: 'low'` (they cannot disable thinking outright), `gemini-2.5-flash` gets
+`thinkingLevel: 'low'` (they cannot disable thinking outright; `gemini-3.5-flash-lite` gets
+`'minimal'`, its documented default — `'low'` raised its thinking), `gemini-2.5-flash` gets
 `thinkingBudget: 0`. Lowering it is safe here for the same reason a lower rung is: the
 verifier and the deterministic engines guard the output, not the depth of the reasoning.
 `check:fallback` asserts every model in the chain receives a bounded (never dynamic/`-1`,

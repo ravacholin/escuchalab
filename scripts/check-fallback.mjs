@@ -57,7 +57,9 @@ const {
   quotaScope,
   runWithModelFallback,
   shouldSwitchModel,
-  thinkingConfigFor
+  thinkingConfigFor,
+  samplingConfigFor,
+  servedModelMismatch
 } = await loadModule('services/modelFallback.ts');
 const { generateJsonWithProgress } = await loadModule('services/geminiService.ts');
 
@@ -121,9 +123,36 @@ const check = (label, condition, detail = '') => {
   check('los 3.x usan thinkingLevel bajo',
     thinkingConfigFor('gemini-3.6-flash').thinkingLevel === 'low',
     JSON.stringify(thinkingConfigFor('gemini-3.6-flash')));
+  check('3.5-flash-lite usa su mínimo documentado (minimal), no low',
+    thinkingConfigFor('gemini-3.5-flash-lite').thinkingLevel === 'minimal',
+    JSON.stringify(thinkingConfigFor('gemini-3.5-flash-lite')));
   check('el 2.5 usa thinkingBudget desactivado',
     thinkingConfigFor('gemini-2.5-flash').thinkingBudget === 0,
     JSON.stringify(thinkingConfigFor('gemini-2.5-flash')));
+}
+
+// --- 1b. Muestreo y redirecciones silenciosas (octubre de 2026) -------------
+// Desde 3.5-flash-lite `temperature` se ignora y en generaciones futuras dará
+// 400: solo se manda a las familias que la honran. Y Google redirige ids
+// discontinuados sin error, así que se compara lo servido con lo pedido.
+{
+  for (const model of ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash', 'gemini-9.9-flash']) {
+    check(`a "${model}" no se le manda temperature`,
+      !('temperature' in samplingConfigFor(model, 0)), JSON.stringify(samplingConfigFor(model, 0)));
+  }
+  for (const model of ['gemini-3.1-flash-lite', 'gemini-2.5-flash']) {
+    check(`a "${model}" se le manda temperature`,
+      samplingConfigFor(model, 0.4).temperature === 0.4, JSON.stringify(samplingConfigFor(model, 0.4)));
+  }
+  check('ningún id de la cadena está discontinuado ni es un alias',
+    GENERATION_MODELS.every((m) => !/^gemini-3\.5-flash$|^gemini-3\.7-flash$|latest/.test(m)),
+    GENERATION_MODELS.join(', '));
+  check('redirección detectada', servedModelMismatch('gemini-3.5-flash', 'gemini-3.6-flash') === 'gemini-3.6-flash');
+  check('redirección detectada aunque el pedido sea prefijo', servedModelMismatch('gemini-3.5-flash', 'gemini-3.5-flash-lite') === 'gemini-3.5-flash-lite');
+  check('mismo modelo no es redirección', servedModelMismatch('gemini-3.6-flash', 'gemini-3.6-flash') === null);
+  check('prefijo models/ no es redirección', servedModelMismatch('gemini-3.6-flash', 'models/gemini-3.6-flash') === null);
+  check('revisión numérica no es redirección', servedModelMismatch('gemini-2.5-flash', 'gemini-2.5-flash-001') === null);
+  check('sin modelVersion no se afirma nada', servedModelMismatch('gemini-3.6-flash', undefined) === null);
 }
 
 // --- 2. Clasificación de errores -----------------------------------------
