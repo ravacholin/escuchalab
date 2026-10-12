@@ -22,6 +22,8 @@ import {
   modelsFrom,
   quotaScope,
   runWithModelFallback,
+  samplingConfigFor,
+  servedModelMismatch,
   thinkingConfigFor
 } from "./modelFallback";
 import {
@@ -245,9 +247,15 @@ export async function generateJsonWithProgress(
     // Mientras el modelo «piensa» y aún no ha emitido nada, para que la pantalla
     // no parezca congelada («se queda en recepción del guion y ni progresa»).
     onWaiting?: (elapsedMs: number) => void;
+    // Google redirigió el id pedido a otro modelo sin devolver error.
+    onRedirect?: (requested: string, served: string) => void;
   }
 ): Promise<string> {
   const STREAM_ATTEMPTS = 2;
+  const reportServed = (served: string | undefined) => {
+    const other = servedModelMismatch(String(params.model), served);
+    if (other) hooks.onRedirect?.(String(params.model), other);
+  };
   let lastError: unknown = null;
 
   for (let attempt = 1; attempt <= STREAM_ATTEMPTS; attempt++) {
@@ -270,17 +278,20 @@ export async function generateJsonWithProgress(
     }, 2500);
     unref(heartbeat);
     const stopBeat = () => clearInterval(heartbeat);
+    let served: string | undefined;
     try {
       const stream = await ai.models.generateContentStream(withSignal(params, guard.signal));
       for await (const chunk of stream) {
         guard.ping(); // llegó algo: el stream no está colgado
         lastActivityAt = Date.now();
+        served ??= chunk.modelVersion;
         const delta = chunk.text ?? '';
         if (!delta) continue;
         accumulated += delta;
         hooks.onText(accumulated);
       }
       if (!accumulated.trim()) throw new Error('la API devolvió una respuesta vacía');
+      reportServed(served);
       return accumulated;
     } catch (error) {
       // Si fuimos nosotros quienes abortamos, el `AbortError` del SDK no dice
@@ -310,6 +321,7 @@ export async function generateJsonWithProgress(
       throw lastError instanceof Error ? lastError : new Error('la API devolvió una respuesta vacía');
     }
     hooks.onText(text);
+    reportServed(response.modelVersion);
     return text;
   } catch (error) {
     const actual = guard.reason() ?? error;
@@ -1516,7 +1528,9 @@ export const generateLessonPlan = async (
             config: {
               systemInstruction: "Expert Spanish Linguist. Respond with ONLY a single valid JSON object. Valid, parseable JSON is the top priority: escape every double quote inside string values as \\\", never leave a string unterminated, use correct commas. To save space, do not pretty-print (no indentation, no decorative line breaks) — but keep it well-formed JSON; never sacrifice validity for compactness.",
               responseMimeType: "application/json",
-              temperature: parseRetryBump ? 0.4 : 0.0,
+              // Solo a los modelos que la honran: desde 3.5-flash-lite se ignora
+              // y en generaciones futuras dará 400 (ver `samplingConfigFor`).
+              ...samplingConfigFor(model, parseRetryBump ? 0.4 : 0.0),
               // Sin esto el modelo pensante razona con presupuesto dinámico y
               // tarda ~37 s en emitir el primer token: toda la lentitud del guion.
               thinkingConfig: thinkingConfigFor(model),
@@ -1587,6 +1601,9 @@ export const generateLessonPlan = async (
             },
             onFallback: (reason) => {
               reporter.log(`Streaming no disponible (${briefly(reason)}); se pide la respuesta completa`, 'warn');
+            },
+            onRedirect: (requested, served) => {
+              reporter.log(`Google redirigió «${requested}» a «${served}» sin avisar: el guion lo generó otro modelo`, 'warn');
             },
             onWaiting: (idleMs) => {
               // `idleMs` = tiempo desde el último chunk. Antes del primero es la
@@ -1982,6 +1999,7 @@ async function synthesizeWithProgress(
   hooks: {
     onAudio: (totalBytes: number, chunkCount: number) => void;
     onRetry: (attempt: number, received: number, reason: string) => void;
+    onRedirect?: (requested: string, served: string) => void;
   }
 ): Promise<Uint8Array> {
   const NETWORK_ATTEMPTS = 2;
@@ -2030,6 +2048,8 @@ async function synthesizeWithProgress(
       throw new Error("El modelo no devolvió datos de audio. Verificá la configuración o intentá de nuevo.");
     }
     hooks.onAudio(total, 1);
+    const other = servedModelMismatch(String(params.model), response.modelVersion);
+    if (other) hooks.onRedirect?.(String(params.model), other);
     return concatBytes(chunks, total);
   }
 
@@ -2527,6 +2547,7 @@ export const generateAudio = async (
     // no arreglaría una red caída —solo reharía dos peticiones por escalón para
     // nada—.
 
+    const redirectsSeen = new Set<string>();
     const ask = async (
       model: string,
       text: string,
@@ -2555,6 +2576,12 @@ export const generateAudio = async (
               `La petición ${index + 1}/${totalChunks} falló por red (intento ${attempt}): ${reason}; se reintenta`,
               'warn'
             );
+          },
+          onRedirect: (requested, served) => {
+            const key = `${requested}→${served}`;
+            if (redirectsSeen.has(key)) return;
+            redirectsSeen.add(key);
+            reporter.log(`Google redirigió «${requested}» a «${served}» sin avisar: el audio lo generó otro modelo`, 'warn');
           }
         }
       );
